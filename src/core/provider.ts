@@ -1,0 +1,122 @@
+import type { ChatMsg, ChatResponse, ToolCall } from "./types"
+import type { ProviderConfig } from "./config"
+
+export async function parseSSE(res: Response): Promise<any[]> {
+  const events: any[] = []
+  if (!res.body) return events
+  const reader = res.body.getReader()
+  const dec = new TextDecoder()
+  let buf = ""
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += dec.decode(value, { stream: true })
+    let i: number
+    while ((i = buf.indexOf("\n\n")) !== -1) {
+      const block = buf.slice(0, i)
+      buf = buf.slice(i + 2)
+      for (const line of block.split("\n")) {
+        if (!line.startsWith("data:")) continue
+        const payload = line.slice(5).trim()
+        if (payload === "[DONE]") return events
+        try { events.push(JSON.parse(payload)) } catch { /* skip malformed */ }
+      }
+    }
+  }
+  return events
+}
+
+export class Provider {
+  constructor(
+    private cfg: ProviderConfig,
+    private model: string,
+    private fetchFn: typeof fetch = fetch,
+  ) {}
+
+  private headers(): Record<string, string> {
+    const h: Record<string, string> = { "content-type": "application/json" }
+    if (this.cfg.apiKey) h.authorization = `Bearer ${this.cfg.apiKey}`
+    return h
+  }
+
+  async chat(args: {
+    messages: ChatMsg[]
+    tools: { name: string; description: string; schema: unknown }[]
+    signal?: AbortSignal
+    onToken?: (t: string) => void
+  }): Promise<ChatResponse> {
+    let lastErr = new Error("chat failed")
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 100 * 2 ** attempt))
+      try {
+        const res = await this.fetchFn(`${this.cfg.baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: this.headers(),
+          signal: args.signal,
+          body: JSON.stringify({
+            model: this.model,
+            messages: args.messages,
+            stream: true,
+            tools: args.tools.map(t => ({
+              type: "function",
+              function: { name: t.name, description: t.description, parameters: t.schema },
+            })),
+          }),
+        })
+        if (res.status === 429 || res.status >= 500) {
+          lastErr = new Error(`HTTP ${res.status}`)
+          continue
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`)
+        const events = await parseSSE(res)
+        let content = ""
+        const acc: Record<number, { id: string; name: string; args: string }> = {}
+        for (const ev of events) {
+          const delta = ev.choices?.[0]?.delta
+          if (!delta) continue
+          if (typeof delta.content === "string") {
+            content += delta.content
+            args.onToken?.(delta.content)
+          }
+          for (const tc of delta.tool_calls ?? []) {
+            const slot = acc[tc.index] ??= { id: "", name: "", args: "" }
+            if (tc.id) slot.id = tc.id
+            if (tc.function?.name) slot.name = tc.function.name
+            if (tc.function?.arguments) slot.args += tc.function.arguments
+          }
+        }
+        const toolCalls: ToolCall[] = Object.values(acc)
+          .filter(t => t.id)
+          .map(t => {
+            let parsed: unknown = t.args
+            try { parsed = t.args ? JSON.parse(t.args) : {} } catch { /* keep raw string */ }
+            return { id: t.id, name: t.name, args: parsed }
+          })
+        return { content, toolCalls }
+      } catch (e: any) {
+        if (args.signal?.aborted) throw e
+        lastErr = e
+      }
+    }
+    throw lastErr
+  }
+
+  async listModels(): Promise<string[]> {
+    const res = await this.fetchFn(`${this.cfg.baseUrl}/models`, { headers: this.headers() })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const json = await res.json()
+    return (json.data ?? []).map((m: any) => m.id)
+  }
+
+  async health(): Promise<boolean> {
+    try {
+      const res = await this.fetchFn(`${this.cfg.baseUrl}/models`, {
+        headers: this.headers(),
+        signal: AbortSignal.timeout(3000),
+      })
+      return res.ok
+    } catch {
+      return false
+    }
+  }
+}
