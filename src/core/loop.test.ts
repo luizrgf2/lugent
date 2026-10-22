@@ -150,6 +150,89 @@ test("always on ask grants session permission", async () => {
   expect(store.hasPermission(sessionId, "asktool", "x")).toBe(true)
 })
 
+test("abort with content + tool_calls: next turn has no orphan tool_calls (review F1)", async () => {
+  const ac = new AbortController()
+  let orphanSeen = false
+  let step = 0
+  const provider = {
+    chat: async (a: any) => {
+      step++
+      if (step === 1) {
+        ac.abort()
+        return { content: "Let me check that", toolCalls: [{ id: "t1", name: "echo", args: { path: "a" } }] }
+      }
+      for (const m of a.messages) {
+        if (m.role === "assistant" && m.tool_calls?.length) orphanSeen = true
+        if (m.role === "tool" && !a.messages.some((x: any) => x.role === "assistant" && x.tool_calls?.some((t: any) => t.id === m.tool_call_id))) orphanSeen = true
+      }
+      return { content: "recovered", toolCalls: [] }
+    },
+  }
+  await runTurn(deps(provider, { signal: ac.signal }), sessionId, "go")
+  expect(store.loadSession(sessionId)!.aborted).toBe(true)
+  const r2 = await runTurn(deps(provider), sessionId, "continue")
+  expect(r2.aborted).toBe(false)
+  expect(orphanSeen).toBe(false)
+})
+
+test("crash between tool results: partial results keep valid wire format (review F2)", async () => {
+  // simulate crash: assistant asked t1+t2, only t1 result stored
+  store.appendMessage({ id: "ma", sessionId, role: "assistant", content: null,
+    toolCalls: [{ id: "t1", name: "echo", args: { path: "a" } }, { id: "t2", name: "echo", args: { path: "b" } }],
+    createdAt: new Date().toISOString() })
+  store.appendMessage({ id: "mt1", sessionId, role: "tool", content: "echoed:a", toolCallId: "t1",
+    createdAt: new Date().toISOString() })
+
+  let orphanSeen = false
+  const provider = {
+    chat: async (a: any) => {
+      const tools = a.messages.filter((m: any) => m.role === "tool")
+      const calls = a.messages.filter((m: any) => m.role === "assistant" && m.tool_calls)
+      const callIds = calls.flatMap((m: any) => m.tool_calls.map((t: any) => t.id))
+      for (const id of callIds) {
+        if (!tools.some((t: any) => t.tool_call_id === id)) orphanSeen = true
+      }
+      for (const t of tools) {
+        if (!callIds.includes(t.tool_call_id)) orphanSeen = true
+      }
+      return { content: "resumed", toolCalls: [] }
+    },
+  }
+  const r = await runTurn(deps(provider), sessionId, "continue")
+  expect(r.aborted).toBe(false)
+  expect(orphanSeen).toBe(false)
+})
+
+test("outside-project resource forces ask even for allow-tools (review F4)", async () => {
+  let asked = 0
+  let step = 0
+  const provider = {
+    chat: async () => {
+      step++
+      if (step === 1) return { content: "", toolCalls: [{ id: "t1", name: "echo", args: { path: "/etc/passwd" } }] }
+      return { content: "ok", toolCalls: [] }
+    },
+  }
+  const r = await runTurn(deps(provider, { onAsk: async () => { asked++; return "n" as const } }), sessionId, "go")
+  expect(asked).toBe(1)
+  expect(store.getMessages(sessionId).find(m => m.role === "tool")!.content).toContain("permission denied")
+})
+
+test("inside-project allow-tool does not ask (review F4)", async () => {
+  let asked = 0
+  let step = 0
+  const provider = {
+    chat: async () => {
+      step++
+      if (step === 1) return { content: "", toolCalls: [{ id: "t1", name: "echo", args: { path: "a.txt" } }] }
+      return { content: "ok", toolCalls: [] }
+    },
+  }
+  await runTurn(deps(provider, { onAsk: async () => { asked++; return "y" as const } }), sessionId, "go")
+  expect(asked).toBe(0)
+  expect(store.getMessages(sessionId).find(m => m.role === "tool")!.content).toBe("echoed:a.txt")
+})
+
 test("abort before tools: no orphan tool_calls (golden #2)", async () => {
   const ac = new AbortController()
   let step = 0

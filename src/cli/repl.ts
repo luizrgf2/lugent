@@ -7,7 +7,7 @@ import type { Store } from "../core/store"
 import type { AppConfig } from "../core/config"
 import type { ToolDef } from "../core/tools/registry"
 import type { SkillMeta } from "../core/types"
-import { parseSlash } from "./commands"
+import { parseSlash, parseAnswer } from "./commands"
 
 export interface ReplEnv {
   store: Store
@@ -43,8 +43,7 @@ export async function runRepl(env: ReplEnv): Promise<void> {
 
   const ask = async (tool: string, resource: string): Promise<"y" | "n" | "a"> => {
     const answer = await rl.question(`\n allow ${tool} on "${resource}"? [y/n/a(lways)] `)
-    const c = answer.trim().toLowerCase()[0]
-    return c === "a" ? "a" : c === "n" ? "n" : "y"
+    return parseAnswer(answer)
   }
 
   console.log(`session ${session.id} | /model /skills /clear /exit | Ctrl+C aborts turn`)
@@ -68,7 +67,14 @@ export async function runRepl(env: ReplEnv): Promise<void> {
       }
       if (slash.cmd === "model") {
         const [provName, modelName] = slash.args
-        if (provName && env.config.providers[provName]) {
+        if (!provName) {
+          if (providerCfg) {
+            try { console.log((await new Provider(providerCfg, model).listModels()).join("\n") || "(no models)") }
+            catch (e: any) { console.log(`list failed: ${e.message}`) }
+          } else console.log("no provider configured (lugent.json)")
+          continue
+        }
+        if (env.config.providers[provName]) {
           providerCfg = env.config.providers[provName]
           if (modelName) model = modelName
           console.log(`provider ${provName} model ${model}`)

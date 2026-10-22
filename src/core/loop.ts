@@ -27,15 +27,27 @@ function truncate(s: string): string {
   return s.length > TRUNCATE ? s.slice(0, TRUNCATE) + `\n…(truncated ${s.length - TRUNCATE} chars)` : s
 }
 
-/** Drop assistant tool_calls messages that have no results (aborted edge). */
+/** Normalize history after abort/crash: strip unanswered tool_calls, drop orphaned results. */
 function cleanHistory(history: Message[]): Message[] {
   const answered = new Set(history.filter(m => m.role === "tool").map(m => m.toolCallId))
-  return history.filter(m => {
-    if (m.role !== "assistant" || !m.toolCalls) return true
-    const hasUnanswered = m.toolCalls.some(tc => !answered.has(tc.id))
-    // keep only if fully answered or it also carries text content
-    return !hasUnanswered || !!m.content
+  const droppedCallIds = new Set<string>()
+  const cleaned = history.flatMap(m => {
+    if (m.role !== "assistant" || !m.toolCalls) return [m]
+    if (m.toolCalls.every(tc => answered.has(tc.id))) return [m]
+    const kept = m.toolCalls.filter(tc => answered.has(tc.id))
+    for (const tc of m.toolCalls) if (!kept.includes(tc)) droppedCallIds.add(tc.id)
+    if (kept.length === 0 && !m.content) return []                  // nothing survives: drop message
+    return [{ ...m, toolCalls: kept.length ? kept : undefined }]    // keep text + answered calls only
   })
+  return cleaned.filter(m => !(m.role === "tool" && m.toolCallId && droppedCallIds.has(m.toolCallId)))
+}
+
+/** ponytail: pattern-level escape check (absolute, .., ~) — symlink escapes need real path audit later. */
+function isOutsideProject(resource: string, cwd: string): boolean {
+  if (resource.startsWith("~") || resource.includes("..")) return true
+  if (!resource.startsWith("/")) return false
+  const rel = resource.startsWith(cwd + "/") || resource === cwd
+  return !rel
 }
 
 export async function runTurn(deps: LoopDeps, sessionId: string, userText: string): Promise<{ aborted: boolean; error?: string }> {
@@ -83,7 +95,9 @@ export async function runTurn(deps: LoopDeps, sessionId: string, userText: strin
         return
       }
       const resource = resourceFor(call)
-      const decision = checkPermission(store, sessionId, tool, resource)
+      const decision = isOutsideProject(resource, deps.promptInput.cwd)
+        ? (store.hasPermission(sessionId, tool.name, resource) ? "allow" : "ask")
+        : checkPermission(store, sessionId, tool, resource)
       if (decision === "ask") {
         const answer = await deps.onAsk(call.name, resource)
         if (answer === "a") store.grantPermission(sessionId, tool.name, resource)
