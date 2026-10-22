@@ -7,7 +7,7 @@ export function parseFrontmatter(text: string): { data: Record<string, string>; 
   const end = text.indexOf("\n---", 3)
   if (end === -1) return { data: {}, body: text }
   const head = text.slice(4, end)             // skip leading "---\n"
-  const body = text.slice(end + 4)            // skip trailing "\n---"
+  const body = text.slice(end + 5)            // skip trailing "\n---\n"
   const data: Record<string, string> = {}
   for (const line of head.split("\n")) {
     const i = line.indexOf(":")
