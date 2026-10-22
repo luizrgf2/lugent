@@ -1,0 +1,7 @@
+{
+  "name": "lugent",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": { "lugent": "./src/main.ts" },
+  "scripts": { "test": "bun test", "start": "bun src/main.ts" }
+}
