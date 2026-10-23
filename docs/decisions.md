@@ -81,3 +81,8 @@ Cost if wrong: cache misses on straddled slices (clamped texts differ per scroll
 Decision: `docs/lugent.svg` is the source of truth (README badge); the plain REPL prints an ANSI truecolor L-mark (`logo()` in `ui.ts`, TTY-gated) above the session box; the TUI shows a one-line `▟▙ LUGENT` mark centered in the status bar (amended — initially no TUI logo at all).
 Why: terminals can't render SVG without a rasterizer (would break zero-dep); a multi-line logo would eat transcript viewport rows every frame, but the status bar row is already spent — a centered mark there is free.
 Cost if wrong: mark is text-only (▟▙ approximates the SVG geometry); a real splash or full logo would need the viewport decision revisited.
+
+## 2026-10-23 — landing page lives at docs/index.html, GitHub Pages serves /docs
+Decision: the single-file landing page (`docs/index.html`) is published via GitHub Pages from `main` `/docs`; root-path Pages is not used.
+Why: legacy Pages only accepts `/` or `/docs`; from `/` Jekyll renders the repo README over any `site/index.html`, and a `.nojekyll` at root changes nothing for that collision. `/docs` publishes only the docs tree and the page verbatim.
+Cost if wrong: `/docs` publishes all of docs/ (architecture.md, decisions.md, future-features.md become public HTML) — acceptable today, but any future internal doc must stay out of docs/ (docs/specs and docs/plans already are, via .gitignore).
