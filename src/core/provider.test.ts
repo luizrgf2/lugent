@@ -69,3 +69,24 @@ test("listModels parses ids; health false when unreachable", async () => {
   const off = new Provider({ baseUrl: "http://dead/v1" }, "m", (async () => { throw new Error("ECONNREFUSED") }) as any)
   expect(await off.health()).toBe(false)
 })
+
+test("onReasoning fires per reasoning_content delta, content stays clean", async () => {
+  const chunks = [
+    { choices: [{ delta: { reasoning_content: "think " } }] },
+    { choices: [{ delta: { reasoning_content: "hard" } }] },
+    { choices: [{ delta: { content: "answer" } }] },
+  ]
+  const got: string[] = []
+  const p = new Provider({ baseUrl: "http://x/v1" }, "m", (async () => sseBody(chunks)) as any)
+  const res = await p.chat({ messages: [], tools: [], onReasoning: (t) => got.push(t) })
+  expect(got).toEqual(["think ", "hard"])
+  expect(res.content).toBe("answer")
+})
+
+test("provider without reasoning_content never calls onReasoning", async () => {
+  const p = new Provider({ baseUrl: "http://x/v1" }, "m",
+    (async () => sseBody([{ choices: [{ delta: { content: "ok" } }] }])) as any)
+  let called = false
+  await p.chat({ messages: [], tools: [], onReasoning: () => { called = true } })
+  expect(called).toBe(false)
+})

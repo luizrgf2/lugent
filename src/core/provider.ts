@@ -44,6 +44,7 @@ export class Provider {
     tools: { name: string; description: string; schema: unknown }[]
     signal?: AbortSignal
     onToken?: (t: string) => void
+    onReasoning?: (t: string) => void
   }): Promise<ChatResponse> {
     let lastErr = new Error("chat failed")
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -77,6 +78,9 @@ export class Provider {
           if (typeof delta.content === "string") {
             content += delta.content
             args.onToken?.(delta.content)
+          }
+          if (typeof (delta as any).reasoning_content === "string") {
+            args.onReasoning?.((delta as any).reasoning_content)
           }
           for (const tc of delta.tool_calls ?? []) {
             const slot = acc[tc.index] ??= { id: "", name: "", args: "" }
