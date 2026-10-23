@@ -77,7 +77,7 @@ Decision: transcript keeps rendering only a manual window (`clampItems(items, bu
 Why: opencode-style per-item virtualization needs stable item ids + measured heights; ink has neither cheaply. Line-based clamping reuses the existing tail-clamp, renders O(viewport) regardless of history size, and the parse cache removes the O(n²) streaming re-parse.
 Cost if wrong: cache misses on straddled slices (clamped texts differ per scroll position) re-parse — bounded by the 300-entry LRU; no arbitrary anchor (scroll is page-quantized only).
 
-## 2026-10-23 — logo: SVG in docs + ANSI L-mark in plain REPL only, not the TUI
-Decision: `docs/lugent.svg` is the source of truth (README badge); the plain REPL prints an ANSI truecolor L-mark (`logo()` in `ui.ts`, TTY-gated) above the session box; the full-screen TUI shows no logo.
-Why: terminals can't render SVG without a rasterizer (would break zero-dep); the TUI is viewport-constrained — a logo would eat transcript rows every frame.
-Cost if wrong: TUI users never see the mark in-app (only on GitHub/README); revisit if a splash screen is wanted.
+## 2026-10-23 — logo: SVG in docs + ANSI L-mark in plain REPL + mini mark in TUI status
+Decision: `docs/lugent.svg` is the source of truth (README badge); the plain REPL prints an ANSI truecolor L-mark (`logo()` in `ui.ts`, TTY-gated) above the session box; the TUI shows a one-line `▟▙ LUGENT` mark centered in the status bar (amended — initially no TUI logo at all).
+Why: terminals can't render SVG without a rasterizer (would break zero-dep); a multi-line logo would eat transcript viewport rows every frame, but the status bar row is already spent — a centered mark there is free.
+Cost if wrong: mark is text-only (▟▙ approximates the SVG geometry); a real splash or full logo would need the viewport decision revisited.
