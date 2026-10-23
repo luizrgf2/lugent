@@ -157,24 +157,38 @@ test("pageUp mid-stream pins the view: growth does not jump it back to the tail"
   expect(f).toContain("line-")                 // view content present
 })
 
-test("ctrl+c on a later turn aborts instead of exiting (counter resets per turn)", async () => {  const hanging = {
-    chat: (a: any) => new Promise((_, rej) => a.signal?.addEventListener("abort", () => rej(new Error("aborted")))),
+test("ctrl+c on a later turn aborts instead of exiting (counter resets per turn)", async () => {
+  let calls = 0
+  const provider = {
+    chat: (a: any) => {
+      calls++
+      // The first turn hangs until ctrl+c aborts it; later turns finish at once.
+      if (calls === 1) return new Promise((_, rej) => a.signal?.addEventListener("abort", () => rej(new Error("aborted"))))
+      return Promise.resolve({ content: "done", toolCalls: [] })
+    },
   }
-  const ok = { chat: async () => ({ content: "done", toolCalls: [] }) }
-  let useHanging = true
-  const env = fakeEnv({ tools: [], makeProvider: () => (useHanging ? hanging : ok) })
-  const { type, lastFrame, waitUntilExit } = renderTui(<App env={env} />)
-  await new Promise(r => setTimeout(r, 30))
+  const env = fakeEnv({ tools: [], makeProvider: () => provider })
+  const { type, lastFrame, waitUntilExit } = renderTui(<App env={env} />, { rows: 30 })
+  // The composer caret marks the idle state; the composer ignores keys while a
+  // turn runs, so the test must wait instead of sleeping a fixed amount.
+  const idle = () => lastFrame().includes("▏")
+  const settle = async (cond: () => boolean) => {
+    const t0 = Date.now()
+    while (!cond() && Date.now() - t0 < 3000) await new Promise(r => setTimeout(r, 5))
+    expect(cond()).toBe(true)
+  }
+
+  await settle(idle)
   type("turn1\r")
-  await new Promise(r => setTimeout(r, 60))
+  await settle(() => !idle())        // turn 1 is running
   type("\x03")                       // abort turn 1
-  await new Promise(r => setTimeout(r, 60))
-  useHanging = false
-  type("turn2\r")                    // complete a fresh turn
-  await new Promise(r => setTimeout(r, 80))
-  type("\x03")                       // single ctrl+c: must abort-nothing, NOT exit
-  await new Promise(r => setTimeout(r, 80))
-  const exited = await Promise.race([waitUntilExit().then(() => true), new Promise(r => setTimeout(() => r(false), 150))])
+  await settle(idle)                 // the turn unwound
+  expect(calls).toBe(1)
+
+  type("turn2\r")                    // a fresh turn resets the ctrl+c counter
+  await settle(() => calls === 2)    // turn 2 started → submit already reset the counter (its busy state is too brief to poll)
+  type("\x03")                       // single ctrl+c: abort-nothing, NOT exit
+  const exited = await Promise.race([waitUntilExit().then(() => true), new Promise(r => setTimeout(() => r(false), 200))])
   expect(exited).toBe(false)
   expect(lastFrame()).toContain(">") // composer still alive
 })
