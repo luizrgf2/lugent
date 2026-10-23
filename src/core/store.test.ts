@@ -87,3 +87,30 @@ test("permission grant + hasPermission", () => {
   expect(store.hasPermission(s.id, "shell", "bun test")).toBe(true)
   expect(store.hasPermission(s.id, "shell", "rm -rf /")).toBe(false)
 })
+
+test("createSession stores the agent and loadSession returns it", () => {
+  const s = store.createSession("local", "qwen", "/proj", "reviewer")
+  expect(store.loadSession(s.id)?.agent).toBe("reviewer")
+})
+
+test("sessions without an agent load as null", () => {
+  const s = store.createSession("local", "qwen")
+  expect(store.loadSession(s.id)?.agent).toBe(null)
+})
+
+test("setAgent switches the agent on an existing session", () => {
+  const s = store.createSession("local", "qwen")
+  store.setAgent(s.id, "reviewer")
+  expect(store.loadSession(s.id)?.agent).toBe("reviewer")
+  store.setAgent(s.id, null)
+  expect(store.loadSession(s.id)?.agent).toBe(null)
+})
+
+test("reopening the database keeps the agent column (migration is idempotent)", () => {
+  const s = store.createSession("local", "qwen", "/proj", "reviewer")
+  store.close()
+  const again = new Store(DB)
+  expect(again.loadSession(s.id)?.agent).toBe("reviewer")
+  again.close()
+  store = new Store(DB)   // restore the shared instance for afterAll cleanup
+})
