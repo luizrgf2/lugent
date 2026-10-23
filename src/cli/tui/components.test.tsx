@@ -57,10 +57,38 @@ test("transcript renders kinds distinctly", () => {
   const { lastFrame } = renderTui(<Transcript items={items} />)
   const f = lastFrame()
   expect(f).toContain("do it")
+  expect(f).toContain("… pensando")
   expect(f).toContain("thinking aloud")
   expect(f).toContain("▸ read src/main.ts")
   expect(f).toContain("done now")
   expect(f).toContain("boom")
+})
+
+test("reasoning block sits above blank margin, indented from label", () => {
+  const items = [
+    { kind: "user" as const, text: "q" },
+    { kind: "reasoning" as const, text: "step" },
+    { kind: "assistant" as const, text: "a" },
+  ]
+  const { lastFrame } = renderTui(<Transcript items={items} />)
+  const f = lastFrame()
+  const label = f.indexOf("… pensar")
+  const body = f.indexOf("step")
+  expect(body).toBeGreaterThan(label)        // body below label
+  expect(f.slice(body - 2, body)).toBe("  ") // paddingLeft 2 indent
+})
+
+test("assistant markdown renders as aligned table with separator", () => {
+  const { lastFrame } = renderTui(<Transcript items={[{ kind: "assistant", text: "| h | t |\n| --- | --- |\n| cell | x |" }]} />)
+  const f = lastFrame()
+  expect(f).toContain("h    ")   // padded interior column
+  expect(f).toContain("│")       // column separator
+  expect(f).toContain("cell")
+})
+
+test("assistant markdown renders list markers", () => {
+  const { lastFrame } = renderTui(<Transcript items={[{ kind: "assistant", text: "- one\n- two" }]} />)
+  expect(lastFrame()).toContain("•")
 })
 
 test("transcript renders assistant markdown: fence and inline code", () => {
