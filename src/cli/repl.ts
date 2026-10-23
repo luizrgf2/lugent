@@ -1,5 +1,4 @@
 import * as readline from "node:readline/promises"
-import { readFileSync } from "node:fs"
 import { runTurn } from "../core/loop"
 import { Provider } from "../core/provider"
 import { buildPrefix, type PromptInput } from "../core/prompt"
@@ -9,6 +8,7 @@ import type { ToolDef } from "../core/tools/registry"
 import type { SkillMeta } from "../core/types"
 import { parseSlash, parseAnswer } from "./commands"
 import { box, glyph, truncate, dim, cyan, red, Spinner } from "./ui"
+import { safeBranch, safeAgentsMd } from "./context"
 
 export interface ReplEnv {
   store: Store
@@ -16,16 +16,6 @@ export interface ReplEnv {
   tools: ToolDef[]
   skills: SkillMeta[]
   projectRoot: string
-}
-
-function safeBranch(root: string): string | null {
-  try {
-    return readFileSync(`${root}/.git/HEAD`, "utf8").replace("ref: refs/heads/", "").trim()
-  } catch { return null }
-}
-
-function safeAgentsMd(root: string): string | null {
-  try { return readFileSync(`${root}/AGENTS.md`, "utf8") } catch { return null }
 }
 
 export async function runRepl(env: ReplEnv): Promise<void> {
