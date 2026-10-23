@@ -1,6 +1,25 @@
 export type Seg = { text: string; bold?: boolean; code?: boolean; header?: 1 | 2 | 3 }
 
+// LRU by insertion order: get = delete+re-set, evict oldest key.
+// Streaming reparses the growing prefix per token (O(n²) per answer) — the
+// cache collapses it to a Map lookup; old prefixes age out.
+const CACHE = new Map<string, Seg[][]>()
+const CACHE_MAX = 300
+
 export function parseMarkdown(text: string): Seg[][] {
+  const hit = CACHE.get(text)
+  if (hit) {
+    CACHE.delete(text)
+    CACHE.set(text, hit)
+    return hit
+  }
+  const out = compute(text)
+  if (CACHE.size >= CACHE_MAX) CACHE.delete(CACHE.keys().next().value as string)
+  CACHE.set(text, out)
+  return out
+}
+
+function compute(text: string): Seg[][] {
   const lines = text.split("\n")
   const out: Seg[][] = []
   let inFence = false

@@ -1,3 +1,4 @@
+import { memo } from "react"
 import { Box, Text } from "ink"
 import { parseMarkdown, type Seg } from "./markdown"
 import { glyph } from "../ui"
@@ -29,19 +30,34 @@ function describeArgs(args: unknown): string {
 }
 
 function itemLines(it: TItem): number {
-  return it.kind === "assistant" ? Math.max(1, parseMarkdown(it.text).length) : 1
+  return it.kind === "assistant" ? Math.max(1, it.text.split("\n").length) : 1
 }
+export { itemLines }
 
 /**
  * Keep only the newest content that fits `maxLines` lines (a multi-line item is
  * tailed, not dropped). Ink resolves height="100%" to auto, so the transcript
  * window must be constrained manually from the real terminal rows.
+ * `skipBottom` scrolls up: it drops the newest `skipBottom` lines and shows the
+ * window just above them (a straddling item is headed, i.e. sliced from the
+ * top). Returns [] when scrolled past everything.
  */
-export function clampItems(items: TItem[], maxLines: number): TItem[] {
+export function clampItems(items: TItem[], maxLines: number, skipBottom = 0): TItem[] {
   const out: TItem[] = []
   let used = 0
   for (let i = items.length - 1; i >= 0; i--) {
     const lines = itemLines(items[i])
+    if (skipBottom > 0) {
+      const skip = Math.min(lines, skipBottom)
+      skipBottom -= skip
+      if (skip === lines) continue                  // fully hidden
+      // straddles the hidden tail: show its head, capped to the window
+      const head = items[i].text.split("\n").slice(0, lines - skip)
+      const shown = head.length > maxLines ? head.slice(head.length - maxLines) : head
+      out.unshift({ ...items[i], text: shown.join("\n") })
+      used += shown.length
+      continue
+    }
     if (used + lines > maxLines) {
       const room = maxLines - used
       if (out.length === 0 && room > 0 && items[i].kind === "assistant") {
@@ -55,7 +71,7 @@ export function clampItems(items: TItem[], maxLines: number): TItem[] {
   return out
 }
 
-function Markdown({ text }: { text: string }) {
+const Markdown = memo(function Markdown({ text }: { text: string }) {
   return (
     <Box flexDirection="column">
       {parseMarkdown(text).map((line: Seg[], i: number) => (
@@ -73,7 +89,7 @@ function Markdown({ text }: { text: string }) {
       ))}
     </Box>
   )
-}
+})
 
 export function Transcript({ items }: { items: TItem[] }) {
   return (

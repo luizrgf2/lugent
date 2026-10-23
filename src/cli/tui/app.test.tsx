@@ -98,8 +98,65 @@ test("transcript is screen-constrained: old items drop off, composer stays", asy
   expect(lineCount).toBeLessThanOrEqual(30)   // frame never taller than screen
 })
 
-test("ctrl+c on a later turn aborts instead of exiting (counter resets per turn)", async () => {
-  const hanging = {
+test("pageUp scrolls transcript up; pageDown scrolls back; typing resets to tail", async () => {
+  const prov = {
+    chat: async (a: any) => {
+      for (let i = 0; i < 60; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
+      return { content: "", toolCalls: [] }
+    },
+  }
+  const ok = { chat: async () => ({ content: "tail answer", toolCalls: [] }) }
+  let n = 0
+  const env = fakeEnv({ tools: [], makeProvider: () => (n++ === 0 ? prov : ok) })
+  const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  await new Promise(r => setTimeout(r, 100))
+  expect(lastFrame()).not.toContain("line-00")   // tail view
+  type("\x1b[5~")                                 // pageUp (once: ~23 lines)
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).not.toContain("line-59")    // tail clipped
+  expect(lastFrame()).toContain("line-30")        // older content visible
+  type("\x1b[5~")                                 // pageUp again: reaches the top
+  await new Promise(r => setTimeout(r, 80))
+  const f = lastFrame()
+  expect(f).toContain("line-00")                  // oldest content visible
+  expect(f).not.toContain("line-59")              // tail clipped
+  type("\x1b[6~")                                 // pageDown ×2 returns to tail
+  await new Promise(r => setTimeout(r, 80))
+  type("\x1b[6~")
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).toContain("line-59")        // back at tail
+})
+
+test("pageUp mid-stream pins the view: growth does not jump it back to the tail", async () => {
+  const prov = {
+    chat: async (a: any) => {
+      for (let i = 0; i < 60; i++) {
+        a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
+        await new Promise(r => setTimeout(r, 4))
+      }
+      return { content: "", toolCalls: [] }
+    },
+  }
+  const env = fakeEnv({ tools: [], makeProvider: () => prov })
+  const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  // wait until ~20 lines have streamed, then scroll up
+  const t0 = Date.now()
+  while (!lastFrame().includes("line-20") && Date.now() - t0 < 3000) await new Promise(r => setTimeout(r, 10))
+  await new Promise(r => setTimeout(r, 30))
+  type("\x1b[5~")
+  const pinned = lastFrame()
+  await new Promise(r => setTimeout(r, 500))   // stream finishes (60 lines)
+  const f = lastFrame()
+  expect(pinned).toContain("line-1") || expect(pinned).toContain("line-0")   // sanity: not at tail
+  expect(f).not.toContain("line-59")           // still pinned, tail hidden
+  expect(f).toContain("line-")                 // view content present
+})
+
+test("ctrl+c on a later turn aborts instead of exiting (counter resets per turn)", async () => {  const hanging = {
     chat: (a: any) => new Promise((_, rej) => a.signal?.addEventListener("abort", () => rej(new Error("aborted")))),
   }
   const ok = { chat: async () => ({ content: "done", toolCalls: [] }) }

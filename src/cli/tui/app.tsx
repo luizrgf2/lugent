@@ -5,7 +5,7 @@ import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
 import { buildPromptInput } from "../context"
 import { Status } from "./status"
-import { Transcript, clampItems, itemsFromHistory, type TItem } from "./transcript"
+import { Transcript, clampItems, itemLines, itemsFromHistory, type TItem } from "./transcript"
 import { Input } from "./input"
 import { Permissions } from "./permissions"
 import { ModelPicker } from "./model-picker"
@@ -34,6 +34,13 @@ export function App(props: { env: TuiEnv }) {
   // reading the sigint state can see a stale value (same hazard as input.tsx).
   const sigintRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
+  // Transcript scroll: skipBottom lines hidden below the window; 0 = follow tail.
+  // PageUp/Down move it; submit resets to 0. While scrolled, streaming growth
+  // is compensated by bumping scroll with the same delta so the view stays put.
+  const [scroll, setScroll] = useState(0)
+  const scrollRef = useRef(0)
+  const itemLinesOf = (it: TItem): number =>
+    it.kind === "assistant" ? Math.max(1, it.text.split("\n").length) : 1
   // The loop runs tool calls in parallel; several can require permission at
   // once. A bare setAsk keeps only the last dialog and loses the first
   // resolve → Promise.all never settles → turn hangs. Queue asks instead.
@@ -52,6 +59,8 @@ export function App(props: { env: TuiEnv }) {
 
   const closeOverlay = () => { overlayRef.current = null; setOverlay(null) }
 
+  const budget = () => Math.max(3, ((stdout as any)?.rows ?? 24) - 7)
+
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
       if (overlayRef.current) { closeOverlay(); return }   // overlay open: ctrl+c just closes it
@@ -65,11 +74,17 @@ export function App(props: { env: TuiEnv }) {
       } else {
         exit()
       }
+      return
     }
+    if (overlayRef.current || ask) return   // overlays/dialogs own the keys
+    if (key.pageUp) { scrollRef.current += budget(); setScroll(scrollRef.current); return }
+    if (key.pageDown) { scrollRef.current = Math.max(0, scrollRef.current - budget()); setScroll(scrollRef.current) }
   })
 
   async function submit(text: string) {
     sigintRef.current = 0   // new turn: single ctrl+c aborts again, doesn't exit
+    scrollRef.current = 0   // new turn: jump back to the tail
+    setScroll(0)
     setItems(is => [...is, { kind: "user", text }])
     if (text.startsWith("/")) {
       if (text.trim() === "/exit") return exit()
@@ -97,6 +112,17 @@ export function App(props: { env: TuiEnv }) {
     setBusy(true)
     let reasoning = ""
     let answer = ""
+    let seen = 0   // lines already counted for the streaming tail item (scroll pin)
+    const grow = (patch: (is: TItem[]) => TItem[]) => setItems(is => {
+      const next = patch(is)
+      const tail = next[next.length - 1]
+      if (!tail) return next
+      const now = itemLines(tail)
+      const delta = now - seen
+      seen = now
+      if (delta > 0 && scrollRef.current > 0) { scrollRef.current += delta; setScroll(scrollRef.current) }
+      return next
+    })
     const chatProvider = env.makeProvider?.(cfg, model) ?? new Provider(cfg, model)
     const r = await runTurn({
       store: env.store,
@@ -105,8 +131,8 @@ export function App(props: { env: TuiEnv }) {
       promptInput: buildPromptInput(env, model),
       signal: ac.signal,
       yolo: yoloRef.current,
-      onReasoning: t => { reasoning += t; setItems(is => patchTail(is, { kind: "reasoning", text: reasoning })) },
-      onToken: t => { answer += t; setItems(is => patchTail(is, { kind: "assistant", text: answer })) },
+      onReasoning: t => { reasoning += t; grow(is => patchTail(is, { kind: "reasoning", text: reasoning })) },
+      onToken: t => { answer += t; grow(is => patchTail(is, { kind: "assistant", text: answer })) },
       onToolStart: (name, resource) => setItems(is => [...is, { kind: "tool", tool: name, text: resource }]),
       onAsk: (tool, resource) => new Promise(resolve => {
         askChainRef.current = askChainRef.current.then(() => new Promise<void>(release => {
@@ -125,7 +151,7 @@ export function App(props: { env: TuiEnv }) {
 
   // ink resolves height="100%" to auto — constrain manually from real rows.
   const rows = (stdout as any)?.rows ?? 24
-  const visible = clampItems(items, Math.max(3, rows - 7))
+  const visible = clampItems(items, Math.max(3, rows - 7), scroll)
 
   return (
     <Box flexDirection="column">

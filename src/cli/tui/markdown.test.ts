@@ -1,6 +1,11 @@
 import { test, expect } from "bun:test"
 import { parseMarkdown } from "./markdown"
 
+test("parseMarkdown is memoized: same text returns the same reference", () => {
+  const t = "# h\nsome `code` and **bold**\n```fence\ninner\n```\ntail"
+  expect(parseMarkdown(t)).toBe(parseMarkdown(t))
+})
+
 test("plain text is one plain segment", () => {
   expect(parseMarkdown("hello world")).toEqual([[{ text: "hello world" }]])
 })

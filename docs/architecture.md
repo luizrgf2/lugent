@@ -46,7 +46,7 @@ user input
 
 **SSE fragment accumulation.** Streaming `delta.tool_calls` arrive name-first then arguments in arbitrary chunk splits. Provider accumulates by `index` and concatenates `arguments` before parsing. Malformed JSON arguments stay a raw string — the loop's `validateArgs` turns them into a schema-error tool result so the model can retry, instead of crashing the turn. Events are yielded as they arrive (`parseSSE` is an async generator), so `onToken`/`onReasoning` fire during the stream — never buffered until the end.
 
-**Permissions.** Three layers: tool default (`allow`/`ask`), session-scoped `always` grants in SQLite, and an outside-project guard (absolute/`..`/`~` resources force ask even for allow tools). The outside check is pattern-level — symlink escapes are a known ceiling, not yet audited.
+**Permissions.** Four layers, first match wins: yolo flag (`runTurn(yolo)` — TUI-only `/permissions` toggle, auto-approves everything including outside-project, runtime state not persisted), tool default (`allow`/`ask`), session-scoped `always` grants in SQLite, and an outside-project guard (absolute/`..`/`~` resources force ask even for allow tools). The outside check is pattern-level — symlink escapes are a known ceiling, not yet audited.
 
 **Provider.** `stream: true` always; retries up to 3 attempts with exponential backoff; streams are idle-guarded — no bytes for 120s (`idleTimeoutMs`) aborts the read with `stream stalled`, surfaced as a provider error instead of a forever-hung turn; `GET /models` doubles as health check. Works with any OpenAI-compatible `/v1` endpoint.
 
@@ -83,6 +83,15 @@ Files: `app.tsx` (state + turn flow + `runTui`), `status.tsx` (bar; shows provid
 Provider: `chat(args.onReasoning?)` forwards `delta.reasoning_content` chunks. Not accumulated into `content`, not persisted — replaying a session shows no reasoning (accepted).
 
 Provider injection: `env.makeProvider?(cfg, model)` (tests); default `new Provider(cfg, model)`.
+
+### Transcript windowing & scroll
+
+Rendering stays O(viewport) regardless of history length — no item outside the window is ever rendered:
+
+- `clampItems(items, maxLines, skipBottom)` walks items newest→oldest, line-budgeted. `skipBottom` scrolls up: it hides the newest N lines and shows the window just above (a straddling multi-line item is sliced from the top). `itemLines` = `split("\n").length` for assistant items, 1 otherwise.
+- `App` holds `scroll`/`scrollRef` (ref mirrors state — ink batching hazard). PageUp adds the page budget, PageDown subtracts (clamped at 0 = follow tail). Submit resets to 0.
+- **View pin while scrolled up**: streaming callbacks go through `grow()`, which counts tail-item line deltas (`seen`) and bumps `scroll` by the same delta — new content grows below without jumping the screen. `seen` always tracks (not only when scrolled) so a mid-stream PageUp doesn't miscount.
+- **Parse cost**: `parseMarkdown` is an LRU (300 entries) keyed by text — streaming re-parses of the growing prefix collapse to Map lookups; `Markdown` is `memo`ized so stable items don't re-render. `clampItems` line counting avoids `parseMarkdown` entirely (plain `split`).
 
 ## Testing (TUI)
 

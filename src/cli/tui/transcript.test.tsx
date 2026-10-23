@@ -28,3 +28,24 @@ test("clampItems with budget smaller than everything returns at most the tail of
   expect(out).toHaveLength(1)
   expect(out[0].text).toBe("l2\nl3")
 })
+
+test("clampItems skipBottom hides newest lines (scroll up): single-line items", () => {
+  const items: TItem[] = Array.from({ length: 30 }, (_, i) => ({ kind: "user" as const, text: `l${i}` }))
+  const out = clampItems(items, 5, 10)
+  expect(out.map(i => i.text)).toEqual(["l15", "l16", "l17", "l18", "l19"])
+})
+
+test("clampItems skipBottom slices the head of a straddling multi-line item", () => {
+  const items: TItem[] = [
+    { kind: "assistant", text: "l0\nl1\nl2\nl3\nl4" },
+    { kind: "user", text: "after" },
+  ]
+  const out = clampItems(items, 3, 2)   // hide "after" + "l4": show l1..l3
+  expect(out).toHaveLength(1)
+  expect(out[0].text).toBe("l1\nl2\nl3")
+})
+
+test("clampItems skipBottom larger than total content returns empty", () => {
+  const items: TItem[] = [{ kind: "user", text: "a" }, { kind: "user", text: "b" }]
+  expect(clampItems(items, 5, 10)).toHaveLength(0)
+})

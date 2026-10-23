@@ -55,6 +55,7 @@ In a terminal, `lugent` starts a **full-screen TUI** (React + Ink): scrollable t
 ```
 
 - **Ctrl+C once** aborts the running turn (and denies a pending permission); **twice** exits.
+- **PageUp/PageDown** scroll the transcript (window = one page). Scrolling up during streaming pins the view — new content grows below without jumping the screen; submitting a new message snaps back to the tail.
 - Slash commands: `/exit` quits; `/model` opens a two-level picker (provider → live model list via `listModels()`, `↑/↓`+Enter, Esc cancels, Ctrl+C closes); `/skills` browses loaded skills; `/resume` picks a past session of this directory (replays its transcript, next turn continues it — not a fork); `/permissions` toggles normal/yolo (yolo auto-approves every tool call, shown in the status bar). Typing `/` in the composer shows an autocomplete box — it filters as you type, `↑/↓` move, Enter or Tab completes. Others work in `--plain` mode.
 - `--plain` forces the inline REPL below; piped stdin (non-TTY) falls back to it automatically.
 
@@ -112,6 +113,21 @@ Step 1: ...
 ```
 
 Skills with a `description` in the frontmatter are advertised in the system prompt (id, name, description only). The model loads the full body on demand via the `skill` tool — skill content never bloats the prompt upfront.
+
+Using skills in a session:
+
+- **Let the model pick them.** Advertised skills appear in the system prompt; when your request matches a description ("prepare a release"), the model calls `skill git-release` itself — you see the `▸ skill` line in the transcript.
+- **Force one:** mention the id in your message ("use skill git-release to …").
+- **Browse:** TUI `/skills` lists what is loaded (read-only, ↑/↓+Esc); plain REPL `/skills` lists ids. Toggling skills on/off is not implemented — every loaded skill is active in every session (selector design deferred, see `docs/future-features.md`).
+
+## Permissions & yolo
+
+Every tool has a default (`allow` / `ask`, table above). During a turn the model may trigger an inline dialog:
+
+- Answer `y` (once), `n` (deny — the model sees the refusal), or `a` (always this session, for that tool+resource). Anything else — including Enter — denies.
+- Any resource outside the project root (absolute path, `..`, `~`) forces `ask` even for `allow` tools.
+
+**Yolo mode** (TUI only — `--plain` REPL has no equivalent): `/permissions` → pick `yolo` and every tool call is auto-approved — no dialogs, **including outside-project paths**. The status bar shows a red `YOLO` while active. It is runtime state: not persisted, reset on restart, and it does not modify the per-session `a` grants. `/permissions` → `normal` (or restart) turns it off.
 
 ## Data
 
