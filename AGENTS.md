@@ -38,6 +38,7 @@ Documentation pattern for this repo: **one small doc per topic, never one big fi
 | permissions (`permissions.ts`, tool `permission` field) | `docs/architecture.md` § "Permissions" |
 | adding/changing a tool | `README.md` § "Tools" (keep table + defaults in sync) |
 | config loading (`config.ts`) | `README.md` § "Configuration" (precedence, `{env:VAR}`) |
+| `src/core/skills.ts` (skill loading) | `README.md` § "Skills" — user `~/.agents/skills` + project `.agents/skills`; same id → project wins |
 | branch or commit | `.agents/skills/git-conventions/SKILL.md` |
 | `src/cli/ui.ts` (ANSI, box, spinner) | zero-dep: no color/TUI lib; gate all styling on `isTTY` so piped output stays plain; keep pure formatters tested in `ui.test.ts` |
 | `src/cli/tui/*` (Ink TUI) | reasoning is display-only (never persisted); core must not import react/ink; test via `harness.tsx` (ink-testing-library is incompatible with ink v8) |
@@ -61,4 +62,4 @@ Before each commit (or declaring a task done), diff what changed against the doc
 
 No match (internal-only refactor, test tweaks) → state "docs: no update needed" and move on. Doc updates ship in the same commit as the code they describe.
 
-Note: lugent itself loads this file into its system prompt (`safeAgentsMd` in `src/cli/repl.ts`) — it doubles as dogfooded instructions.
+Note: lugent itself loads this file into its system prompt (`safeAgentsMd` in `src/cli/context.ts`) — it doubles as dogfooded instructions.

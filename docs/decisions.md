@@ -56,3 +56,8 @@ Cost if wrong: session replay shows no reasoning (accepted until a replay featur
 Decision: `src/cli/tui/harness.tsx` renders through ink's real `render()` against fake stdin/stdout; ink-testing-library removed.
 Why: ink-testing-library@4 declares `ink: ^5` — on ink v8 it triplicates input events and returns stale frames. The harness is ~40 lines, dev-only, and exercises the production renderer.
 Cost if wrong: harness maintenance is ours; replace it when a testing lib with v8 support ships.
+
+## 2026-10-22 — TUI v1: deliberate deferrals from final review
+Decision: ship the Ink TUI without (a) deduplicating reasoning across loop iterations, (b) case-insensitive/word answers in permission dialogs, (c) alt-screen mode.
+Why: all three are cosmetic edge paths (reasoning repeats only when the model reasons after a tool result; the REPL already accepts `yes`/`always` and caps; scrollback pollution on exit is minor). None blocks the core flow, and each risks touching the just-stabilized input/permission plumbing.
+Cost if wrong: minor UX roughness until addressed; revisit when (a) a model streams reasoning mid-tool-loop regularly, (b) users complain about capital Y, (c) scrollback complaints start.
