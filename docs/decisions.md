@@ -107,6 +107,11 @@ Decision: The system prefix is byte-stable within an agent (golden snapshot per 
 Why: The agent's system prompt must replace the base prompt to be an agent (OpenCode semantics); keeping the base prompt under it would bloat tokens and defeat read-only agents.
 Cost if wrong: Sessions that flip agents often pay a cache miss each switch; a future "reasoning-less prefix" split could isolate the volatile part.
 
+## 2026-10-23 — Built-in agents: `build` (default) and `plan`, compiled into the loader
+Decision: `BUILTIN_AGENTS` lives in `agents.ts` and merges *before* the user and project file scopes; `build` reuses `SYSTEM_PROMPT` verbatim and is what `resolveAgent` falls back to (`defaultAgent` unset or unknown); `plan` denies `edit`/`write` and keeps every other tool — `shell` stays permission-controlled.
+Why: "always ships with lugent" cannot rely on files — `package.json` publishes `src/` only, so a separate asset tree would need a new shipping mechanism, while a constant arrives with the code and can still be overridden by a same-id file (OpenCode's override rule). Reusing the base prompt keeps the default prefix byte-identical, so nobody pays a cache miss for a feature they didn't ask for, and it gives the "no way back to a plain agent" gap a home: `/agent build`.
+Cost if wrong: the built-in prompts are code, so rewording `plan` is a commit unless the user shadows it with their own `plan.md`; `plan` blocks only what a tool list can express — a shell command can still write (`echo > f`), exactly as in OpenCode, so `plan` is a planning guard, not a sandbox.
+
 ## 2026-10-23 — Project-scoped agents may grant `allow`; scope restriction deferred
 Decision: a project repo can ship `.agents/agents/*.md` with `permissions: {shell: allow}` (and a `defaultAgent` in `lugent.json`), so switching to that agent runs those tools without prompting. Project scope wins over user scope by id, exactly like skills.
 Why: project `AGENTS.md` and skills are already trusted-repo channels; a trust prompt or a user-only `allow` rule is a product decision with no user asking for it yet. The `/agent` switch line now reports the resulting toolset, so the widening is visible at the moment it happens.

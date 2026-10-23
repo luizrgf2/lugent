@@ -13,7 +13,7 @@ src/core/
   types.ts                 Message, ToolCall, ChatMsg, SkillMeta, ...
   store.ts                 SQLite (bun:sqlite): sessions, messages, permissions
   skills.ts                .agents/skills loader (user ~/.agents + project) + frontmatter parser
-  agents.ts                .agents/agents loader (markdown profile: prompt, model, tools, permissions)
+  agents.ts                .agents/agents loader (markdown profile: prompt, model, tools, permissions) + built-ins (build, plan)
   prompt.ts                system prefix builder + history→wire mapping
   provider.ts              OpenAI-compatible SSE client
   permissions.ts           allow/ask decision, resource extraction
@@ -42,6 +42,8 @@ user input
 
 ## Design decisions
 
+**Built-in agents.** `BUILTIN_AGENTS` (`build`, `plan`) is hardcoded in `agents.ts` and merged *before* the file scopes, so every install has both and a file with the same id overrides one instead of removing it. `build.prompt` is `SYSTEM_PROMPT` itself — one source of truth, and the default prefix stays byte-identical (the golden snapshot keeps guarding it). `resolveAgent(agents, id)` is the single resolution point: requested id if it exists, else `build` (what `defaultAgent` unset and an unknown id both land on); sessions store the resolved id, and a `null` agent (a session created before agents shipped) keeps the base prompt. New sessions therefore start on `build`, which is also the way back from `plan`.
+
 **Byte-stable prefix.** The system prompt is rebuilt from immutable inputs every iteration and pinned by a golden snapshot test. Identical bytes across requests let providers reuse their prompt cache — one changing line silently kills caching. A selected agent's prompt *replaces* the base prompt and gets its own pinned snapshot, so the prefix is byte-stable per agent; switching agent invalidates the cache once.
 
 **Append-only store, repaired on read.** Messages are never edited after insert. `cleanHistory` normalizes at request time: unanswered `tool_calls` are stripped from assistant messages, results whose call vanished are dropped. This is what survives aborts and crashes — a stored assistant call without its result row would produce an orphan `tool_calls`/`tool` pair in the wire format and 400 the provider.
@@ -59,7 +61,7 @@ user input
 ## Schema
 
 ```sql
-session    (id, title, created_at, provider, model, agent, directory, aborted)   -- directory scopes /resume; legacy null rows are excluded; agent is null for the base agent and restored by /resume
+session    (id, title, created_at, provider, model, agent, directory, aborted)   -- directory scopes /resume; legacy null rows are excluded; agent holds the resolved id (build for new sessions) and null only for rows created before agents shipped, where the base prompt applies; restored by /resume
 message    (id, session_id, role, content, tool_calls, tool_call_id, meta, created_at)
 permission (session_id, tool, resource)   -- "always" grants
 ```
@@ -80,7 +82,7 @@ provider.chat (SSE)
   onAsk              → Permissions dialogs, queued in order (parallel asks would race); y/n/a; Ctrl+C denies + aborts
 ```
 
-Files: `app.tsx` (state + turn flow + `runTui`), `status.tsx` (bar; shows provider/model/session/YOLO, plus the agent id while one is set), `transcript.tsx` (`itemsFromHistory` maps stored messages back to TItems for `/resume` replay — reasoning is never persisted), `input.tsx` (refs mirror state — ink batches keys into one render, stale-closure hazard; optional `completions` prop renders a slash-command autocomplete box under the composer: prefix-filtered, `↑/↓` move, Tab completes), `permissions.tsx`, `model-picker.tsx` (`/model`: provider list → live `listModels()`, windowed 8 rows, pick updates provider+model state and appends a dim `system` line), `skill-list.tsx` (`/skills`: read-only windowed list of loaded skills), `agent-picker.tsx` (`/agent`: windowed agent list with descriptions; picking switches the profile and persists it via `store.setAgent`), `session-picker.tsx` (`/resume`: windowed session list scoped to the project directory; picking one switches session state, restores provider/model and replays `itemsFromHistory`), `permission-mode.tsx` (`/permissions`: normal/yolo toggle, yolo sets `runTurn(yolo)`), `markdown.ts` (pure parser), `harness.tsx` (test-only renderer).
+Files: `app.tsx` (state + turn flow + `runTui`), `status.tsx` (bar; shows provider/model/session/YOLO, plus the agent id — always set: `build` by default), `transcript.tsx` (`itemsFromHistory` maps stored messages back to TItems for `/resume` replay — reasoning is never persisted), `input.tsx` (refs mirror state — ink batches keys into one render, stale-closure hazard; optional `completions` prop renders a slash-command autocomplete box under the composer: prefix-filtered, `↑/↓` move, Tab completes), `permissions.tsx`, `model-picker.tsx` (`/model`: provider list → live `listModels()`, windowed 8 rows, pick updates provider+model state and appends a dim `system` line), `skill-list.tsx` (`/skills`: read-only windowed list of loaded skills), `agent-picker.tsx` (`/agent`: windowed agent list with descriptions; picking switches the profile and persists it via `store.setAgent`), `session-picker.tsx` (`/resume`: windowed session list scoped to the project directory; picking one switches session state, restores provider/model and replays `itemsFromHistory`), `permission-mode.tsx` (`/permissions`: normal/yolo toggle, yolo sets `runTurn(yolo)`), `markdown.ts` (pure parser), `harness.tsx` (test-only renderer).
 
 Provider: `chat(args.onReasoning?)` forwards `delta.reasoning_content` chunks. Not accumulated into `content`, not persisted — replaying a session shows no reasoning (accepted).
 

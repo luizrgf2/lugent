@@ -41,7 +41,7 @@ lugent reads the **first file found** — no merging between the two:
 | `providers.<name>.apiKey` | Optional. `{env:VAR}` is substituted at load; unknown vars become `""` |
 | `defaultProvider` | Key into `providers` used at startup |
 | `defaultModel` | Model id sent as `model` on every request |
-| `defaultAgent` | Optional agent id (`.agents/agents/<id>.md`) selected at startup. Unknown id → warning, base agent |
+| `defaultAgent` | Optional agent id selected at startup. Defaults to `build`; unknown id → warning, then `build` |
 
 At startup each provider gets a health check (`GET /models`, 8s timeout) — unreachable ones are reported as `OFF` but lugent still starts.
 
@@ -141,6 +141,17 @@ An agent is a named profile — system prompt, model, tool allowlist, permission
 ~/.agents/agents/reviewer.md       → user scope; project wins on the same id
 ```
 
+### Built-in agents
+
+Two agents are always present, in every install (inspired by OpenCode's pair, adapted: no rule engine, no plan files):
+
+| Id | Prompt | Tools | Permissions |
+| --- | --- | --- | --- |
+| `build` | the base system prompt | all | tool defaults |
+| `plan` | "plan mode": explore and design, no file changes | all but `edit`/`write` | `{edit: deny, write: deny}` |
+
+`build` is the startup default, so there is always a way back to a normal session (`/agent build`). `plan` can read, search and run shell commands — shell stays permission-controlled, as in OpenCode — it just cannot modify files. Both load **first**, so a file with the same id (user or project) overrides the built-in without removing it: drop `.agents/agents/plan.md` to give your own plan agent.
+
 ```markdown
 ---
 description: Reviews changes read-only
@@ -160,7 +171,7 @@ You are a code reviewer. Report findings with file and line references.
 
 The body is the agent's system prompt: it **replaces** the base prompt, and AGENTS.md plus the skills advertisement are still added on top. A permission override replaces the tool's default — a session `always` grant still wins over it, and the outside-project guard still forces an ask.
 
-Usage: `/agent` lists loaded agents, `/agent reviewer` switches. Switching works mid-session — history is kept and the next turn runs with the new prompt, model and toolset; the switch line confirms provider/model/toolset, and the `# Tools` section of the prompt is filtered to match. An agent's `model` applies at startup (`defaultAgent`) and on `/resume`, not only when switched to. `/resume` restores the agent together with provider and model; `defaultAgent` picks the startup agent. Nothing installed → behavior is identical to no agents at all. Bad frontmatter never breaks startup: an empty body drops that agent, and an unknown tool id or a `model` without `provider/` warns and falls back.
+Usage: `/agent` lists loaded agents (`build` and `plan` plus your file agents), `/agent reviewer` switches. Switching works mid-session — history is kept and the next turn runs with the new prompt, model and toolset; the switch line confirms provider/model/toolset, and the `# Tools` section of the prompt is filtered to match. An agent's `model` applies at startup (`defaultAgent`) and on `/resume`, not only when switched to. `/resume` restores the agent together with provider and model; `defaultAgent` picks the startup agent and defaults to `build` — an unknown id warns and falls back to `build`. Because `build` reuses the base prompt, the default system prefix stays byte-identical to a session with no agent (and sessions created before agents existed keep the base prompt). Bad frontmatter never breaks startup: an empty body drops that agent, and an unknown tool id or a `model` without `provider/` warns and falls back.
 
 ## Permissions & yolo
 

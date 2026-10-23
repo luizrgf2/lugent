@@ -48,14 +48,17 @@ Existing baseline: user (`~/.agents/skills/`) + project (`.agents/skills/`) scop
 
 Existing baseline: primary agents shipped — markdown profile at `.agents/agents/**/*.md`
 (body = system prompt; frontmatter `description`, `model`, `tools`, `permissions`),
-selected with `/agent`, default from `defaultAgent`. Loader: `src/core/agents.ts`;
-usage and fields: `README.md` § "Agents".
+selected with `/agent`, default from `defaultAgent`; two built-ins (`build` default,
+`plan` read-only) compiled into the loader and overridable by a same-id file.
+Loader: `src/core/agents.ts`; usage and fields: `README.md` § "Agents".
 
 | Feature | Why deferred | Add when |
 | --- | --- | --- |
 | Subagents (child sessions, fresh context, parallel work) | Significant session-model complexity | Long tasks need context isolation or parallelism |
 | Hidden maintenance agents (title, summary generation) | Cosmetic | Session lists get unwieldy |
 | Steps limit (remove tools on final step, force text answer) | Loop discipline not yet a problem | Agents loop excessively on hard tasks |
+| Agent permission rule engine (wildcards, per-resource patterns, ordered rules) | One flag per tool covers the real cases (`plan`) | A policy needs "deny `git push`, allow `git status`" |
+| Plan files (`plan` writing its own scratch doc, as OpenCode does) | No plan-file concept exists in the store | Planning output needs to outlive the transcript |
 
 ### Tools
 

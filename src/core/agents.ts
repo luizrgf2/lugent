@@ -4,6 +4,40 @@ import { homedir } from "node:os"
 import type { Agent, AgentModelRef } from "./types"
 import type { ToolDef } from "./tools/registry"
 import { parseFrontmatter } from "./skills"
+import { SYSTEM_PROMPT } from "./prompt"
+
+const PLAN_PROMPT = `You are lugent in plan mode: you explore and design, you do not change files.
+
+Read the code and the tests before proposing anything. Answer with a concrete plan:
+the files to touch, the change in each, how to verify it, and the risks.
+
+You cannot edit or write files — those tools are withheld from you. When work is
+needed, state exactly what to change and let the user switch to the build agent
+to apply it.`
+
+/**
+ * Agents every install has (OpenCode's `build` / `plan` pair, adapted: no rule
+ * engine and no plan files). They load first, so a file with the same id — user
+ * or project scope — overrides one without removing it.
+ */
+export const BUILTIN_AGENTS: Agent[] = [
+  {
+    id: "build",
+    description: "Implements changes (default)",
+    prompt: SYSTEM_PROMPT,   // the base prompt itself: the default path stays byte-identical
+  },
+  {
+    id: "plan",
+    description: "Plans changes read-only — no edit or write",
+    permissions: { edit: "deny", write: "deny" },
+    prompt: PLAN_PROMPT,
+  },
+]
+
+/** The session's agent: the requested id when it exists, else `build`. Undefined only if build is gone. */
+export function resolveAgent(agents: Agent[], id?: string): Agent | undefined {
+  return (id ? agents.find(a => a.id === id) : undefined) ?? agents.find(a => a.id === "build")
+}
 
 /** "[read, \"glob\"]" → ["read", "glob"] */
 export function parseList(raw: string): string[] {
@@ -31,13 +65,15 @@ export function parseModelRef(raw: string): AgentModelRef | undefined {
 }
 
 /**
- * Loads markdown agents from `<root>/.agents/agents` plus `~/.agents/agents`.
- * Nested path is the id (`team/reviewer.md` → `team/reviewer`); project wins.
+ * Loads markdown agents from `<root>/.agents/agents` plus `~/.agents/agents`,
+ * on top of the always-present built-ins (`build`, `plan`). Nested path is the
+ * id (`team/reviewer.md` → `team/reviewer`); later scopes win, so a file
+ * overrides a built-in and project beats user.
  * Bad frontmatter warns and drops only the offending entry, never the agent
  * (empty body is the exception: it drops the agent — an empty prompt is useless).
  */
 export function loadAgents(projectRoot: string, homeDir: string = homedir(), knownTools: string[] = []): Agent[] {
-  const merged = new Map<string, Agent>()
+  const merged = new Map<string, Agent>(BUILTIN_AGENTS.map(a => [a.id, a]))
   for (const dir of [join(homeDir, ".agents", "agents"), join(projectRoot, ".agents", "agents")]) {
     if (!existsSync(dir)) continue
     for (const rel of new Bun.Glob("**/*.md").scanSync({ cwd: dir, onlyFiles: true })) {
