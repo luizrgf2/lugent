@@ -91,3 +91,18 @@ Cost if wrong: `/docs` publishes all of docs/ (architecture.md, decisions.md, fu
 Decision: `@path/to.png` anywhere in the user's message expands (CLI layer, `src/core/images.ts`) into `[{type:"text"},{type:"image_url",image_url:{url:"data:..."}}]` for the newest user message only; the stored message keeps the raw marker text and images are re-read from disk each turn.
 Why: one wire format serves every provider behind an OpenAI-compatible proxy (no per-provider code); turn-scoped expansion keeps SQLite schema and session replay untouched; video (`video_url`) was cut — no cross-provider shape exists.
 Cost if wrong: image files must keep existing across turns (replay re-reads them); models without vision reject content-parts arrays — the marker stays literal only when the file doesn't resolve, not when the model can't see images.
+
+## 2026-10-23 — Agents: markdown only, no config-file agents
+Decision: Agents are `.agents/agents/*.md` files (body = system prompt), mirroring the skills loader; no `agents` key in `lugent.json`.
+Why: Long prompts in JSON are unmaintainable, and markdown + frontmatter is already this repo's lived format for skills.
+Cost if wrong: Teams wanting agents in one committed config file must add one file per agent instead; the JSONC path of OpenCode stays unimplemented.
+
+## 2026-10-23 — Agents: simple tools list and permission map, no rule engine
+Decision: `tools: [...]` plus `permissions: {tool: allow|ask|deny}`. No wildcards, no per-resource patterns, no last-match-wins ordering.
+Why: The real use cases (read-only reviewer, shell ask, edit deny) need one flag per tool; the full rule engine stays deferred in `future-features.md`.
+Cost if wrong: Policies like "deny `git push`, allow `git status`" are impossible until the rule engine lands; the loader's frontmatter shape stays compatible.
+
+## 2026-10-23 — Per-agent byte-stable prefix, switch invalidates the cache once
+Decision: The system prefix is byte-stable within an agent (golden snapshot per fixture), but switching agent mid-session changes the prefix and loses the provider prompt cache for one request.
+Why: The agent's system prompt must replace the base prompt to be an agent (OpenCode semantics); keeping the base prompt under it would bloat tokens and defeat read-only agents.
+Cost if wrong: Sessions that flip agents often pay a cache miss each switch; a future "reasoning-less prefix" split could isolate the volatile part.

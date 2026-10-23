@@ -39,6 +39,7 @@ Documentation pattern for this repo: **one small doc per topic, never one big fi
 | adding/changing a tool | `README.md` § "Tools" (keep table + defaults in sync) |
 | config loading (`config.ts`) | `README.md` § "Configuration" (precedence, `{env:VAR}`) |
 | `src/core/skills.ts` (skill loading) | `README.md` § "Skills" — user `~/.agents/skills` + project `.agents/skills`; same id → project wins |
+| `src/core/agents.ts` (agent format, tools/permissions, `/agent`) | `README.md` § "Agents" |
 | branch or commit | `.agents/skills/git-conventions/SKILL.md` |
 | `src/cli/ui.ts` (ANSI, box, spinner) | zero-dep: no color/TUI lib; gate all styling on `isTTY` so piped output stays plain; keep pure formatters tested in `ui.test.ts` |
 | `src/cli/tui/*` (Ink TUI) | reasoning is display-only (never persisted); core must not import react/ink; test via `harness.tsx` (ink-testing-library is incompatible with ink v8) |

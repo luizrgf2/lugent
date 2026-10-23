@@ -46,6 +46,11 @@ Existing baseline: user (`~/.agents/skills/`) + project (`.agents/skills/`) scop
 
 ### Agents
 
+Existing baseline: primary agents shipped — markdown profile at `.agents/agents/**/*.md`
+(body = system prompt; frontmatter `description`, `model`, `tools`, `permissions`),
+selected with `/agent`, default from `defaultAgent`. Loader: `src/core/agents.ts`;
+usage and fields: `README.md` § "Agents".
+
 | Feature | Why deferred | Add when |
 | --- | --- | --- |
 | Subagents (child sessions, fresh context, parallel work) | Significant session-model complexity | Long tasks need context isolation or parallelism |
