@@ -291,3 +291,70 @@ test("yolo mode runs ask tools without ever calling onAsk", async () => {
   const msgs = store.getMessages(sessionId)
   expect(msgs.some(m => m.role === "tool" && m.content?.includes("edited:"))).toBe(true)
 })
+
+test("agent tools list filters the toolset sent to the provider", async () => {
+  const seen: string[][] = []
+  const provider = {
+    chat: async (a: any) => { seen.push(a.tools.map((t: any) => t.name)); return { content: "ok", toolCalls: [] } },
+  }
+  const agent = { id: "rev", prompt: "review", tools: ["echo"] }
+  await runTurn(deps(provider, { agent }), sessionId, "go")
+  expect(seen[0]).toEqual(["echo"])
+})
+
+test("agent deny removes a tool even when it is listed", async () => {
+  const seen: string[][] = []
+  const provider = {
+    chat: async (a: any) => { seen.push(a.tools.map((t: any) => t.name)); return { content: "ok", toolCalls: [] } },
+  }
+  const agent = { id: "rev", prompt: "review", tools: ["echo", "boom"], permissions: { boom: "deny" as const } }
+  await runTurn(deps(provider, { agent }), sessionId, "go")
+  expect(seen[0]).toEqual(["echo"])
+})
+
+test("agent permission override turns an ask-tool into allow (no onAsk call)", async () => {
+  const askTool: ToolDef = { ...echoTool, name: "asktool", permission: "ask" }
+  let asked = 0
+  let step = 0
+  const provider = {
+    chat: async () => {
+      step++
+      if (step === 1) return { content: "", toolCalls: [{ id: "t1", name: "asktool", args: { path: "x" } }] }
+      return { content: "ok", toolCalls: [] }
+    },
+  }
+  const agent = { id: "rev", prompt: "review", permissions: { asktool: "allow" as const } }
+  await runTurn(deps(provider, { tools: [askTool], agent, onAsk: async () => { asked++; return "n" as const } }), sessionId, "go")
+  expect(asked).toBe(0)
+})
+
+test("agent ask override on an allow-tool does ask", async () => {
+  let asked = 0
+  let step = 0
+  const provider = {
+    chat: async () => {
+      step++
+      if (step === 1) return { content: "", toolCalls: [{ id: "t1", name: "echo", args: { path: "a" } }] }
+      return { content: "ok", toolCalls: [] }
+    },
+  }
+  const agent = { id: "rev", prompt: "review", permissions: { echo: "ask" as const } }
+  await runTurn(deps(provider, { agent, onAsk: async () => { asked++; return "y" as const } }), sessionId, "go")
+  expect(asked).toBe(1)
+})
+
+test("session grant still beats an agent ask override (review focus 4)", async () => {
+  store.grantPermission(sessionId, "echo", "a")
+  let asked = 0
+  let step = 0
+  const provider = {
+    chat: async () => {
+      step++
+      if (step === 1) return { content: "", toolCalls: [{ id: "t1", name: "echo", args: { path: "a" } }] }
+      return { content: "ok", toolCalls: [] }
+    },
+  }
+  const agent = { id: "rev", prompt: "review", permissions: { echo: "ask" as const } }
+  await runTurn(deps(provider, { agent, onAsk: async () => { asked++; return "n" as const } }), sessionId, "go")
+  expect(asked).toBe(0)
+})

@@ -1,6 +1,7 @@
 import type { Store } from "./store"
-import type { ToolCall } from "./types"
+import type { ToolCall, Agent } from "./types"
 import type { ToolDef } from "./tools/registry"
+import { effectivePermission } from "./agents"
 
 export type Decision = "allow" | "ask"
 
@@ -12,7 +13,7 @@ export function resourceFor(call: ToolCall): string {
   return "*"
 }
 
-export function checkPermission(store: Store, sessionId: string, tool: ToolDef, resource: string): Decision {
+export function checkPermission(store: Store, sessionId: string, tool: ToolDef, resource: string, agent?: Agent): Decision {
   if (store.hasPermission(sessionId, tool.name, resource)) return "allow"
-  return tool.permission
+  return effectivePermission(tool, agent)
 }

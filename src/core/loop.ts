@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto"
 import type { Store } from "./store"
-import type { ChatResponse, Message } from "./types"
+import type { Agent, ChatResponse, Message } from "./types"
 import type { ToolDef } from "./tools/registry"
 import { validateArgs } from "./tools/registry"
 import { buildPrefix, buildMessages, type PromptInput } from "./prompt"
 import { checkPermission, resourceFor } from "./permissions"
+import { toolsForAgent } from "./agents"
 import { expandImages } from "./images"
 
 const TRUNCATE = 10_000
@@ -20,6 +21,7 @@ export interface LoopDeps {
   onToolStart?: (name: string, resource: string) => void
   onAsk: (tool: string, resource: string) => Promise<"y" | "n" | "a">
   yolo?: boolean   // auto-approve every tool call, including outside-project ones
+  agent?: Agent    // selected agent: filters the toolset, overrides permission defaults
 }
 
 function msg(partial: Partial<Message> & { sessionId: string; role: Message["role"] }): Message {
@@ -55,6 +57,7 @@ function isOutsideProject(resource: string, cwd: string): boolean {
 
 export async function runTurn(deps: LoopDeps, sessionId: string, userText: string, cwd = process.cwd()): Promise<{ aborted: boolean; error?: string }> {
   const { store } = deps
+  const tools = toolsForAgent(deps.tools, deps.agent)
   store.appendMessage(msg({ sessionId, role: "user", content: userText }))
   const userContent = expandImages(userText, cwd)
 
@@ -65,7 +68,7 @@ export async function runTurn(deps: LoopDeps, sessionId: string, userText: strin
     try {
       res = await deps.provider.chat({
         messages: buildMessages(prefix, history, userContent),
-        tools: deps.tools,
+        tools: tools,
         signal: deps.signal,
         onToken: deps.onToken,
         onReasoning: deps.onReasoning,
@@ -94,7 +97,7 @@ export async function runTurn(deps: LoopDeps, sessionId: string, userText: strin
     }
 
     await Promise.all(res.toolCalls.map(async call => {
-      const tool = deps.tools.find(t => t.name === call.name)
+      const tool = tools.find(t => t.name === call.name)
       if (!tool) {
         store.appendMessage(msg({ sessionId, role: "tool", content: `unknown tool: ${call.name}`, toolCallId: call.id }))
         return
@@ -103,7 +106,7 @@ export async function runTurn(deps: LoopDeps, sessionId: string, userText: strin
       const decision = deps.yolo ? "allow"
         : isOutsideProject(resource, deps.promptInput.cwd)
           ? (store.hasPermission(sessionId, tool.name, resource) ? "allow" : "ask")
-          : checkPermission(store, sessionId, tool, resource)
+          : checkPermission(store, sessionId, tool, resource, deps.agent)
       if (decision === "ask") {
         const answer = await deps.onAsk(call.name, resource)
         if (answer === "a") store.grantPermission(sessionId, tool.name, resource)
