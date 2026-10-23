@@ -46,6 +46,8 @@ When you create a new doc: single topic, short, and add a trigger row here. If a
 
 ## End-of-iteration doc check
 
+Enforced by `.opencode/plugins/doc-check` — on `session.idle`, if code changed without docs, the plugin injects a reminder into the session. The rules below are what that check enforces (and what to run yourself when it can't, e.g. outside OpenCode).
+
 Before each commit (or declaring a task done), diff what changed against the docs and update whatever is stale:
 
 - `git diff --stat` + the commit subject vs the trigger table above

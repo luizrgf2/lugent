@@ -31,3 +31,8 @@ Cost if wrong: long sessions may hit unbounded shell output (F9) or slow 4xx err
 Decision: `docs/specs/` and `docs/plans/` are gitignored; main history was rewritten to drop them before first push.
 Why: internal design docs must not reach the public repo.
 Cost if wrong: pushing from an old ref (reflog, stale branches) leaks spec blobs. Never revive pre-rewrite refs.
+
+## 2026-10-22 — doc-check enforcement via session.idle, not per-tool
+Decision: the end-of-iteration doc check is enforced by an OpenCode plugin (`.opencode/plugins/doc-check`) that marks sessions on write/edit/patch and reminds on `session.idle` — once per mutation batch, 10min cooldown.
+Why: per-tool reminder (`tool.execute.after`) fires mid-turn and spams; `session.idle` is the true end-of-implementation trigger. The reminder arrives as a synthetic message the model answers next step.
+Cost if wrong: synthetic message wakes the model once more per batch (small token cost); reminder relies on event field shapes from @opencode/plugin 2.1.3 — a breaking event change silently disables it.
