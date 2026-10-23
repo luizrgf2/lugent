@@ -13,6 +13,17 @@ test("status shows provider, model, short session, OFF warn", () => {
   expect(f).toContain("OFF")
 })
 
+test("status centers the LUGENT mark between left info and right session", () => {
+  const { lastFrame } = renderTui(
+    <Status provider="9router" model="glm/glm-5.2" sessionId="ses_12345678-abc" off={[]} busy={false} />
+  )
+  const f = lastFrame()
+  expect(f).toContain("▟▙ LUGENT")            // centered mark
+  const markAt = f.indexOf("▟▙ LUGENT")
+  expect(f.indexOf("9router")).toBeLessThan(markAt)   // left info first
+  expect(f.indexOf("ses_1234")).toBeGreaterThan(markAt) // session right of mark
+})
+
 test("status busy shows working indicator", () => {
   const { lastFrame } = renderTui(
     <Status provider="p" model="m" sessionId="ses_12345678-abc" off={[]} busy={true} />
