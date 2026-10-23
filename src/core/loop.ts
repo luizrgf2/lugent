@@ -15,6 +15,7 @@ export interface LoopDeps {
   promptInput: PromptInput
   signal: AbortSignal
   onToken?: (t: string) => void
+  onReasoning?: (t: string) => void
   onToolStart?: (name: string, resource: string) => void
   onAsk: (tool: string, resource: string) => Promise<"y" | "n" | "a">
 }
@@ -64,6 +65,7 @@ export async function runTurn(deps: LoopDeps, sessionId: string, userText: strin
         tools: deps.tools,
         signal: deps.signal,
         onToken: deps.onToken,
+        onReasoning: deps.onReasoning,
       })
     } catch (e: any) {
       if (deps.signal.aborted) {

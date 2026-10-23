@@ -258,3 +258,16 @@ test("abort before tools: no orphan tool_calls (golden #2)", async () => {
   const roles = store.getMessages(sessionId).map(m => m.role)
   expect(roles[roles.length - 1]).toBe("assistant")
 })
+
+test("onReasoning is forwarded to provider.chat", async () => {
+  let seen: unknown = undefined
+  const provider = {
+    chat: async (a: any) => {
+      seen = a.onReasoning
+      return { content: "done", toolCalls: [] } as ChatResponse
+    },
+  }
+  const noop = () => {}
+  await runTurn(deps(provider, { onReasoning: noop }), sessionId, "hi")
+  expect(seen).toBe(noop)
+})
