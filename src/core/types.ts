@@ -24,6 +24,17 @@ export interface SkillMeta {
   file: string   // absolute path to the markdown file
 }
 
+export interface AgentModelRef { provider: string; model: string }
+
+export interface Agent {
+  id: string
+  description?: string
+  model?: AgentModelRef
+  tools?: string[]
+  permissions?: Record<string, "allow" | "ask" | "deny">
+  prompt: string   // markdown body — becomes the agent's system prompt
+}
+
 // ---- wire types (OpenAI-compatible) ----
 export interface ApiToolCall {
   id: string
