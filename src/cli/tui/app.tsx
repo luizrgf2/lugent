@@ -29,6 +29,12 @@ export function App(props: { env: TuiEnv }) {
   // Ref mirrors state: ink batches keys into one render, so a useInput closure
   // reading the sigint state can see a stale value (same hazard as input.tsx).
   const sigintRef = useRef(0)
+  const abortRef = useRef<AbortController | null>(null)
+  // The loop runs tool calls in parallel; several can require permission at
+  // once. A bare setAsk keeps only the last dialog and loses the first
+  // resolve → Promise.all never settles → turn hangs. Queue asks instead.
+  const askChainRef = useRef<Promise<void>>(Promise.resolve())
+  const askRef = useRef<{ tool: string; resource: string; resolve(a: "y" | "n" | "a"): void } | null>(null)
   const [abort, setAbort] = useState<AbortController | null>(null)
   const [session] = useState(() => env.store.createSession(env.config.defaultProvider, env.config.defaultModel))
   const [model] = useState(env.config.defaultModel)
@@ -39,8 +45,9 @@ export function App(props: { env: TuiEnv }) {
       const n = sigintRef.current + 1
       sigintRef.current = n
       if (n === 1) {
-        abort?.abort()
-        ask?.resolve("n")   // deny pending permission so the turn can unwind
+        abortRef.current?.abort()
+        askRef.current?.resolve("n")   // deny pending permission so the turn can unwind
+        askRef.current = null
         setAsk(null)
       } else {
         exit()
@@ -62,6 +69,7 @@ export function App(props: { env: TuiEnv }) {
       return
     }
     const ac = new AbortController()
+    abortRef.current = ac
     setAbort(ac)
     setBusy(true)
     let reasoning = ""
@@ -76,9 +84,16 @@ export function App(props: { env: TuiEnv }) {
       onReasoning: t => { reasoning += t; setItems(is => patchTail(is, { kind: "reasoning", text: reasoning })) },
       onToken: t => { answer += t; setItems(is => patchTail(is, { kind: "assistant", text: answer })) },
       onToolStart: (name, resource) => setItems(is => [...is, { kind: "tool", tool: name, text: resource }]),
-      onAsk: (tool, resource) => new Promise(resolve => setAsk({ tool, resource, resolve })),
+      onAsk: (tool, resource) => new Promise(resolve => {
+        askChainRef.current = askChainRef.current.then(() => new Promise<void>(release => {
+          if (abortRef.current?.signal.aborted) { resolve("n"); release(); return }
+          askRef.current = { tool, resource, resolve: a => { resolve(a); release() } }
+          setAsk(askRef.current)
+        }))
+      }),
     }, session.id, text)
     setBusy(false)
+    abortRef.current = null
     setAbort(null)
     setAsk(null)
     if (r.error) setItems(is => [...is, { kind: "error", text: r.error! }])
@@ -95,7 +110,7 @@ export function App(props: { env: TuiEnv }) {
         <Transcript items={visible} />
       </Box>
       {ask
-        ? <Permissions tool={ask.tool} resource={ask.resource} onAnswer={a => { ask.resolve(a); setAsk(null) }} />
+        ? <Permissions tool={ask.tool} resource={ask.resource} onAnswer={a => { askRef.current = null; ask.resolve(a); setAsk(null) }} />
         : <Input disabled={busy} onSubmit={submit} />}
     </Box>
   )

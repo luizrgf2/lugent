@@ -133,3 +133,64 @@ test("rapid double ctrl+c exits the app", async () => {
   const exited = await Promise.race([waitUntilExit().then(() => true), new Promise(r => setTimeout(() => r(false), 200))])
   expect(exited).toBe(true)
 })
+
+const pathTool = {
+  name: "edit", description: "edit", schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+  permission: "ask" as const, execute: async () => ({ output: "edited" }),
+}
+
+test("two ask tools in one batch: dialogs queue, both resolve, turn completes", async () => {
+  let calls = 0
+  const provider = {
+    chat: async (a: any) => {
+      if (calls++ === 0) return {
+        content: "", toolCalls: [
+          { id: "t1", name: "edit", args: { path: "a.ts" } },
+          { id: "t2", name: "edit", args: { path: "b.ts" } },
+        ],
+      }
+      a.onToken?.("all edited")
+      return { content: "all edited", toolCalls: [] }
+    },
+  }
+  const env = fakeEnv({ tools: [pathTool], makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).toContain("allow edit")
+  type("y")                          // answer dialog 1
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).toContain("allow edit")   // dialog 2 now up (queued, not lost)
+  type("y")                          // answer dialog 2
+  await new Promise(r => setTimeout(r, 80))
+  const f = lastFrame()
+  expect(f).toContain("all edited")  // turn completed: second chat streamed
+})
+
+test("ctrl+c while a queued ask waits ends the turn (no zombie dialog)", async () => {
+  let calls = 0
+  const provider = {
+    chat: async (a: any) => {
+      if (calls++ === 0) return {
+        content: "", toolCalls: [
+          { id: "t1", name: "edit", args: { path: "a.ts" } },
+          { id: "t2", name: "edit", args: { path: "b.ts" } },
+        ],
+      }
+      return { content: "", toolCalls: [] }
+    },
+  }
+  const env = fakeEnv({ tools: [pathTool], makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  await new Promise(r => setTimeout(r, 80))
+  type("y")                          // dialog 1 → dialog 2 queued up
+  await new Promise(r => setTimeout(r, 80))
+  type("\x03")                       // abort while dialog 2 is up
+  await new Promise(r => setTimeout(r, 100))
+  const f = lastFrame()
+  expect(f).not.toContain("allow edit")   // dialog gone
+  expect(f).toContain(">")                // composer back, turn ended
+})

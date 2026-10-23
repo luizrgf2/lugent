@@ -75,7 +75,7 @@ provider.chat (SSE)
   onReasoning(chunk) → TItem "reasoning" (dim italic; display-only, never stored)
   onToken(chunk)     → TItem "assistant" (markdown-lite: fences, `code`, **bold**, #h1-3)
   onToolStart        → TItem "tool" (glyph + name + resource)
-  onAsk              → Permissions dialog (y/n/a); Ctrl+C denies and aborts
+  onAsk              → Permissions dialogs, queued in order (parallel asks would race); y/n/a; Ctrl+C denies + aborts
 ```
 
 Files: `app.tsx` (state + turn flow + `runTui`), `status.tsx`, `transcript.tsx`, `input.tsx` (refs mirror state — ink batches keys into one render, stale-closure hazard), `permissions.tsx`, `markdown.ts` (pure parser), `harness.tsx` (test-only renderer).
