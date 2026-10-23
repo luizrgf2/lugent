@@ -22,6 +22,15 @@ export function fakeEnv(over: Record<string, unknown> = {}): any {
   }
 }
 
+const CARET = "▏"   // composer caret: rendered only while no turn is running
+
+/** Polls until `cond` holds — keys typed during a turn are dropped, so tests must wait on state, not on sleeps. */
+async function waitFor(cond: () => boolean, ms = 3000) {
+  const t0 = Date.now()
+  while (!cond() && Date.now() - t0 < ms) await new Promise(r => setTimeout(r, 5))
+  expect(cond()).toBe(true)
+}
+
 test("app skeleton renders header and empty transcript", async () => {
   const { lastFrame } = renderTui(<App env={fakeEnv()} />)
   await new Promise(r => setTimeout(r, 30))
@@ -132,30 +141,31 @@ test("pageUp scrolls transcript up; pageDown scrolls back; typing resets to tail
 })
 
 test("pageUp mid-stream pins the view: growth does not jump it back to the tail", async () => {
+  // The provider parks after 20 lines, so the pageUp is guaranteed to land
+  // mid-stream without depending on token timing.
+  let release: () => void = () => {}
+  const gate = new Promise<void>(r => { release = r })
   const prov = {
     chat: async (a: any) => {
-      for (let i = 0; i < 60; i++) {
-        a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
-        await new Promise(r => setTimeout(r, 4))
-      }
+      for (let i = 0; i < 20; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
+      await gate
+      for (let i = 20; i < 60; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
       return { content: "", toolCalls: [] }
     },
   }
   const env = fakeEnv({ tools: [], makeProvider: () => prov })
   const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
-  await new Promise(r => setTimeout(r, 30))
+  const idle = () => lastFrame().includes(CARET)
+
+  await waitFor(idle)
   type("go\r")
-  // wait until ~20 lines have streamed, then scroll up
-  const t0 = Date.now()
-  while (!lastFrame().includes("line-20") && Date.now() - t0 < 3000) await new Promise(r => setTimeout(r, 10))
-  await new Promise(r => setTimeout(r, 30))
-  type("\x1b[5~")
-  const pinned = lastFrame()
-  await new Promise(r => setTimeout(r, 500))   // stream finishes (60 lines)
+  await waitFor(() => lastFrame().includes("line-19"))   // the first 20 lines are on screen
+  type("\x1b[5~")                                        // pageUp, while the stream is parked
+  release()                                              // 40 more lines stream in under the pin
+  await waitFor(idle)                                    // the turn finished
   const f = lastFrame()
-  expect(pinned).toContain("line-1") || expect(pinned).toContain("line-0")   // sanity: not at tail
-  expect(f).not.toContain("line-59")           // still pinned, tail hidden
-  expect(f).toContain("line-")                 // view content present
+  expect(f).not.toContain("line-59")                     // still pinned: the tail stayed hidden
+  expect(f).toContain("line-")                           // and the view is not blank
 })
 
 test("ctrl+c on a later turn aborts instead of exiting (counter resets per turn)", async () => {
@@ -170,24 +180,19 @@ test("ctrl+c on a later turn aborts instead of exiting (counter resets per turn)
   }
   const env = fakeEnv({ tools: [], makeProvider: () => provider })
   const { type, lastFrame, waitUntilExit } = renderTui(<App env={env} />, { rows: 30 })
-  // The composer caret marks the idle state; the composer ignores keys while a
-  // turn runs, so the test must wait instead of sleeping a fixed amount.
-  const idle = () => lastFrame().includes("▏")
-  const settle = async (cond: () => boolean) => {
-    const t0 = Date.now()
-    while (!cond() && Date.now() - t0 < 3000) await new Promise(r => setTimeout(r, 5))
-    expect(cond()).toBe(true)
-  }
+  // The composer ignores keys while a turn runs and the caret marks idle, so the
+  // test waits on those states instead of sleeping a fixed amount.
+  const idle = () => lastFrame().includes(CARET)
 
-  await settle(idle)
+  await waitFor(idle)
   type("turn1\r")
-  await settle(() => !idle())        // turn 1 is running
+  await waitFor(() => !idle())       // turn 1 is running
   type("\x03")                       // abort turn 1
-  await settle(idle)                 // the turn unwound
+  await waitFor(idle)                // the turn unwound
   expect(calls).toBe(1)
 
   type("turn2\r")                    // a fresh turn resets the ctrl+c counter
-  await settle(() => calls === 2)    // turn 2 started → submit already reset the counter (its busy state is too brief to poll)
+  await waitFor(() => calls === 2)   // turn 2 started → submit already reset the counter (its busy state is too brief to poll)
   type("\x03")                       // single ctrl+c: abort-nothing, NOT exit
   const exited = await Promise.race([waitUntilExit().then(() => true), new Promise(r => setTimeout(() => r(false), 200))])
   expect(exited).toBe(false)

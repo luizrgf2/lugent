@@ -47,7 +47,9 @@ test("clampItems skipBottom slices the head of a straddling multi-line item", ()
   expect(out[0].text).toBe("l1\nl2\nl3")
 })
 
-test("clampItems skipBottom larger than total content returns empty", () => {
-  const items: TItem[] = [{ kind: "user", text: "a" }, { kind: "user", text: "b" }]
-  expect(clampItems(items, 5, 10)).toHaveLength(0)
+test("clampItems never blanks the view: an oversized skipBottom clamps to the top window", () => {
+  const short: TItem[] = [{ kind: "user", text: "a" }, { kind: "user", text: "b" }]
+  expect(clampItems(short, 5, 10).map(i => i.text)).toEqual(["a", "b"])   // nothing to scroll past
+  const long: TItem[] = Array.from({ length: 30 }, (_, i) => ({ kind: "user" as const, text: `l${i}` }))
+  expect(clampItems(long, 5, 999).map(i => i.text)).toEqual(["l0", "l1", "l2"])   // the oldest lines
 })

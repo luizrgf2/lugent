@@ -45,6 +45,7 @@ export { itemLines }
 export function clampItems(items: TItem[], maxLines: number, skipBottom = 0): TItem[] {
   const out: TItem[] = []
   let used = 0
+  const scrolled = skipBottom > 0   // the walk below mutates skipBottom
   const push = (it: TItem, text?: string) => {
     if (out.length > 0) used += 1   // blank separator line before each item
     used += itemLines(it)
@@ -70,6 +71,22 @@ export function clampItems(items: TItem[], maxLines: number, skipBottom = 0): TI
       break
     }
     push(items[i])
+  }
+  // The skip swallowed everything — scrolled past the top, or the mid-stream pin
+  // compensation outgrew the item. Fall back to the oldest lines (head window)
+  // instead of rendering a blank transcript.
+  if (out.length === 0 && scrolled) {
+    for (const it of items) {
+      const lines = itemLines(it)
+      if (used + lines + (out.length > 0 ? 1 : 0) > maxLines) {
+        const room = maxLines - used - (out.length > 0 ? 1 : 0)
+        if (room > 0) out.push({ ...it, text: it.text.split("\n").slice(0, room).join("\n") })
+        break
+      }
+      if (out.length > 0) used += 1
+      used += lines
+      out.push(it)
+    }
   }
   return out
 }
