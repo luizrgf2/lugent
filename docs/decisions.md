@@ -106,3 +106,8 @@ Cost if wrong: Policies like "deny `git push`, allow `git status`" are impossibl
 Decision: The system prefix is byte-stable within an agent (golden snapshot per fixture), but switching agent mid-session changes the prefix and loses the provider prompt cache for one request.
 Why: The agent's system prompt must replace the base prompt to be an agent (OpenCode semantics); keeping the base prompt under it would bloat tokens and defeat read-only agents.
 Cost if wrong: Sessions that flip agents often pay a cache miss each switch; a future "reasoning-less prefix" split could isolate the volatile part.
+
+## 2026-10-23 — Project-scoped agents may grant `allow`; scope restriction deferred
+Decision: a project repo can ship `.agents/agents/*.md` with `permissions: {shell: allow}` (and a `defaultAgent` in `lugent.json`), so switching to that agent runs those tools without prompting. Project scope wins over user scope by id, exactly like skills.
+Why: project `AGENTS.md` and skills are already trusted-repo channels; a trust prompt or a user-only `allow` rule is a product decision with no user asking for it yet. The `/agent` switch line now reports the resulting toolset, so the widening is visible at the moment it happens.
+Cost if wrong: cloning a hostile repo and switching to (or defaulting into) its agent silently widens permissions to whatever that agent allows; the outside-project guard still forces ask for paths outside the project.

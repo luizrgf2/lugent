@@ -4,6 +4,7 @@ import type { ReplEnv } from "../repl"
 import type { Agent } from "../../core/types"
 import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
+import { toolsForAgent, agentModelTarget } from "../../core/agents"
 import { buildPromptInput } from "../context"
 import { Status, Spinner } from "./status"
 import { Transcript, clampItems, itemLines, itemsFromHistory, type TItem } from "./transcript"
@@ -51,8 +52,9 @@ export function App(props: { env: TuiEnv }) {
   const [abort, setAbort] = useState<AbortController | null>(null)
   const [agent, setAgentState] = useState<Agent | undefined>(() => env.agents.find(a => a.id === env.config.defaultAgent))
   const [session, setSession] = useState(() => env.store.createSession(env.config.defaultProvider, env.config.defaultModel, env.projectRoot, agent?.id ?? null))
-  const [provider, setProvider] = useState(env.config.defaultProvider)
-  const [model, setModel] = useState(env.config.defaultModel)
+  // A defaultAgent's model (when its provider is configured) wins over the config default at startup.
+  const [provider, setProvider] = useState(() => agentModelTarget(agent, env.config.providers)?.provider ?? env.config.defaultProvider)
+  const [model, setModel] = useState(() => agentModelTarget(agent, env.config.providers)?.model ?? env.config.defaultModel)
   const [overlay, setOverlay] = useState<null | "model" | "skills" | "resume" | "permissions" | "agent">(null)
   const overlayRef = useRef<null | "model" | "skills" | "resume" | "permissions" | "agent">(null)
   const [yolo, setYolo] = useState(false)
@@ -183,11 +185,12 @@ export function App(props: { env: TuiEnv }) {
               closeOverlay()
               setAgentState(a)
               env.store.setAgent(session.id, a.id)
-              if (a.model && env.config.providers[a.model.provider]) {
-                setProvider(a.model.provider)
-                setModel(a.model.model)
+              const target = agentModelTarget(a, env.config.providers)
+              if (target) {
+                setProvider(target.provider)
+                setModel(target.model)
               }
-              setItems(is => [...is, { kind: "system", text: `agent ${a.id}${a.model ? ` · ${a.model.provider}/${a.model.model}` : ""}` }])
+              setItems(is => [...is, { kind: "system", text: `agent ${a.id}${target ? ` · ${target.provider}/${target.model}` : ""} · tools: ${toolsForAgent(env.tools, a).map(t => t.name).join(",") || "none"}` }])
             }} />
         : overlay === "model"
         ? <ModelPicker
@@ -219,9 +222,14 @@ export function App(props: { env: TuiEnv }) {
                   const row = env.store.loadSession(id)
                   if (!row) return
                   setSession({ ...row, id })
-                  setProvider(row.provider)
-                  if (row.model) setModel(row.model)
-                  setAgentState(row.agent ? env.agents.find(a => a.id === row.agent) : undefined)
+                  const nextAgent = row.agent ? env.agents.find(a => a.id === row.agent) : undefined
+                  setAgentState(nextAgent)
+                  const target = agentModelTarget(nextAgent, env.config.providers)
+                  if (target) { setProvider(target.provider); setModel(target.model) }
+                  else {
+                    setProvider(row.provider)
+                    if (row.model) setModel(row.model)
+                  }
                   setItems(itemsFromHistory(env.store.getMessages(id)).map(it =>
                     it.kind === "assistant" ? { ...it, kind: "system" } : it))
                 }} />

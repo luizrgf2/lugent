@@ -3,7 +3,7 @@ import { runTurn } from "./core/loop"
 import { Store } from "./core/store"
 import { makeTools } from "./core/tools"
 import { loadSkills } from "./core/skills"
-import { loadAgents } from "./core/agents"
+import { loadAgents, toolsForAgent } from "./core/agents"
 import { rmSync, mkdirSync, writeFileSync } from "node:fs"
 
 const ROOT = "/tmp/opencode/e2e"
@@ -96,7 +96,7 @@ test("e2e: agent turn uses its prompt, filters the toolset, keeps the prefix sta
       cwd: ROOT, os: "linux", gitBranch: null, date: "2026-10-22",
       agentsMd: "# Rules\n- always run tests",
       skills: [],
-      tools: tools.map(t => ({ name: t.name, description: t.description, schema: t.schema })),
+      tools: toolsForAgent(tools, agent).map(t => ({ name: t.name, description: t.description, schema: t.schema })),
       agentPrompt: agent.prompt,
     },
   }, session.id, "review src.txt")
@@ -107,6 +107,8 @@ test("e2e: agent turn uses its prompt, filters the toolset, keeps the prefix sta
   expect(seenPrefixes[0]).toContain("always run tests")   // AGENTS.md still on top
   expect(seenPrefixes[0]).toBe(seenPrefixes[1])            // stable across iterations
   expect(seenTools[0].sort()).toEqual(["glob", "read"])     // write/shell/edit/grep filtered out
+  expect(seenPrefixes[0]).toContain("- read:")              // # Tools section lists the agent's toolset
+  expect(seenPrefixes[0]).not.toContain("- write:")          // excluded tools stay out of the prompt too
   expect(store.loadSession(session.id)?.agent).toBe("reviewer")
   store.close()
 })

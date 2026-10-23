@@ -155,12 +155,12 @@ You are a code reviewer. Report findings with file and line references.
 | --- | --- | --- |
 | `description` | shown by `/agent` | none |
 | `model` | `provider/model`, both required — provider must exist in the config | inherit the session's |
-| `tools` | tool ids sent to the model; anything else is invisible to it | all tools |
+| `tools` | tool ids sent to the model; anything else is invisible to it — a `tools` key that parses to nothing (typo, block-style YAML) fails closed to **no** tools, with a warning | all tools |
 | `permissions` | per-tool `allow` / `ask` / `deny`; `deny` also removes the tool | tool default |
 
 The body is the agent's system prompt: it **replaces** the base prompt, and AGENTS.md plus the skills advertisement are still added on top. A permission override replaces the tool's default — a session `always` grant still wins over it, and the outside-project guard still forces an ask.
 
-Usage: `/agent` lists loaded agents, `/agent reviewer` switches. Switching works mid-session — history is kept and the next turn runs with the new prompt, model and toolset. `/resume` restores the agent together with provider and model; `defaultAgent` picks the startup agent. Nothing installed → behavior is identical to no agents at all. Bad frontmatter never breaks startup: an empty body drops that agent, and an unknown tool id or a `model` without `provider/` warns and falls back.
+Usage: `/agent` lists loaded agents, `/agent reviewer` switches. Switching works mid-session — history is kept and the next turn runs with the new prompt, model and toolset; the switch line confirms provider/model/toolset, and the `# Tools` section of the prompt is filtered to match. An agent's `model` applies at startup (`defaultAgent`) and on `/resume`, not only when switched to. `/resume` restores the agent together with provider and model; `defaultAgent` picks the startup agent. Nothing installed → behavior is identical to no agents at all. Bad frontmatter never breaks startup: an empty body drops that agent, and an unknown tool id or a `model` without `provider/` warns and falls back.
 
 ## Permissions & yolo
 

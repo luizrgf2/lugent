@@ -1,7 +1,7 @@
 import { test, expect, beforeEach, afterAll } from "bun:test"
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
-import { loadAgents, parseList, parsePermMap, parseModelRef, toolsForAgent, effectivePermission } from "./agents"
+import { loadAgents, parseList, parsePermMap, parseModelRef, toolsForAgent, effectivePermission, agentModelTarget } from "./agents"
 import type { ToolDef } from "./tools/registry"
 
 const HOME = "/tmp/opencode/agents-home"
@@ -86,6 +86,28 @@ test("toolsForAgent: no agent keeps all; list filters; deny filters", () => {
   expect(toolsForAgent(all).map(t => t.name)).toEqual(["read", "edit"])
   expect(toolsForAgent(all, { id: "a", prompt: "p", tools: ["read"] }).map(t => t.name)).toEqual(["read"])
   expect(toolsForAgent(all, { id: "a", prompt: "p", permissions: { read: "deny" } }).map(t => t.name)).toEqual(["edit"])
+})
+
+test("a tools list with only unknown ids fails closed, never widens to every tool", () => {
+  write(join(PROJ, ".agents", "agents"), "reviewer.md", "---\ntools: [reed]\n---\nReview.")
+  expect(loadAgents(PROJ, HOME, KNOWN)[0].tools).toEqual([])
+})
+
+test("block-style tools (unparsable) fails closed and still credentials nothing", () => {
+  write(join(PROJ, ".agents", "agents"), "reviewer.md", "---\ntools:\n  - read\n  - grep\n---\nReview.")
+  expect(loadAgents(PROJ, HOME, KNOWN)[0].tools).toEqual([])
+})
+
+test("block-style permissions stays absent instead of becoming an empty override map", () => {
+  write(join(PROJ, ".agents", "agents"), "reviewer.md", "---\npermissions:\n  shell: deny\n---\nReview.")
+  expect(loadAgents(PROJ, HOME, KNOWN)[0].permissions).toBeUndefined()
+})
+
+test("agentModelTarget resolves only against a configured provider", () => {
+  const agent = { id: "r", prompt: "p", model: { provider: "9router", model: "glm/5.2" } }
+  expect(agentModelTarget(agent, { "9router": {} })).toEqual({ provider: "9router", model: "glm/5.2" })
+  expect(agentModelTarget(agent, {})).toBeUndefined()
+  expect(agentModelTarget(undefined, {})).toBeUndefined()
 })
 
 test("effectivePermission: override wins over registry default", () => {

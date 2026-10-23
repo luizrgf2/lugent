@@ -63,15 +63,19 @@ function loadAgentFile(dir: string, rel: string, knownTools: string[]): Agent | 
     if (ref) agent.model = ref
     else console.warn(`agent ${id}: bad model "${data.model}" — inheriting session model`)
   }
-  if (data.tools) {
+  if (data.tools !== undefined) {
+    if (data.tools.trim() === "")
+      console.warn(`agent ${id}: "tools" needs a one-line list (e.g. [read, grep]) — denying every tool`)
     const tools = parseList(data.tools).filter(t => {
       if (known(t)) return true
       console.warn(`agent ${id}: unknown tool "${t}" in tools, dropped`)
       return false
     })
-    if (tools.length) agent.tools = tools
+    agent.tools = tools   // present key ⇒ fail closed: a typo must not widen access to every tool
   }
-  if (data.permissions) {
+  if (data.permissions !== undefined) {
+    if (data.permissions.trim() === "")
+      console.warn(`agent ${id}: "permissions" needs one-line pairs (e.g. {shell: ask})`)
     const perms = parsePermMap(data.permissions)
     for (const name of Object.keys(perms)) {
       if (!known(name)) { console.warn(`agent ${id}: unknown tool "${name}" in permissions, dropped`); delete perms[name] }
@@ -79,6 +83,11 @@ function loadAgentFile(dir: string, rel: string, knownTools: string[]): Agent | 
     if (Object.keys(perms).length) agent.permissions = perms
   }
   return agent
+}
+
+/** The agent's model when its provider is configured; undefined means "inherit the session's". */
+export function agentModelTarget(agent: Agent | undefined, providers: Record<string, unknown>): AgentModelRef | undefined {
+  return agent?.model && providers[agent.model.provider] ? agent.model : undefined
 }
 
 /** Toolset sent to the provider: agent list (when present) minus denied tools. */

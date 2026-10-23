@@ -466,8 +466,17 @@ test("yolo mode: ask tool runs without a permission dialog", async () => {
   expect(lastFrame()).not.toContain("allow edit")     // no dialog ever appeared
 })
 
-test("/agent picker: pick switches the profile and shows it in the status bar", async () => {
-  const env = fakeEnv({ agents: [{ id: "reviewer", prompt: "review", description: "Reviews read-only" }] })
+test("/agent picker: pick switches the profile, status and toolset line follow", async () => {
+  const env = fakeEnv({
+    tools: [{
+      name: "read", description: "Read a file", schema: { type: "object", properties: {} },
+      permission: "allow", execute: async () => ({ output: "" }),
+    }, {
+      name: "shell", description: "Run a command", schema: { type: "object", properties: {} },
+      permission: "ask", execute: async () => ({ output: "" }),
+    }],
+    agents: [{ id: "reviewer", prompt: "review", description: "Reviews read-only", tools: ["read"] }],
+  })
   const { type, lastFrame } = renderTui(<App env={env} />)
   await new Promise(r => setTimeout(r, 30))
   type("/agent\r")
@@ -478,5 +487,43 @@ test("/agent picker: pick switches the profile and shows it in the status bar", 
   await new Promise(r => setTimeout(r, 80))
   const f = lastFrame()
   expect(f).toContain("agent reviewer")
+  expect(f).toContain("tools: read")     // switch line confirms the toolset result
+  expect(f).not.toContain("tools: read,shell")
   expect(f).toContain("reviewer")
+})
+
+test("defaultAgent at startup applies the agent's model", async () => {
+  const env = fakeEnv({
+    config: {
+      defaultProvider: "9router", defaultModel: "base-model", defaultAgent: "reviewer",
+      providers: { "9router": { baseUrl: "http://x/v1" }, "ollama": { baseUrl: "http://y/v1" } },
+    },
+    agents: [{ id: "reviewer", prompt: "r", model: { provider: "ollama", model: "rev-model" } }],
+  })
+  const { lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("ollama · rev-model")
+  expect(lastFrame()).toContain("reviewer")
+})
+
+test("resume restores the agent's model, not the session's creation model", async () => {
+  const env = fakeEnv({ agents: [{ id: "reviewer", prompt: "r", model: { provider: "ollama", model: "rev-model" } }] })
+  const old = env.store.createSession("9router", "glm/glm-5.2", env.projectRoot, "reviewer")
+  env.store.appendMessage({ id: "u1", sessionId: old.id, role: "user", content: "past question", createdAt: new Date(0).toISOString() })
+
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  const waitFor = async (want: string, ms = 3000) => {
+    const t0 = Date.now()
+    while (!lastFrame().includes(want)) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout waiting for "${want}"`)
+      await new Promise(r => setTimeout(r, 20))
+    }
+    await new Promise(r => setTimeout(r, 30))
+  }
+  await new Promise(r => setTimeout(r, 30))
+  type("/resume\r")
+  await waitFor("past question")
+  type("\r")                                  // pick it
+  await waitFor("ollama · rev-model")          // agent's model, not glm/glm-5.2
+  expect(lastFrame()).toContain("reviewer")
 })
