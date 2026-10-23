@@ -9,6 +9,7 @@ import { Transcript, clampItems, type TItem } from "./transcript"
 import { Input } from "./input"
 import { Permissions } from "./permissions"
 import { ModelPicker } from "./model-picker"
+import { SkillList } from "./skill-list"
 
 export type TuiEnv = ReplEnv & {
   offProviders: string[]
@@ -40,15 +41,15 @@ export function App(props: { env: TuiEnv }) {
   const [session] = useState(() => env.store.createSession(env.config.defaultProvider, env.config.defaultModel))
   const [provider, setProvider] = useState(env.config.defaultProvider)
   const [model, setModel] = useState(env.config.defaultModel)
-  const [picker, setPicker] = useState(false)
-  const pickerRef = useRef(false)
+  const [overlay, setOverlay] = useState<null | "model" | "skills">(null)
+  const overlayRef = useRef<null | "model" | "skills">(null)
   const { stdout } = useStdout()
 
-  const closePicker = () => { pickerRef.current = false; setPicker(false) }
+  const closeOverlay = () => { overlayRef.current = null; setOverlay(null) }
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
-      if (pickerRef.current) { closePicker(); return }   // picker open: ctrl+c just closes it
+      if (overlayRef.current) { closeOverlay(); return }   // overlay open: ctrl+c just closes it
       const n = sigintRef.current + 1
       sigintRef.current = n
       if (n === 1) {
@@ -67,7 +68,8 @@ export function App(props: { env: TuiEnv }) {
     setItems(is => [...is, { kind: "user", text }])
     if (text.startsWith("/")) {
       if (text.trim() === "/exit") return exit()
-      if (text.trim() === "/model") { pickerRef.current = true; setPicker(true); return }
+      if (text.trim() === "/model") { overlayRef.current = "model"; setOverlay("model"); return }
+      if (text.trim() === "/skills") { overlayRef.current = "skills"; setOverlay("skills"); return }
       setItems(is => [...is, { kind: "error", text: `${text} — use --plain mode for slash commands in v1` }])
       return
     }
@@ -117,7 +119,7 @@ export function App(props: { env: TuiEnv }) {
       <Box flexDirection="column">
         <Transcript items={visible} />
       </Box>
-      {picker
+      {overlay === "model"
         ? <ModelPicker
             providers={Object.keys(env.config.providers)}
             currentProvider={provider}
@@ -129,15 +131,17 @@ export function App(props: { env: TuiEnv }) {
               return (pr as any).listModels()
             }}
             onPick={(prov, m) => {
-              closePicker()
+              closeOverlay()
               setProvider(prov)
               setModel(m)
               setItems(is => [...is, { kind: "system", text: `${prov} · ${m}` }])
             }}
-            onClose={closePicker} />
-        : ask
-          ? <Permissions tool={ask.tool} resource={ask.resource} onAnswer={a => { askRef.current = null; ask.resolve(a); setAsk(null) }} />
-          : <Input disabled={busy} onSubmit={submit} />}
+            onClose={closeOverlay} />
+        : overlay === "skills"
+          ? <SkillList skills={env.skills} onClose={closeOverlay} />
+          : ask
+            ? <Permissions tool={ask.tool} resource={ask.resource} onAnswer={a => { askRef.current = null; ask.resolve(a); setAsk(null) }} />
+            : <Input disabled={busy} onSubmit={submit} />}
     </Box>
   )
 }

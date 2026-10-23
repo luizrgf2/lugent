@@ -235,3 +235,31 @@ test("ctrl+c while picker is open closes the picker, app stays alive", async () 
   const exited = await Promise.race([waitUntilExit().then(() => true), new Promise(r => setTimeout(() => r(false), 150))])
   expect(exited).toBe(false)
 })
+
+test("/skills opens the skill list; esc closes; ctrl+c closes too", async () => {
+  const provider = { chat: async () => ({ content: "ok", toolCalls: [] }) }
+  const env = fakeEnv({
+    makeProvider: () => provider,
+    skills: [
+      { id: "git-release", name: "Git Release", description: "Prepare releases", file: "/x" },
+      { id: "review", name: "review", description: "Review diffs", file: "/y" },
+    ],
+  })
+  const { type, lastFrame, waitUntilExit } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("/skills\r")
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).toContain("git-release")
+  expect(lastFrame()).toContain("Prepare releases")
+  type("\u001b")                                     // esc closes
+  await new Promise(r => setTimeout(r, 100))
+  expect(lastFrame()).not.toContain("Prepare releases")
+  type("/skills\r")
+  await new Promise(r => setTimeout(r, 60))
+  type("\x03")                                       // ctrl+c closes, app alive
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).not.toContain("Prepare releases")
+  expect(lastFrame()).toContain(">")
+  const exited = await Promise.race([waitUntilExit().then(() => true), new Promise(r => setTimeout(() => r(false), 150))])
+  expect(exited).toBe(false)
+})
