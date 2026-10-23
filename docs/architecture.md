@@ -12,7 +12,7 @@ src/core/
   platform.ts              per-OS db path, shell command
   types.ts                 Message, ToolCall, ChatMsg, SkillMeta, ...
   store.ts                 SQLite (bun:sqlite): sessions, messages, permissions
-  skills.ts                .agents/skills loader + frontmatter parser
+  skills.ts                .agents/skills loader (user ~/.agents + project) + frontmatter parser
   prompt.ts                system prefix builder + history→wire mapping
   provider.ts              OpenAI-compatible SSE client
   permissions.ts           allow/ask decision, resource extraction

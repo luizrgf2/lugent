@@ -95,7 +95,7 @@ Plain REPL:
 
 ## Skills
 
-Drop markdown files in `.agents/skills/` — nested dir or flat:
+Drop markdown files in `.agents/skills/` — nested dir or flat. Both scopes load (user `~/.agents/skills/` + project `.agents/skills/`; on Windows the user scope is `%USERPROFILE%\.agents\skills` — same layout). Same id → project wins:
 
 ```
 .agents/skills/git-release/SKILL.md   → id "git-release"

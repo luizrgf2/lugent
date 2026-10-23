@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { homedir } from "node:os"
 import type { SkillMeta } from "./types"
 
 export function parseFrontmatter(text: string): { data: Record<string, string>; body: string } {
@@ -16,8 +17,22 @@ export function parseFrontmatter(text: string): { data: Record<string, string>; 
   return { data, body }
 }
 
-export function loadSkills(projectRoot: string): SkillMeta[] {
-  const dir = join(projectRoot, ".agents", "skills")
+/**
+ * Loads skills from the cross-agent `.agents/skills` convention: user-level
+ * (`~/.agents/skills`, resolved via os.homedir() — same layout on Windows)
+ * plus project-level (`<root>/.agents/skills`). Same id → project wins.
+ * ponytail: shadowed user skills are dropped silently; log a warning when a
+ * UI surface exists that printing won't corrupt.
+ */
+export function loadSkills(projectRoot: string, homeDir: string = homedir()): SkillMeta[] {
+  const merged = new Map<string, SkillMeta>()
+  for (const dir of [join(homeDir, ".agents", "skills"), join(projectRoot, ".agents", "skills")]) {
+    for (const skill of loadFromDir(dir)) merged.set(skill.id, skill)
+  }
+  return [...merged.values()]
+}
+
+function loadFromDir(dir: string): SkillMeta[] {
   if (!existsSync(dir)) return []
   const out: SkillMeta[] = []
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

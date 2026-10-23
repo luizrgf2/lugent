@@ -45,3 +45,27 @@ test("readSkillBody returns body without frontmatter", () => {
   expect(body).toContain("## Workflow")
   expect(body).not.toContain("description:")
 })
+
+const HOME = "/tmp/opencode/skills-home"
+
+test("loadSkills reads user-level ~/.agents/skills (homeDir param)", () => {
+  rmSync(HOME, { recursive: true, force: true })
+  mkdirSync(`${HOME}/.agents/skills/roll-dice`, { recursive: true })
+  writeFileSync(`${HOME}/.agents/skills/roll-dice/SKILL.md`,
+    `---\nname: Roll Dice\ndescription: Roll dice\n---\nEcho $RANDOM.`)
+  const skills = loadSkills(ROOT, HOME)
+  const ids = skills.map(s => s.id)
+  expect(ids).toContain("roll-dice")     // from home
+  expect(ids).toContain("git-release")   // from project
+})
+
+test("project-level skill overrides user-level with the same id", () => {
+  mkdirSync(`${HOME}/.agents/skills/git-release`, { recursive: true })
+  writeFileSync(`${HOME}/.agents/skills/git-release/SKILL.md`,
+    `---\nname: Shadowed\ndescription: user-level copy\n---\nold.`)
+  const skills = loadSkills(ROOT, HOME)
+  const gr = skills.find(s => s.id === "git-release")!
+  expect(gr.name).toBe("Git Release")            // project wins
+  expect(skills.filter(s => s.id === "git-release")).toHaveLength(1)
+  rmSync(HOME, { recursive: true, force: true })
+})
