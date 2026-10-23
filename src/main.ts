@@ -22,9 +22,17 @@ const skills = loadSkills(projectRoot)
 const tools = makeTools(projectRoot)
 
 // startup health check: report OFF providers, never crash
+const offProviders: string[] = []
 for (const [name, cfg] of Object.entries(config.providers)) {
   const ok = await new Provider(cfg, "x").health()
-  if (!ok) console.log(`${name}: OFF (${cfg.baseUrl})`)
+  if (!ok) { offProviders.push(name); console.log(`${name}: OFF (${cfg.baseUrl})`) }
 }
 
-await runRepl({ store, config, tools, skills, projectRoot })
+const env = { store, config, tools, skills, projectRoot }
+const plain = args.includes("--plain")
+if (!plain && process.stdout.isTTY && process.stdin.isTTY) {
+  const { runTui } = await import("./cli/tui/app")
+  await runTui({ ...env, offProviders })
+} else {
+  await runRepl(env)
+}
