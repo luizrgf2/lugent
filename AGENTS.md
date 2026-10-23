@@ -25,8 +25,23 @@ lugent: minimal OpenCode-style coding agent. TS + Bun, **zero runtime dependenci
 - `docs/specs/` and `docs/plans/` are local-only (gitignored internal design docs). History was rewritten once specifically to keep them off `origin` — never re-add or push them from old refs/reflog.
 - No `lugent.json` belongs in this repo.
 
-## Architecture pointers
+## Doc index — read only what the trigger matches
 
-Turn flow, design decisions (orphan `tool_calls` repair in `cleanHistory`, SSE fragment accumulation by index, permissions layers, truncation) and schema: `docs/architecture.md`. User-facing config/tools/skills reference: `README.md`.
+Documentation pattern for this repo: **one small doc per topic, never one big file**. `AGENTS.md` holds only triggers and pointers; the detail lives in the target doc. Don't read them all upfront — follow the trigger.
+
+| If you touch… | Read |
+| --- | --- |
+| `src/core/prompt.ts` (prefix, buildMessages) | `docs/architecture.md` § "Byte-stable prefix" — snapshot must stay byte-identical unless the change is deliberate |
+| `src/core/provider.ts` (SSE, retry, health) | `docs/architecture.md` § "SSE fragment accumulation" |
+| `src/core/loop.ts` / abort / history repair | `docs/architecture.md` § "Append-only store, repaired on read" + § "Turn flow" |
+| `src/core/store.ts` | `docs/architecture.md` § "Schema" |
+| permissions (`permissions.ts`, tool `permission` field) | `docs/architecture.md` § "Permissions" |
+| adding/changing a tool | `README.md` § "Tools" (keep table + defaults in sync) |
+| config loading (`config.ts`) | `README.md` § "Configuration" (precedence, `{env:VAR}`) |
+| branch or commit | `.agents/skills/git-conventions/SKILL.md` |
+| a decision with a trade-off | append to `docs/decisions.md` (format in the skill above) |
+| a request near v1's edge (subagents, MCP, compaction) | `docs/future-features.md` — check the trigger before designing |
+
+When you create a new doc: single topic, short, and add a trigger row here. If a doc grows past ~150 lines, split it and update this index.
 
 Note: lugent itself loads this file into its system prompt (`safeAgentsMd` in `src/cli/repl.ts`) — it doubles as dogfooded instructions.
