@@ -1,4 +1,5 @@
 import { Box, Text, useAnimation } from "ink"
+import type { Agent } from "../../core/types"
 
 const FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".split("")
 
@@ -9,6 +10,18 @@ export function Spinner(p: { busy: boolean; label?: string }) {
     <Box paddingX={2}>
       <Text color="yellow">{FRAMES[frame % FRAMES.length]} </Text>
       <Text dimColor>{p.label ?? "working…"}</Text>
+    </Box>
+  )
+}
+
+// Fixed line above the input: AGENTS.md presence + current agent.
+// Agents without a color (legacy files) fall back to magenta (build's color).
+export function ContextLine(p: { agent?: Agent; agentsMd: string | null }) {
+  if (!p.agentsMd && !p.agent) return null
+  return (
+    <Box paddingX={1}>
+      {p.agentsMd && <Text color="yellow">§ AGENTS.md loaded </Text>}
+      {p.agent && <Text color={p.agent.color ?? "magenta"}>· agent {p.agent.id}</Text>}
     </Box>
   )
 }

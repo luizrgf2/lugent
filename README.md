@@ -150,11 +150,14 @@ Two agents are always present, in every install (inspired by OpenCode's pair, ad
 | `build` | the base system prompt | all | tool defaults |
 | `plan` | "plan mode": explore and design, no file changes | all but `edit`/`write` | `{edit: deny, write: deny}` |
 
+Built-ins carry display colors (`build` magenta, `plan` yellow); the TUI context line — fixed above the input — shows a yellow `§ AGENTS.md loaded` when a project `AGENTS.md` was loaded, plus `· agent <id>` in the agent's color.
+
 `build` is the startup default, so there is always a way back to a normal session (`/agent build`). `plan` can read, search and run shell commands — shell stays permission-controlled, as in OpenCode — it just cannot modify files. Both load **first**, so a file with the same id (user or project) overrides the built-in without removing it: drop `.agents/agents/plan.md` to give your own plan agent.
 
 ```markdown
 ---
 description: Reviews changes read-only
+color: cyan
 model: 9router/glm-5.2
 tools: [read, glob, grep]
 permissions: {shell: ask}
@@ -165,6 +168,7 @@ You are a code reviewer. Report findings with file and line references.
 | Field | Meaning | Default when absent |
 | --- | --- | --- |
 | `description` | shown by `/agent` | none |
+| `color` | TUI display color for the agent: an ink color name (`red`, `cyan`…) or `#rrggbb`; display-only, invalid warns and uses the default | `magenta` (build's) |
 | `model` | `provider/model`, both required — provider must exist in the config | inherit the session's |
 | `tools` | tool ids sent to the model; anything else is invisible to it — a `tools` key that parses to nothing (typo, block-style YAML) fails closed to **no** tools, with a warning | all tools |
 | `permissions` | per-tool `allow` / `ask` / `deny`; `deny` also removes the tool | tool default |

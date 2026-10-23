@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test"
-import { rmSync } from "node:fs"
+import { rmSync, mkdtempSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import { App } from "./app"
 import { renderTui } from "./harness"
 import { Store } from "../../core/store"
@@ -520,8 +521,7 @@ test("defaultAgent at startup applies the agent's model", async () => {
   expect(lastFrame()).toContain("reviewer")
 })
 
-test("resume restores the agent's model, not the session's creation model", async () => {
-  const env = fakeEnv({ agents: [{ id: "reviewer", prompt: "r", model: { provider: "ollama", model: "rev-model" } }] })
+test("resume restores the agent's model, not the session's creation model", async () => {  const env = fakeEnv({ agents: [{ id: "reviewer", prompt: "r", model: { provider: "ollama", model: "rev-model" } }] })
   const old = env.store.createSession("9router", "glm/glm-5.2", env.projectRoot, "reviewer")
   env.store.appendMessage({ id: "u1", sessionId: old.id, role: "user", content: "past question", createdAt: new Date(0).toISOString() })
 
@@ -540,6 +540,23 @@ test("resume restores the agent's model, not the session's creation model", asyn
   type("\r")                                  // pick it
   await waitFor("ollama · rev-model")          // agent's model, not glm/glm-5.2
   expect(lastFrame()).toContain("reviewer")
+})
+
+test("context line shows AGENTS.md loaded and the current agent, above the input", async () => {
+  const root = mkdtempSync("/tmp/lugent-ctx-")
+  writeFileSync(join(root, "AGENTS.md"), "# rules")
+  const env = fakeEnv({ projectRoot: root, agents: [{ id: "reviewer", color: "cyan", prompt: "r" }] })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("/agent\r")
+  await new Promise(r => setTimeout(r, 80))
+  type("\r")                                  // pick the first listed agent
+  await new Promise(r => setTimeout(r, 80))
+  const f = lastFrame()
+  expect(f).toContain("AGENTS.md loaded")
+  expect(f).toContain("agent reviewer")
+  // fixed: banner stays above the composer in the same frame
+  expect(f.indexOf("AGENTS.md loaded")).toBeLessThan(f.lastIndexOf(">"))
 })
 
 test("no defaultAgent: the session starts on the build agent", async () => {

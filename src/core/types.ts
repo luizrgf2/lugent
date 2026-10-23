@@ -32,6 +32,8 @@ export interface Agent {
   model?: AgentModelRef
   tools?: string[]
   permissions?: Record<string, "allow" | "ask" | "deny">
+  /** TUI display color: an ink color name or #rrggbb; display-only. */
+  color?: string
   prompt: string   // markdown body — becomes the agent's system prompt
 }
 

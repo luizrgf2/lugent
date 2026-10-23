@@ -151,6 +151,20 @@ test("a file overrides a built-in by id; project beats user; the other built-in 
   expect(byId("build").prompt).toBe(SYSTEM_PROMPT)
 })
 
+test("color: valid names and hex pass through; invalid warns and stays absent", () => {
+  write(join(PROJ, ".agents", "agents"), "good.md", "---\ncolor: cyan\n---\nGood.")
+  write(join(PROJ, ".agents", "agents"), "hexp.md", "---\ncolor: \"#ff8800\"\n---\nHex.")
+  write(join(PROJ, ".agents", "agents"), "bad.md", "---\ncolor: sparkly\n---\nBad.")
+  expect(byId("good").color).toBe("cyan")
+  expect(byId("hexp").color).toBe("#ff8800")
+  expect(byId("bad").color).toBeUndefined()
+})
+
+test("built-ins carry display colors: build magenta, plan yellow", () => {
+  expect(byId("build").color).toBe("magenta")
+  expect(byId("plan").color).toBe("yellow")
+})
+
 test("resolveAgent: named id, else build, even for an unknown id", () => {
   const agents = loadAgents(PROJ, HOME, KNOWN)
   expect(resolveAgent(agents, "plan")?.id).toBe("plan")

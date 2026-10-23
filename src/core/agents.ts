@@ -20,16 +20,27 @@ to apply it.`
  * engine and no plan files). They load first, so a file with the same id — user
  * or project scope — overrides one without removing it.
  */
+const COLORS = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "gray", "grey"]
+
+/** ink color name or #rrggbb (also #rgb) — invalid warns and stays absent. */
+export function parseColor(raw: string): string | undefined {
+  const v = raw.trim().replace(/^["']|["']$/g, "")
+  if (COLORS.includes(v) || /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v)) return v
+  return undefined
+}
+
 export const BUILTIN_AGENTS: Agent[] = [
   {
     id: "build",
     description: "Implements changes (default)",
+    color: "magenta",
     prompt: SYSTEM_PROMPT,   // the base prompt itself: the default path stays byte-identical
   },
   {
     id: "plan",
     description: "Plans changes read-only — no edit or write",
     permissions: { edit: "deny", write: "deny" },
+    color: "yellow",
     prompt: PLAN_PROMPT,
   },
 ]
@@ -93,6 +104,11 @@ function loadAgentFile(dir: string, rel: string, knownTools: string[]): Agent | 
   const known = (t: string) => knownTools.length === 0 || knownTools.includes(t)
   const agent: Agent = { id, prompt }
   if (data.description) agent.description = data.description
+  if (data.color !== undefined) {
+    const c = parseColor(data.color)
+    if (c) agent.color = c
+    else console.warn(`agent ${id}: bad color "${data.color}" — using the default`)
+  }
 
   if (data.model) {
     const ref = parseModelRef(data.model)

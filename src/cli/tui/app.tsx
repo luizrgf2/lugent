@@ -5,8 +5,8 @@ import type { Agent } from "../../core/types"
 import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
 import { toolsForAgent, agentModelTarget, resolveAgent } from "../../core/agents"
-import { buildPromptInput } from "../context"
-import { Status, Spinner } from "./status"
+import { buildPromptInput, safeAgentsMd } from "../context"
+import { Status, Spinner, ContextLine } from "./status"
 import { Transcript, clampItems, itemLines, itemsFromHistory, type TItem } from "./transcript"
 import { Input } from "./input"
 import { Permissions } from "./permissions"
@@ -168,7 +168,8 @@ export function App(props: { env: TuiEnv }) {
 
   // ink resolves height="100%" to auto — constrain manually from real rows.
   const rows = (stdout as any)?.rows ?? 24
-  const visible = clampItems(items, Math.max(3, rows - 7), scroll)
+  const visible = clampItems(items, Math.max(3, rows - 8), scroll)   // -1 line: context line above input
+  const agentsMd = safeAgentsMd(env.projectRoot)
 
   return (
     <Box flexDirection="column">
@@ -176,6 +177,7 @@ export function App(props: { env: TuiEnv }) {
       <Box flexDirection="column">
         <Transcript items={visible} />
       </Box>
+      <ContextLine agent={agent} agentsMd={agentsMd} />
       {overlay === "agent"
         ? <AgentPicker
             agents={env.agents}
