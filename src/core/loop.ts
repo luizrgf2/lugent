@@ -5,6 +5,7 @@ import type { ToolDef } from "./tools/registry"
 import { validateArgs } from "./tools/registry"
 import { buildPrefix, buildMessages, type PromptInput } from "./prompt"
 import { checkPermission, resourceFor } from "./permissions"
+import { expandImages } from "./images"
 
 const TRUNCATE = 10_000
 
@@ -52,9 +53,10 @@ function isOutsideProject(resource: string, cwd: string): boolean {
   return !rel
 }
 
-export async function runTurn(deps: LoopDeps, sessionId: string, userText: string): Promise<{ aborted: boolean; error?: string }> {
+export async function runTurn(deps: LoopDeps, sessionId: string, userText: string, cwd = process.cwd()): Promise<{ aborted: boolean; error?: string }> {
   const { store } = deps
   store.appendMessage(msg({ sessionId, role: "user", content: userText }))
+  const userContent = expandImages(userText, cwd)
 
   while (true) {
     const prefix = buildPrefix(deps.promptInput)
@@ -62,7 +64,7 @@ export async function runTurn(deps: LoopDeps, sessionId: string, userText: strin
     let res: ChatResponse
     try {
       res = await deps.provider.chat({
-        messages: buildMessages(prefix, history),
+        messages: buildMessages(prefix, history, userContent),
         tools: deps.tools,
         signal: deps.signal,
         onToken: deps.onToken,

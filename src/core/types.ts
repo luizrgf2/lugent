@@ -38,6 +38,12 @@ export interface ChatMsg {
   tool_call_id?: string        // tool
 }
 
+// OpenAI vision content parts (user role only)
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } }
+export type UserContent = string | ContentPart[]
+
 export interface ChatResponse {
   content: string
   toolCalls: ToolCall[]

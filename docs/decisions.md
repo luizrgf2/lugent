@@ -86,3 +86,8 @@ Cost if wrong: mark is text-only (▟▙ approximates the SVG geometry); a real 
 Decision: the single-file landing page (`docs/index.html`) is published via GitHub Pages from `main` `/docs`; root-path Pages is not used.
 Why: legacy Pages only accepts `/` or `/docs`; from `/` Jekyll renders the repo README over any `site/index.html`, and a `.nojekyll` at root changes nothing for that collision. `/docs` publishes only the docs tree and the page verbatim.
 Cost if wrong: `/docs` publishes all of docs/ (architecture.md, decisions.md, future-features.md become public HTML) — acceptable today, but any future internal doc must stay out of docs/ (docs/specs and docs/plans already are, via .gitignore).
+
+## 2026-10-23 — image attachments: `@path` marker expanded to OpenAI vision parts at turn start
+Decision: `@path/to.png` anywhere in the user's message expands (CLI layer, `src/core/images.ts`) into `[{type:"text"},{type:"image_url",image_url:{url:"data:..."}}]` for the newest user message only; the stored message keeps the raw marker text and images are re-read from disk each turn.
+Why: one wire format serves every provider behind an OpenAI-compatible proxy (no per-provider code); turn-scoped expansion keeps SQLite schema and session replay untouched; video (`video_url`) was cut — no cross-provider shape exists.
+Cost if wrong: image files must keep existing across turns (replay re-reads them); models without vision reject content-parts arrays — the marker stays literal only when the file doesn't resolve, not when the model can't see images.
