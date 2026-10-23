@@ -45,35 +45,38 @@ export { itemLines }
 export function clampItems(items: TItem[], maxLines: number, skipBottom = 0): TItem[] {
   const out: TItem[] = []
   let used = 0
+  const push = (it: TItem, text?: string) => {
+    if (out.length > 0) used += 1   // blank separator line before each item
+    used += itemLines(it)
+    out.unshift(text === undefined ? it : { ...it, text })
+  }
   for (let i = items.length - 1; i >= 0; i--) {
     const lines = itemLines(items[i])
     if (skipBottom > 0) {
       const skip = Math.min(lines, skipBottom)
       skipBottom -= skip
-      if (skip === lines) continue                  // fully hidden
+      if (skip === lines) continue              // fully hidden
       // straddles the hidden tail: show its head, capped to the window
       const head = items[i].text.split("\n").slice(0, lines - skip)
       const shown = head.length > maxLines ? head.slice(head.length - maxLines) : head
-      out.unshift({ ...items[i], text: shown.join("\n") })
-      used += shown.length
+      push(items[i], shown.join("\n"))
       continue
     }
-    if (used + lines > maxLines) {
-      const room = maxLines - used
+    if (used + lines + (out.length > 0 ? 1 : 0) > maxLines) {
+      const room = maxLines - used - (out.length > 0 ? 1 : 0)
       if (out.length === 0 && room > 0 && items[i].kind === "assistant") {
-        out.unshift({ ...items[i], text: items[i].text.split("\n").slice(-room).join("\n") })
+        push(items[i], items[i].text.split("\n").slice(-room).join("\n"))
       }
       break
     }
-    out.unshift(items[i])
-    used += lines
+    push(items[i])
   }
   return out
 }
 
 const Markdown = memo(function Markdown({ text }: { text: string }) {
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" paddingLeft={1}>
       {parseMarkdown(text).map((line: Seg[], i: number) => (
         <Text key={i} dimColor={line.some(s => s.sep)}>
           {line.map((s: Seg, j: number) => (
@@ -95,10 +98,10 @@ export function Transcript({ items }: { items: TItem[] }) {
   return (
     <Box flexDirection="column">
       {items.map((it, i) => (
-        <Box key={i} flexDirection="column">
+        <Box key={i} flexDirection="column" marginTop={i > 0 ? 1 : 0}>
           {it.kind === "user" && <Text color="blue">&gt; {it.text}</Text>}
           {it.kind === "reasoning" && (
-            <Box flexDirection="column" marginTop={i > 0 ? 1 : 0} marginBottom={1}>
+            <Box flexDirection="column" marginBottom={1}>
               <Text italic dimColor>… pensando</Text>
               <Box paddingLeft={2}>
                 <Text italic dimColor>{it.text}</Text>

@@ -112,21 +112,28 @@ export function App(props: { env: TuiEnv }) {
     setBusy(true)
     let reasoning = ""
     let answer = ""
-    let seen = 0   // lines already counted for the streaming tail item (scroll pin)
+    let seen = 0      // lines already counted for the streaming tail item (scroll pin)
+    let seenIdx = -1  // index the count belongs to; a new item starts from 0 (+ gap line)
     const grow = (patch: (is: TItem[]) => TItem[]) => setItems(is => {
       const next = patch(is)
       const tail = next[next.length - 1]
       if (!tail) return next
-      const now = itemLines(tail)
-      const delta = now - seen
+      const idx = next.length - 1
+      const now = itemLines(tail) + (idx > 0 ? 1 : 0)   // separator gap counts as a line
+      const delta = now - (seenIdx === idx ? seen : 0)
       seen = now
+      seenIdx = idx
       if (delta > 0 && scrollRef.current > 0) { scrollRef.current += delta; setScroll(scrollRef.current) }
       return next
     })
     const chatProvider = env.makeProvider?.(cfg, model) ?? new Provider(cfg, model)
+    // runTurn re-calls provider.chat once per tool round; each round streams only
+    // its own text, so the accumulators must reset or the transcript repeats
+    // every earlier round prefixed into the next one.
+    const chat = (args: any) => { reasoning = ""; answer = ""; seen = 0; seenIdx = -1; return chatProvider.chat(args) }
     const r = await runTurn({
       store: env.store,
-      provider: chatProvider,
+      provider: { chat },
       tools: env.tools,
       promptInput: buildPromptInput(env, model),
       signal: ac.signal,

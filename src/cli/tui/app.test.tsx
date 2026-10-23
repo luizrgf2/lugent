@@ -196,6 +196,31 @@ const pathTool = {
   permission: "ask" as const, execute: async () => ({ output: "edited" }),
 }
 
+test("text before tool rounds is not duplicated by later rounds", async () => {
+  const allowTool = { ...pathTool, permission: "allow" as const }
+  let calls = 0
+  const provider = {
+    chat: async (a: any) => {
+      if (calls++ === 0) {
+        a.onToken?.("Vou ler o arquivo.\n")
+        return { content: "Vou ler o arquivo.\n", toolCalls: [{ id: "t1", name: "edit", args: { path: "a.ts" } }] }
+      }
+      a.onToken?.("Pronto. Feito.")
+      return { content: "Pronto. Feito.", toolCalls: [] }
+    },
+  }
+  const env = fakeEnv({ tools: [allowTool], makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  await new Promise(r => setTimeout(r, 150))
+  const f = lastFrame()
+  expect(f).toContain("Vou ler o arquivo.")
+  expect(f).toContain("Pronto. Feito.")
+  // duplication bug: round-1 text re-prefixed into the round-2 assistant item
+  expect(f.split("Vou ler o arquivo.").length - 1).toBe(1)
+})
+
 test("two ask tools in one batch: dialogs queue, both resolve, turn completes", async () => {
   let calls = 0
   const provider = {
