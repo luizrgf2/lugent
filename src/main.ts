@@ -22,6 +22,8 @@ const store = new Store(dbPath)
 const skills = loadSkills(projectRoot)
 const tools = makeTools(projectRoot)
 const agents = loadAgents(projectRoot, homedir(), tools.map(t => t.name))
+if (config.defaultAgent && !agents.some(a => a.id === config.defaultAgent))
+  console.log(`defaultAgent "${config.defaultAgent}" not found — using the base agent`)
 
 // startup health check: report OFF providers, never crash
 const offProviders: string[] = []
