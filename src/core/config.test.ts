@@ -29,9 +29,24 @@ describe("loadConfig", () => {
     expect(cfg.defaultModel).toBe("qwen3.6-35b")
     rmSync(dir, { recursive: true, force: true })
   })
-  test("no config file returns empty providers", () => {
-    const cfg = loadConfig(`/tmp/opencode/nope-${Date.now()}`)
+  test("no config anywhere returns empty providers", () => {
+    const cfg = loadConfig(`/tmp/opencode/nope-${Date.now()}`, `/tmp/opencode/nope-global-${Date.now()}.json`)
     expect(cfg.providers).toEqual({})
     expect(cfg.defaultProvider).toBe("")
+  })
+
+  test("falls back to global config when root has none", () => {
+    const dir = `/tmp/opencode/cfg2-${Date.now()}`
+    mkdirSync(dir, { recursive: true })
+    const global = `/tmp/opencode/global-${Date.now()}.json`
+    writeFileSync(global, JSON.stringify({
+      providers: { g: { baseUrl: "http://g/v1" } },
+      defaultProvider: "g", defaultModel: "m",
+    }))
+    const cfg = loadConfig(dir, global)
+    expect(cfg.providers.g.baseUrl).toBe("http://g/v1")
+    expect(cfg.defaultModel).toBe("m")
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(global, { force: true })
   })
 })

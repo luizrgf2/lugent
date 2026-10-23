@@ -12,8 +12,8 @@ export function subEnv(v: string): string {
   return v.replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name) => process.env[name] ?? "")
 }
 
-export function loadConfig(root: string): AppConfig {
-  const paths = [`${root}/lugent.json`, `${homedir()}/.config/lugent/config.json`]
+export function loadConfig(root: string, globalPath = `${homedir()}/.config/lugent/config.json`): AppConfig {
+  const paths = [`${root}/lugent.json`, globalPath]
   const file = paths.find(p => existsSync(p))
   if (!file) return { providers: {}, defaultProvider: "", defaultModel: "" }
   const raw = JSON.parse(readFileSync(file, "utf8"))

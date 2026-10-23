@@ -49,7 +49,12 @@ export async function runRepl(env: ReplEnv): Promise<void> {
   console.log(`session ${session.id} | /model /skills /clear /exit | Ctrl+C aborts turn`)
 
   while (true) {
-    const input = (await rl.question("> ")).trim()
+    let input: string
+    try {
+      input = (await rl.question("> ")).trim()
+    } catch {
+      break   // stdin closed (EOF/Ctrl+D): exit cleanly
+    }
     if (!input) continue
     sigintCount = 0
 
