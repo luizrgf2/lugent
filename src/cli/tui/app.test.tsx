@@ -527,3 +527,20 @@ test("resume restores the agent's model, not the session's creation model", asyn
   await waitFor("ollama · rev-model")          // agent's model, not glm/glm-5.2
   expect(lastFrame()).toContain("reviewer")
 })
+
+test("no defaultAgent: the session starts on the build agent", async () => {
+  const env = fakeEnv({ agents: [{ id: "build", prompt: "base" }, { id: "plan", prompt: "p" }] })
+  const { lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("build")
+})
+
+test("an unknown defaultAgent falls back to build", async () => {
+  const env = fakeEnv({
+    config: { defaultProvider: "9router", defaultModel: "m", defaultAgent: "ghost", providers: { "9router": { baseUrl: "http://x/v1" } } },
+    agents: [{ id: "build", prompt: "base" }, { id: "plan", prompt: "p" }],
+  })
+  const { lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("build")
+})

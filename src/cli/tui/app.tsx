@@ -4,7 +4,7 @@ import type { ReplEnv } from "../repl"
 import type { Agent } from "../../core/types"
 import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
-import { toolsForAgent, agentModelTarget } from "../../core/agents"
+import { toolsForAgent, agentModelTarget, resolveAgent } from "../../core/agents"
 import { buildPromptInput } from "../context"
 import { Status, Spinner } from "./status"
 import { Transcript, clampItems, itemLines, itemsFromHistory, type TItem } from "./transcript"
@@ -50,7 +50,7 @@ export function App(props: { env: TuiEnv }) {
   const askChainRef = useRef<Promise<void>>(Promise.resolve())
   const askRef = useRef<{ tool: string; resource: string; resolve(a: "y" | "n" | "a"): void } | null>(null)
   const [abort, setAbort] = useState<AbortController | null>(null)
-  const [agent, setAgentState] = useState<Agent | undefined>(() => env.agents.find(a => a.id === env.config.defaultAgent))
+  const [agent, setAgentState] = useState<Agent | undefined>(() => resolveAgent(env.agents, env.config.defaultAgent))
   const [session, setSession] = useState(() => env.store.createSession(env.config.defaultProvider, env.config.defaultModel, env.projectRoot, agent?.id ?? null))
   // A defaultAgent's model (when its provider is configured) wins over the config default at startup.
   const [provider, setProvider] = useState(() => agentModelTarget(agent, env.config.providers)?.provider ?? env.config.defaultProvider)

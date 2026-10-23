@@ -1,7 +1,7 @@
 import * as readline from "node:readline/promises"
 import { runTurn } from "../core/loop"
 import { Provider } from "../core/provider"
-import { toolsForAgent, agentModelTarget } from "../core/agents"
+import { toolsForAgent, agentModelTarget, resolveAgent } from "../core/agents"
 import type { Store } from "../core/store"
 import type { AppConfig } from "../core/config"
 import type { ToolDef } from "../core/tools/registry"
@@ -21,7 +21,7 @@ export interface ReplEnv {
 
 export async function runRepl(env: ReplEnv): Promise<void> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-  let agent = env.agents.find(a => a.id === env.config.defaultAgent)
+  let agent = resolveAgent(env.agents, env.config.defaultAgent)
   const startTarget = agentModelTarget(agent, env.config.providers)   // defaultAgent's model wins at startup
   let session = env.store.createSession(startTarget?.provider ?? env.config.defaultProvider, startTarget?.model ?? env.config.defaultModel, env.projectRoot, agent?.id ?? null)
   let model = startTarget?.model ?? env.config.defaultModel
