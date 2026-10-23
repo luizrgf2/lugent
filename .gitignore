@@ -152,4 +152,5 @@ vite.config.ts.timestamp-*
 docs/specs/
 docs/plans/
 .superpowers/
-site/
+.impeccable/
+PRODUCT.md

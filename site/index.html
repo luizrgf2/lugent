@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="lugent — a minimal OpenCode-style coding agent. TypeScript + Bun, pure core with zero runtime dependencies, any OpenAI-compatible endpoint.">
+<meta name="theme-color" content="#101010">
+<title>lugent(1) — a minimal coding agent</title>
+<style>
+  :root{
+    --bg:#101010;
+    --bg-raise:#161613;
+    --ink:#f2f2f2;
+    --dim:#a8a294;          /* warm-tinted secondary, from page hue */
+    --amber:#ffcc66;        /* flags, links, interactive */
+    --green:#00f5a0;        /* terminal prompt, allow */
+    --cyan:#00d9f5;
+    --rule:#2a2921;
+    --mono:"JetBrains Mono","Fira Code",ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:var(--mono);
+    background:var(--bg);
+    color:var(--ink);
+    line-height:1.75;
+    font-size:16px;
+  }
+  ::selection{background:var(--amber);color:#101010}
+  a{color:var(--amber);text-decoration:underline;text-underline-offset:.2em}
+  a:hover{background:var(--amber);color:#101010;text-decoration:none}
+  :focus-visible{outline:2px solid var(--amber);outline-offset:3px}
+  ::-webkit-scrollbar{width:10px}
+  ::-webkit-scrollbar-thumb{background:#2e2c22;border-radius:0}
+  ::-webkit-scrollbar-thumb:hover{background:#3d3a2c}
+
+  .man{max-width:80ch;margin:0 auto;padding:0 1.25rem 6rem}
+
+  /* running header — authentic man(1) chrome */
+  .hdr{
+    position:sticky;top:0;z-index:5;
+    display:flex;justify-content:space-between;gap:1rem;
+    padding:.55rem 0;
+    font-size:.82rem;color:var(--dim);
+    background:color-mix(in srgb,var(--bg) 92%,transparent);
+    backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--rule);
+    white-space:nowrap;
+  }
+  .hdr a{color:var(--dim)}
+  .hdr a:hover{color:#101010}
+
+  /* mark */
+  .mark{margin:5.5rem 0 3.5rem}
+  .mark svg{display:block;width:min(84px,20vw);height:auto}
+  .mark svg .cursor{animation:blink 1.1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  h1{
+    font-size:clamp(1.9rem,5.2vw,3rem);
+    line-height:1.25;
+    letter-spacing:-.02em;
+    font-weight:800;
+    max-width:26ch;
+    text-wrap:balance;
+    margin-bottom:3.5rem;
+  }
+  h1 .name{color:var(--green)}
+
+  h2{
+    font-size:.95rem;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.14em;
+    margin:3.8rem 0 1.1rem;
+    padding-top:1.9rem;
+    border-top:1px solid var(--rule);
+  }
+  h3{
+    font-size:.85rem;
+    font-weight:700;
+    color:var(--dim);
+    text-transform:uppercase;
+    letter-spacing:.12em;
+    margin:2.2rem 0 .8rem;
+  }
+  p{max-width:70ch;margin-bottom:1.1rem}
+  .dim{color:var(--dim)}
+  b{font-weight:700}
+  .flag,.cmd{color:var(--amber);font-weight:700}
+  code{color:var(--ink)}
+  .code-dim{color:var(--dim)}
+
+  /* synopsis block */
+  .synopsis{
+    background:var(--bg-raise);
+    border:1px solid var(--rule);
+    padding:1.1rem 1.4rem;
+    font-size:.95rem;
+    margin:1.4rem 0 .4rem;
+    overflow-x:auto;
+    white-space:pre;
+  }
+  .synopsis .bin{color:var(--green);font-weight:700}
+
+  /* description CTA */
+  .cta{
+    display:inline-block;
+    margin:2.2rem 0 0;
+    padding:.75rem 1.6rem;
+    background:var(--amber);
+    color:#101010 !important;
+    font-weight:700;
+    text-decoration:none;
+    border-radius:2px;
+  }
+  .cta:hover{filter:brightness(1.12)}
+
+  /* tools list */
+  .tools{border-collapse:collapse;margin-top:.6rem}
+  .tools td{padding:.45rem 1.5rem .45rem 0;vertical-align:top}
+  .tools td:first-child{font-weight:700;white-space:nowrap}
+  .tools .allow{color:var(--green)}
+  .tools .ask{color:var(--amber)}
+
+  /* terminal / examples */
+  .term{
+    background:var(--bg-raise);
+    border:1px solid var(--rule);
+    padding:1.2rem 1.4rem 1.4rem;
+    margin-top:1.2rem;
+    font-size:.88rem;
+    line-height:1.8;
+    overflow-x:auto;
+    white-space:pre;
+    min-height:15em;
+  }
+  .term .p{color:var(--green);font-weight:700}      /* shell prompt */
+  .term .u{color:var(--amber)}                      /* typed user line */
+  .term .g{color:var(--dim)}                        /* tool/output lines */
+  .term .tcar{display:inline-block;width:.55em;height:1.05em;background:var(--amber);vertical-align:-.15em;animation:blink 1.1s steps(1) infinite}
+
+  .files td{padding:.35rem 2.2rem .35rem 0;vertical-align:top}
+  .files td:first-child{color:var(--amber);white-space:nowrap}
+
+  footer{
+    margin-top:5rem;
+    padding-top:1.6rem;
+    border-top:1px solid var(--rule);
+    font-size:.82rem;
+    color:var(--dim);
+    display:flex;
+    justify-content:space-between;
+    gap:1rem;flex-wrap:wrap;
+  }
+
+  @media (max-width:560px){
+    .hdr span:first-child{display:none}
+    body{font-size:15px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *,.tcar,.mark svg .cursor{animation:none !important}
+    html{scroll-behavior:auto}
+  }
+</style>
+</head>
+<body>
+<main class="man">
+
+  <div class="hdr" role="doc-pageheader">
+    <span>LUGENT(1)</span>
+    <span>User Commands</span>
+    <span><a href="https://github.com/luizrgf2/lugent">LUGENT(1) [github]</a></span>
+  </div>
+
+  <div class="mark" aria-hidden="true">
+    <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" role="img">
+      <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#00F5A0"/><stop offset="1" stop-color="#00D9F5"/>
+        </linearGradient>
+      </defs>
+      <path d="M30 20 L70 60 L30 100" fill="none" stroke="url(#g)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M30 118 L104 118" fill="none" stroke="url(#g)" stroke-width="14" stroke-linecap="round"/>
+      <circle class="cursor" cx="88" cy="60" r="7" fill="#00F5A0"/>
+    </svg>
+  </div>
+
+  <h1><span class="name">lugent</span> — a minimal coding agent you can read in an afternoon</h1>
+
+  <section id="description">
+    <h2>Description</h2>
+    <p><b>lugent</b> is an OpenCode-style coding agent that runs in your terminal: a full-screen TUI with live model reasoning, markdown answers and inline permission dialogs, plus a plain ANSI REPL when stdout isn't a TTY.</p>
+    <p>The core is a <b>pure TypeScript library with zero runtime dependencies</b>, built on <b>Bun</b> and developed entirely test-first: 72 tests, including a golden snapshot that pins the system prompt byte-for-byte. It talks to <b>any OpenAI-compatible endpoint</b> (Ollama, LM Studio, OpenRouter, local routers). Seven tools, y/n/a permission prompts, sessions in one SQLite file, markdown skills dropped in a folder.</p>
+    <p class="dim">No platform lock-in, no vendored runtime, no magic. Clone it, read it, change it.</p>
+    <a class="cta" href="https://github.com/luizrgf2/lugent">github.com/luizrgf2/lugent →</a>
+  </section>
+
+  <section id="synopsis">
+    <h2>Synopsis</h2>
+    <div class="synopsis"><span class="bin">bun src/main.ts</span> [<span class="flag">--plain</span>] [<span class="flag">--db</span> <i>path</i>]</div>
+    <p class="dim">Requires Bun 1.3+ and any OpenAI-compatible chat endpoint (<code>/v1</code>). Each provider gets a health check at startup; unreachable ones report <code>OFF</code> and lugent still starts.</p>
+  </section>
+
+  <section id="options">
+    <h2>Options</h2>
+    <table class="files">
+      <tr><td>--plain</td><td>Force the inline ANSI REPL. Piped stdin (non-TTY) falls back to it automatically.</td></tr>
+      <tr><td>--db &lt;path&gt;</td><td>Override the database location.</td></tr>
+    </table>
+    <h3>Slash commands</h3>
+    <table class="files">
+      <tr><td>/model [provider] [model]</td><td>Switch provider and model; lists live models when called bare.</td></tr>
+      <tr><td>/skills</td><td>Browse loaded skills.</td></tr>
+      <tr><td>/resume</td><td>Pick a past session of this directory and continue it.</td></tr>
+      <tr><td>/permissions</td><td>Toggle normal/yolo (auto-approve every tool call).</td></tr>
+      <tr><td>/clear</td><td>Start a fresh session.</td></tr>
+      <tr><td>/exit</td><td>Quit.</td></tr>
+    </table>
+  </section>
+
+  <section id="tools">
+    <h2>Tools</h2>
+    <table class="tools">
+      <tr><td>read</td><td class="allow">allow</td><td>File with numbered lines or directory listing</td></tr>
+      <tr><td>glob</td><td class="allow">allow</td><td>Glob file search, limit 100</td></tr>
+      <tr><td>grep</td><td class="allow">allow</td><td>Content search, regex or literal</td></tr>
+      <tr><td>edit</td><td class="ask">ask</td><td>Unique-match string replace, returns diff</td></tr>
+      <tr><td>write</td><td class="ask">ask</td><td>Create or replace a file</td></tr>
+      <tr><td>shell</td><td class="ask">ask</td><td>bash (cmd on Windows), 2min default timeout</td></tr>
+      <tr><td>skill</td><td class="allow">allow</td><td>Load a skill body by id</td></tr>
+    </table>
+    <p class="dim" style="margin-top:1rem">Any resource outside the project root forces an <span class="ask">ask</span> even for allow tools.</p>
+  </section>
+
+  <section id="examples">
+    <h2>Examples</h2>
+    <div class="term" id="term" aria-label="lugent terminal session (animated)" aria-live="off"></div>
+  </section>
+
+  <section id="files">
+    <h2>Files</h2>
+    <table class="files">
+      <tr><td>lugent.json</td><td>Project config (wins when present).</td></tr>
+      <tr><td>~/.config/lugent/config.json</td><td>Global config fallback. Providers, default model, <code>{env:VAR}</code> key substitution.</td></tr>
+      <tr><td>~/.local/share/lugent/db.sqlite</td><td>Sessions, messages, permission grants in one SQLite file. <span class="dim">(Windows: %APPDATA%\lugent\db.sqlite)</span></td></tr>
+      <tr><td>.agents/skills/</td><td>Markdown skills, project and user scope; same id → project wins.</td></tr>
+    </table>
+  </section>
+
+  <section id="diagnostics">
+    <h2>Diagnostics</h2>
+    <p><span class="flag">Ctrl+C</span> once aborts the running turn (and denies a pending permission); twice exits. Provider reported <code>OFF</code> means the health check (<code>GET /models</code>, 8s timeout) failed: check that <code>baseUrl</code> includes <code>/v1</code>.</p>
+  </section>
+
+  <section id="see-also">
+    <h2>See Also</h2>
+    <p><a href="https://github.com/luizrgf2/lugent">github.com/luizrgf2/lugent</a> — source, README, architecture docs. <span class="dim">That's the whole manual.</span></p>
+    <a class="cta" href="https://github.com/luizrgf2/lugent">Clone it →</a>
+  </section>
+
+  <footer>
+    <span>lugent 0.1.0</span>
+    <span><a href="https://github.com/luizrgf2/lugent">source</a> · terminal-native, by design</span>
+  </footer>
+
+</main>
+
+<script>
+(function(){
+  var term = document.getElementById('term');
+  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // one authored moment: the session types itself, then loops
+  var script = [
+    {c:'p', t:'$ '},
+    {c:'u', t:'bun src/main.ts', type:true},
+    {c:'g', t:''},
+    {c:'g', t:'┌─ lugent ─────────────────┐'},
+    {c:'g', t:'│ session ses_676f…        │'},
+    {c:'g', t:'│ 9router · glm/glm-5.2    │'},
+    {c:'g', t:'└──────────────────────────┘'},
+    {c:'g', t:''},
+    {c:'u', t:'> read src/core/loop.ts', type:true},
+    {c:'g', t:'  ▸ read  src/core/loop.ts'},
+    {c:'g', t:'  ⠙ thinking…'},
+    {c:'g', t:'  done — 41 lines, 0 dependencies'},
+
+    {c:'g', t:''},
+    {c:'u', t:'> /exit', type:true}
+  ];
+
+  function span(cls, text){
+    var s = document.createElement('span');
+    s.className = cls; s.textContent = text + '\n';
+    return s;
+  }
+
+  function renderAll(){
+    script.forEach(function(l){ term.appendChild(span(l.c, l.t)); });
+  }
+
+  if(reduce){ renderAll(); return; }
+
+  var cursor = document.createElement('span');
+  cursor.className = 'tcar';
+  cursor.setAttribute('aria-hidden','true');
+
+  var started = false;
+  function play(){
+    term.textContent = '';
+    term.appendChild(cursor);
+    var li = 0;
+    function nextLine(){
+      if(li >= script.length){
+        setTimeout(play, 6000);
+        return;
+      }
+      var l = script[li++];
+      if(l.type){
+        var s = span(l.c, '');
+        term.insertBefore(s, cursor);
+        var i = 0;
+        (function typeChar(){
+          if(i < l.t.length){
+            s.textContent = l.t.charAt(i++);
+            setTimeout(typeChar, 34 + Math.random()*46);
+          } else {
+            s.textContent = l.t + '\n';
+            setTimeout(nextLine, l.t.indexOf('/exit') === 0 ? 800 : 420);
+          }
+        })();
+      } else {
+        term.insertBefore(span(l.c, l.t), cursor);
+        setTimeout(nextLine, 160);
+      }
+    }
+    nextLine();
+  }
+
+  if('IntersectionObserver' in window){
+    var io = new IntersectionObserver(function(es){
+      if(es[0].isIntersecting && !started){ started = true; io.disconnect(); play(); }
+    },{threshold:.2});
+    io.observe(term);
+  } else { play(); }
+})();
+</script>
+</body>
+</html>
