@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/lugent.svg" alt="lugent — CLI agent" width="480"></p>
+
 # lugent
 
 A minimal OpenCode-style coding agent. REPL CLI over a pure core library — TypeScript + Bun, zero runtime dependencies.
@@ -62,6 +64,11 @@ In a terminal, `lugent` starts a **full-screen TUI** (React + Ink): scrollable t
 Plain REPL:
 
 ```
+  ▟▙                              ANSI L-mark logo (terminal colors,
+ ▟▛ ▚▖                             gradient from docs/lugent.svg)
+▟▛   ▚▖
+▀▀▀▀▙
+LUGENT
 ┌─ lugent ──────────────┐
 │ session ses_676f…     │      banner on startup
 │ 9router · glm/glm-5.2 │

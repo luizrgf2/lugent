@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 180" width="100%" height="100%">
+  <defs>
+    <!-- Gradiente estilo terminal moderno (Cyan to Emerald) -->
+    <linearGradient id="lugentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F5A0" />
+      <stop offset="100%" stop-color="#00D9F5" />
+    </linearGradient>
+
+    <!-- Brilho sutil para atmosfera cyber/terminal -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Fundo escuro de terminal (opcional / remova se quiser transparente) -->
+  <rect width="600" height="180" rx="16" fill="#0D1117" />
+
+  <!-- Ícone: O prompt '>' estilizado formando a haste e a base do 'L' -->
+  <g transform="translate(45, 30)">
+    <!-- Cursor / Prompt Superior -->
+    <path d="M20 15 L65 55 L20 95" fill="none" stroke="url(#lugentGrad)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)" />
+
+    <!-- Traço horizontal inferior completando o 'L' e evocando o cursor sublinhado '_' -->
+    <path d="M20 115 L105 115" fill="none" stroke="url(#lugentGrad)" stroke-width="14" stroke-linecap="round" filter="url(#glow)" />
+
+    <!-- Ponto do agente / status node -->
+    <circle cx="85" cy="55" r="7" fill="#00F5A0" />
+  </g>
+
+  <!-- Tipografia do Nome: LUGENT -->
+  <text x="180" y="108" font-family="ui-monospace, &#39;JetBrains Mono&#39;, &#39;Fira Code&#39;, Menlo, monospace" font-size="64" font-weight="800" letter-spacing="2" fill="#FFFFFF">
+    LUG<tspan fill="url(#lugentGrad)">ENT</tspan>
+  </text>
+
+  <!-- Badge de Subtítulo estilo CLI -->
+  <rect x="180" y="125" width="95" height="20" rx="4" fill="#161B22" />
+  <text x="188" y="139" font-family="ui-monospace, monospace" font-size="11" font-weight="600" fill="#00F5A0" letter-spacing="1">
+    CLI AGENT
+  </text>
+  <text x="290" y="139" font-family="ui-monospace, monospace" font-size="11" fill="#6E7681">
+    v0.1.0 • ready
+  </text>
+</svg>

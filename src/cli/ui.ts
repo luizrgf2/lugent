@@ -36,6 +36,31 @@ export function red(s: string): string { return tty ? styleText("red", s) : s }
 export function yellow(s: string): string { return tty ? styleText("yellow", s) : s }
 export function cyan(s: string): string { return tty ? styleText("cyan", s) : s }
 
+/**
+ * ANSI logo of the L-mark (mirrors docs/lugent.svg): prompt chevron '>' as the
+ * vertical stroke, base bar as the '_' cursor, dot as the agent node. Colors
+ * sample the SVG gradient (#00F5A0 → #00D9F5); falls back to plain text when
+ * piped. Lines are equal width so the REPL box below aligns.
+ */
+const LOGO_MARK = [
+  "  ▟▙   ",
+  " ▟▛ ▚▖ ",
+  "▟▛   ▚▖",
+  "▀▀▀▀▙  ",
+]
+
+export function logo(): string {
+  const grad = (y: number): string => {
+    const t = y / (LOGO_MARK.length - 1)
+    const mix = (a: number, b: number) => Math.round(a + (b - a) * t)
+    return `38;2;${mix(0x00, 0x00)};${mix(0xf5, 0xd9)};${mix(0xa0, 0xf5)}`
+  }
+  const wordmark = tty ? `\x1b[1m\x1b[38;2;255;255;255mLUG\x1b[0m\x1b[1m\x1b[38;2;0;245;160mENT\x1b[0m` : "LUGENT"
+  return LOGO_MARK.map((l, y) =>
+    tty ? `\x1b[${grad(y)}m${l}\x1b[0m` : l
+  ).join("\n") + "\n" + wordmark
+}
+
 export class Spinner {
   private i = 0
   private timer: ReturnType<typeof setInterval> | null = null

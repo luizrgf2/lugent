@@ -1,5 +1,19 @@
 import { test, expect } from "bun:test"
-import { box, truncate, glyph, frames, padLine } from "./ui"
+import { box, truncate, glyph, frames, padLine, logo } from "./ui"
+
+test("logo renders the L-mark with prompt chevron and cursor dot", () => {
+  const out = logo()
+  const lines = out.split("\n")
+  expect(lines.length).toBeGreaterThanOrEqual(3)
+  expect(lines[0]).toContain("▟▙")         // chevron of the 'L'/prompt mark
+  expect(lines[3]).toContain("▀▀▀")        // base bar (the '_' cursor)
+  expect(lines.at(-1)).toContain("LUGENT") // wordmark (plain when piped)
+})
+
+test("logo mark lines are equal visual width", () => {
+  const lines = logo().split("\n").slice(0, 4)   // the mark block only
+  expect(new Set(lines.map((l) => [...l].length)).size).toBe(1)
+})
 
 test("box wraps lines with borders and title", () => {
   const out = box("lugent", ["one", "two"])

@@ -7,7 +7,7 @@ import type { AppConfig } from "../core/config"
 import type { ToolDef } from "../core/tools/registry"
 import type { SkillMeta } from "../core/types"
 import { parseSlash, parseAnswer } from "./commands"
-import { box, glyph, truncate, dim, cyan, red, Spinner } from "./ui"
+import { box, glyph, truncate, dim, cyan, red, Spinner, logo } from "./ui"
 import { safeBranch, safeAgentsMd } from "./context"
 
 export interface ReplEnv {
@@ -37,6 +37,7 @@ export async function runRepl(env: ReplEnv): Promise<void> {
     return parseAnswer(answer)
   }
 
+  console.log(logo())
   console.log(box("lugent", [
     `session ${session.id.slice(0, 8)}…`,
     `${env.config.defaultProvider} · ${model}`,

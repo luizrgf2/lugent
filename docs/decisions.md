@@ -76,3 +76,8 @@ Cost if wrong: one yolo session can read/write outside the project root without 
 Decision: transcript keeps rendering only a manual window (`clampItems(items, budget, skipBottom)`); PageUp/PageDown move `skipBottom`, streaming growth is compensated by the same delta while scrolled up (view pin), submit snaps to tail. Markdown parse is LRU-cached (300 entries) and the `Markdown` component is `memo`ized.
 Why: opencode-style per-item virtualization needs stable item ids + measured heights; ink has neither cheaply. Line-based clamping reuses the existing tail-clamp, renders O(viewport) regardless of history size, and the parse cache removes the O(n²) streaming re-parse.
 Cost if wrong: cache misses on straddled slices (clamped texts differ per scroll position) re-parse — bounded by the 300-entry LRU; no arbitrary anchor (scroll is page-quantized only).
+
+## 2026-10-23 — logo: SVG in docs + ANSI L-mark in plain REPL only, not the TUI
+Decision: `docs/lugent.svg` is the source of truth (README badge); the plain REPL prints an ANSI truecolor L-mark (`logo()` in `ui.ts`, TTY-gated) above the session box; the full-screen TUI shows no logo.
+Why: terminals can't render SVG without a rasterizer (would break zero-dep); the TUI is viewport-constrained — a logo would eat transcript rows every frame.
+Cost if wrong: TUI users never see the mark in-app (only on GitHub/README); revisit if a splash screen is wanted.
