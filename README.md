@@ -4,6 +4,8 @@
 
 A minimal OpenCode-style coding agent. REPL CLI over a pure core library — TypeScript + Bun, zero runtime dependencies.
 
+**[lugent(1) — landing page](https://luizrgf2.github.io/lugent/)**
+
 ```
 bun src/main.ts
 ```
@@ -44,7 +46,7 @@ At startup each provider gets a health check (`GET /models`, 8s timeout) — unr
 
 ## Usage
 
-In a terminal, `lugent` starts a **full-screen TUI** (React + Ink): scrollable transcript with live model reasoning (dim italic), markdown-rendered answers, tool lines, inline y/n/a permission dialogs, and a braille spinner below the input while the agent loop runs.
+In a terminal, `lugent` starts a **full-screen TUI** (React + Ink): scrollable transcript with live model reasoning (labeled `… pensando` block, indented), markdown-rendered answers (headings, tables, lists), tool lines, inline y/n/a permission dialogs, and a braille spinner below the input while the agent loop runs.
 
 ```
 ╭─ lugent ───────────────────────────╮
