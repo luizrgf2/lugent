@@ -44,4 +44,17 @@ Documentation pattern for this repo: **one small doc per topic, never one big fi
 
 When you create a new doc: single topic, short, and add a trigger row here. If a doc grows past ~150 lines, split it and update this index.
 
+## End-of-iteration doc check
+
+Before each commit (or declaring a task done), diff what changed against the docs and update whatever is stale:
+
+- `git diff --stat` + the commit subject vs the trigger table above
+- New/changed tool, flag, or slash command → `README.md` § Tools / Usage
+- Config field, precedence, or `{env:}` change → `README.md` § Configuration
+- Module added/removed or flow change → `docs/architecture.md` + trigger row here
+- Trade-off accepted or work deliberately deferred → `docs/decisions.md` entry (format in the git-conventions skill)
+- Any user-visible behavior change → `README.md`
+
+No match (internal-only refactor, test tweaks) → state "docs: no update needed" and move on. Doc updates ship in the same commit as the code they describe.
+
 Note: lugent itself loads this file into its system prompt (`safeAgentsMd` in `src/cli/repl.ts`) — it doubles as dogfooded instructions.
