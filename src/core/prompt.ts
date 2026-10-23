@@ -12,10 +12,11 @@ export interface PromptInput {
   agentsMd: string | null
   skills: SkillMeta[]
   tools: { name: string; description: string; schema: unknown }[]
+  agentPrompt?: string   // set when a session agent is selected: replaces SYSTEM_PROMPT
 }
 
 export function buildPrefix(input: PromptInput): string {
-  const parts: string[] = [SYSTEM_PROMPT]
+  const parts: string[] = [input.agentPrompt ?? SYSTEM_PROMPT]
   const env = [`Environment:`, `- cwd: ${input.cwd}`, `- os: ${input.os}`,
     `- git branch: ${input.gitBranch ?? "(none)"}`, `- date: ${input.date}`]
   parts.push(env.join("\n"))

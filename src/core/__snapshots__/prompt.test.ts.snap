@@ -24,3 +24,26 @@ Environment:
 
 - read: Read a file"
 `;
+
+exports[`golden: agent prefix is byte-stable and frozen 1`] = `
+"You are a reviewer. Do not edit files.
+
+Environment:
+- cwd: /home/u/proj
+- os: linux
+- git branch: main
+- date: 2026-10-22
+
+# Project instructions (AGENTS.md)
+
+# Rules
+- run tests
+
+# Skills
+
+- git-release: Git Release — Prepare releases
+
+# Tools
+
+- read: Read a file"
+`;
