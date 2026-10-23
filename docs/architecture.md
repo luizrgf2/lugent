@@ -65,3 +65,25 @@ permission (session_id, tool, resource)   -- "always" grants
 ## Testing
 
 One test file per module plus `src/e2e.test.ts` (full turn: skill advertisement in prefix, tool call, prefix stability across iterations). Golden snapshot: `src/core/__snapshots__/`. The project was built test-first throughout.
+
+## TUI layer
+
+`src/cli/tui/` renders the full-screen interface (React + Ink v8); `src/cli/repl.ts` is the `--plain`/piped fallback. `src/main.ts` picks: TTY stdin+stdout → TUI, anything else → REPL. Shared prompt-building lives in `src/cli/context.ts` (`buildPromptInput`).
+
+```
+provider.chat (SSE)
+  onReasoning(chunk) → TItem "reasoning" (dim italic; display-only, never stored)
+  onToken(chunk)     → TItem "assistant" (markdown-lite: fences, `code`, **bold**, #h1-3)
+  onToolStart        → TItem "tool" (glyph + name + resource)
+  onAsk              → Permissions dialog (y/n/a); Ctrl+C denies and aborts
+```
+
+Files: `app.tsx` (state + turn flow + `runTui`), `status.tsx`, `transcript.tsx`, `input.tsx` (refs mirror state — ink batches keys into one render, stale-closure hazard), `permissions.tsx`, `markdown.ts` (pure parser), `harness.tsx` (test-only renderer).
+
+Provider: `chat(args.onReasoning?)` forwards `delta.reasoning_content` chunks. Not accumulated into `content`, not persisted — replaying a session shows no reasoning (accepted).
+
+Provider injection: `env.makeProvider?(cfg, model)` (tests); default `new Provider(cfg, model)`.
+
+## Testing (TUI)
+
+`harness.tsx` renders through ink's real `render()` with fake stdin/stdout: frames are captured, ANSI-stripped, asserted with `toContain`. Keys are typed one per write (`type("hi\r")`) mirroring raw-mode terminals. `ink-testing-library` declares `ink: ^5` and misbehaves on v8 (triplicated events, stale frames) — do not reintroduce it.

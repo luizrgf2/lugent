@@ -42,6 +42,24 @@ At startup each provider gets a health check (`GET /models`, 8s timeout) — unr
 
 ## Usage
 
+In a terminal, `lugent` starts a **full-screen TUI** (React + Ink): scrollable transcript with live model reasoning (dim italic), markdown-rendered answers, tool lines, and inline y/n/a permission dialogs.
+
+```
+╭─ lugent ───────────────────────────╮
+│ lugent 9router · glm/glm-5.2 · ses │   status: provider · model · session
+╰────────────────────────────────────╯
+> go                                ▏   composer: Enter submits, ↑/↓ history
+  pondering which tool to use…         reasoning (dim, live)
+▸ read src/main.ts                     tool calls
+  all **done**                         answer (markdown-lite)
+```
+
+- **Ctrl+C once** aborts the running turn (and denies a pending permission); **twice** exits.
+- Slash commands (`/exit` etc.) work in plain mode; in the TUI only `/exit` is wired in v1.
+- `--plain` forces the inline REPL below; piped stdin (non-TTY) falls back to it automatically.
+
+Plain REPL:
+
 ```
 ┌─ lugent ──────────────┐
 │ session ses_676f…     │      banner on startup
@@ -57,8 +75,7 @@ At startup each provider gets a health check (`GET /models`, 8s timeout) — unr
 > /exit                       # quit
 ```
 
-- UI is hand-rolled ANSI (`src/cli/ui.ts`, zero deps); colors/spinner auto-disable when output is piped.
-- **Ctrl+C once** aborts the running turn; **twice** exits.
+- UI is hand-rolled ANSI (`src/cli/ui.ts`) in plain mode; colors/spinner auto-disable when output is piped.
 - Permission prompts answer `y` / `n` / `a` (always, session-scoped). Anything else — including Enter — denies.
 - `--db <path>` overrides the database location.
 

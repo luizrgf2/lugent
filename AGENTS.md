@@ -1,6 +1,6 @@
 # AGENTS.md
 
-lugent: minimal OpenCode-style coding agent. TS + Bun, **zero runtime dependencies** (constraint — do not add any). Pure core (`src/core/`, UI-free), thin CLI (`src/cli/`, owns the terminal), entry `src/main.ts`.
+lugent: minimal OpenCode-style coding agent. TS + Bun. **Pure core (`src/core/`) has zero runtime dependencies — do not add any.** The CLI layer may use `react`/`ink` for the TUI (`src/cli/tui/`, decision-logged); the plain REPL (`src/cli/`) stays ANSI-only (`src/cli/ui.ts`).
 
 ## Commands
 
@@ -40,6 +40,7 @@ Documentation pattern for this repo: **one small doc per topic, never one big fi
 | config loading (`config.ts`) | `README.md` § "Configuration" (precedence, `{env:VAR}`) |
 | branch or commit | `.agents/skills/git-conventions/SKILL.md` |
 | `src/cli/ui.ts` (ANSI, box, spinner) | zero-dep: no color/TUI lib; gate all styling on `isTTY` so piped output stays plain; keep pure formatters tested in `ui.test.ts` |
+| `src/cli/tui/*` (Ink TUI) | reasoning is display-only (never persisted); core must not import react/ink; test via `harness.tsx` (ink-testing-library is incompatible with ink v8) |
 | a decision with a trade-off | append to `docs/decisions.md` (format in the skill above) |
 | a request near v1's edge (subagents, MCP, compaction) | `docs/future-features.md` — check the trigger before designing |
 
