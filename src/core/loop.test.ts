@@ -271,3 +271,23 @@ test("onReasoning is forwarded to provider.chat", async () => {
   await runTurn(deps(provider, { onReasoning: noop }), sessionId, "hi")
   expect(seen).toBe(noop)
 })
+
+test("yolo mode runs ask tools without ever calling onAsk", async () => {
+  const askTool: ToolDef = {
+    name: "edit", description: "edit", schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+    permission: "ask", execute: async (a) => ({ output: `edited:${a.path}` }),
+  }
+  let calls = 0
+  const provider = {
+    chat: async () => {
+      if (calls++ === 0) return { content: "", toolCalls: [{ id: "t1", name: "edit", args: { path: `${DIR}/a.txt` } }] }
+      return { content: "done", toolCalls: [] }
+    },
+  }
+  let asked = 0
+  const r = await runTurn(deps(provider, { tools: [askTool], yolo: true, onAsk: async () => { asked++; return "n" as const } }), sessionId, "go")
+  expect(r.error).toBeUndefined()
+  expect(asked).toBe(0)                       // yolo short-circuits the ask
+  const msgs = store.getMessages(sessionId)
+  expect(msgs.some(m => m.role === "tool" && m.content?.includes("edited:"))).toBe(true)
+})

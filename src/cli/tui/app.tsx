@@ -5,11 +5,13 @@ import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
 import { buildPromptInput } from "../context"
 import { Status } from "./status"
-import { Transcript, clampItems, type TItem } from "./transcript"
+import { Transcript, clampItems, itemsFromHistory, type TItem } from "./transcript"
 import { Input } from "./input"
 import { Permissions } from "./permissions"
 import { ModelPicker } from "./model-picker"
 import { SkillList } from "./skill-list"
+import { PermissionMode } from "./permission-mode"
+import { SessionPicker } from "./session-picker"
 
 export type TuiEnv = ReplEnv & {
   offProviders: string[]
@@ -38,11 +40,14 @@ export function App(props: { env: TuiEnv }) {
   const askChainRef = useRef<Promise<void>>(Promise.resolve())
   const askRef = useRef<{ tool: string; resource: string; resolve(a: "y" | "n" | "a"): void } | null>(null)
   const [abort, setAbort] = useState<AbortController | null>(null)
-  const [session] = useState(() => env.store.createSession(env.config.defaultProvider, env.config.defaultModel))
+  const [session, setSession] = useState(() => env.store.createSession(env.config.defaultProvider, env.config.defaultModel, env.projectRoot))
   const [provider, setProvider] = useState(env.config.defaultProvider)
   const [model, setModel] = useState(env.config.defaultModel)
-  const [overlay, setOverlay] = useState<null | "model" | "skills">(null)
-  const overlayRef = useRef<null | "model" | "skills">(null)
+  const [overlay, setOverlay] = useState<null | "model" | "skills" | "resume" | "permissions">(null)
+  const overlayRef = useRef<null | "model" | "skills" | "resume" | "permissions">(null)
+  const [yolo, setYolo] = useState(false)
+  // Ref mirrors state: submit reads it — ink batching can make state stale.
+  const yoloRef = useRef(false)
   const { stdout } = useStdout()
 
   const closeOverlay = () => { overlayRef.current = null; setOverlay(null) }
@@ -70,6 +75,14 @@ export function App(props: { env: TuiEnv }) {
       if (text.trim() === "/exit") return exit()
       if (text.trim() === "/model") { overlayRef.current = "model"; setOverlay("model"); return }
       if (text.trim() === "/skills") { overlayRef.current = "skills"; setOverlay("skills"); return }
+      if (text.trim() === "/permissions") {
+        if (!busy) { overlayRef.current = "permissions"; setOverlay("permissions") }
+        return
+      }
+      if (text.trim() === "/resume") {
+        if (!busy) { overlayRef.current = "resume"; setOverlay("resume") }
+        return
+      }
       setItems(is => [...is, { kind: "error", text: `${text} — use --plain mode for slash commands in v1` }])
       return
     }
@@ -91,6 +104,7 @@ export function App(props: { env: TuiEnv }) {
       tools: env.tools,
       promptInput: buildPromptInput(env, model),
       signal: ac.signal,
+      yolo: yoloRef.current,
       onReasoning: t => { reasoning += t; setItems(is => patchTail(is, { kind: "reasoning", text: reasoning })) },
       onToken: t => { answer += t; setItems(is => patchTail(is, { kind: "assistant", text: answer })) },
       onToolStart: (name, resource) => setItems(is => [...is, { kind: "tool", tool: name, text: resource }]),
@@ -115,7 +129,7 @@ export function App(props: { env: TuiEnv }) {
 
   return (
     <Box flexDirection="column">
-      <Status provider={provider} model={model} sessionId={session.id} off={env.offProviders} busy={busy} />
+      <Status provider={provider} model={model} sessionId={session.id} off={env.offProviders} busy={busy} yolo={yolo} />
       <Box flexDirection="column">
         <Transcript items={visible} />
       </Box>
@@ -139,6 +153,31 @@ export function App(props: { env: TuiEnv }) {
             onClose={closeOverlay} />
         : overlay === "skills"
           ? <SkillList skills={env.skills} onClose={closeOverlay} />
+          : overlay === "resume"
+            ? <SessionPicker
+                sessions={env.store.listSessions(env.projectRoot)}
+                onClose={closeOverlay}
+                onPick={id => {
+                  closeOverlay()
+                  if (id === session.id) return
+                  const row = env.store.loadSession(id)
+                  if (!row) return
+                  setSession({ ...row, id })
+                  setProvider(row.provider)
+                  if (row.model) setModel(row.model)
+                  setItems(itemsFromHistory(env.store.getMessages(id)).map(it =>
+                    it.kind === "assistant" ? { ...it, kind: "system" } : it))
+                }} />
+          : overlay === "permissions"
+            ? <PermissionMode
+                current={yolo ? "yolo" : "normal"}
+                onPick={m => {
+                  closeOverlay()
+                  yoloRef.current = m === "yolo"
+                  setYolo(m === "yolo")
+                  setItems(is => [...is, { kind: "system", text: m === "yolo" ? "permission mode: yolo (auto-approve)" : "permission mode: normal" }])
+                }}
+                onClose={closeOverlay} />
           : ask
             ? <Permissions tool={ask.tool} resource={ask.resource} onAnswer={a => { askRef.current = null; ask.resolve(a); setAsk(null) }} />
             : <Input
@@ -148,6 +187,8 @@ export function App(props: { env: TuiEnv }) {
                   { cmd: "exit", desc: "quit lugent" },
                   { cmd: "model", desc: "switch provider/model" },
                   { cmd: "skills", desc: "browse skills" },
+                  { cmd: "resume", desc: "resume a past session" },
+                  { cmd: "permissions", desc: "permission mode (normal/yolo)" },
                 ]} />}
     </Box>
   )

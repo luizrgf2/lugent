@@ -79,6 +79,14 @@ test("arrows navigate suggestions, not history, while open", async () => {
   expect(got).toEqual(["older", "/exit"])
 })
 
+test("enter picks the highlighted suggestion, not the raw prefix", async () => {
+  const got: string[] = []
+  const { type } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} completions={CMDS} />)
+  type("/\u001b[B\r")   // open list, ↓ to /model, enter
+  await new Promise(r => setTimeout(r, 30))
+  expect(got).toEqual(["/model"])
+})
+
 test("enter submits while suggestions open, box clears", async () => {
   const got: string[] = []
   const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} completions={CMDS} />)

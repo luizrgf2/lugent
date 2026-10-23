@@ -18,6 +18,7 @@ export interface LoopDeps {
   onReasoning?: (t: string) => void
   onToolStart?: (name: string, resource: string) => void
   onAsk: (tool: string, resource: string) => Promise<"y" | "n" | "a">
+  yolo?: boolean   // auto-approve every tool call, including outside-project ones
 }
 
 function msg(partial: Partial<Message> & { sessionId: string; role: Message["role"] }): Message {
@@ -97,9 +98,10 @@ export async function runTurn(deps: LoopDeps, sessionId: string, userText: strin
         return
       }
       const resource = resourceFor(call)
-      const decision = isOutsideProject(resource, deps.promptInput.cwd)
-        ? (store.hasPermission(sessionId, tool.name, resource) ? "allow" : "ask")
-        : checkPermission(store, sessionId, tool, resource)
+      const decision = deps.yolo ? "allow"
+        : isOutsideProject(resource, deps.promptInput.cwd)
+          ? (store.hasPermission(sessionId, tool.name, resource) ? "allow" : "ask")
+          : checkPermission(store, sessionId, tool, resource)
       if (decision === "ask") {
         const answer = await deps.onAsk(call.name, resource)
         if (answer === "a") store.grantPermission(sessionId, tool.name, resource)

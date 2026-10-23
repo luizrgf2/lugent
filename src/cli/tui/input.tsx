@@ -33,7 +33,9 @@ export function Input(p: {
     if (key.ctrl || key.meta) return                 // ctrl/meta combos never type characters
     const open = matchesFor(vRef.current)
     if (key.return) {
-      const t = vRef.current.trim()
+      // Suggestions open: enter picks the highlighted one — submitting the raw
+      // prefix would send a bare "/" when the user only typed the slash.
+      const t = (open.length ? "/" + open[Math.min(selRef.current, open.length - 1)].cmd : vRef.current).trim()
       if (!t) return
       p.onSubmit(t)
       historyRef.current = [...historyRef.current, t].slice(-50)
