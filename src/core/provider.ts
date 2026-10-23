@@ -112,7 +112,7 @@ export class Provider {
     try {
       const res = await this.fetchFn(`${this.cfg.baseUrl}/models`, {
         headers: this.headers(),
-        signal: AbortSignal.timeout(3000),
+        signal: AbortSignal.timeout(8000),
       })
       return res.ok
     } catch {
