@@ -33,3 +33,12 @@ test("resourceFor picks path/command/id in order", () => {
   expect(resourceFor({ id: "1", name: "skill", args: { id: "rel" } })).toBe("rel")
   expect(resourceFor({ id: "1", name: "glob", args: {} })).toBe("*")
 })
+
+test("agent override replaces the tool default, grants still win", () => {
+  const tool = { name: "edit", description: "", schema: { type: "object", properties: {} }, permission: "ask" as const, execute: async () => ({ output: "" }) }
+  const agent = { id: "a", prompt: "p", permissions: { edit: "allow" as const } }
+  expect(checkPermission(store, sessionId, tool, "x")).toBe("ask")
+  expect(checkPermission(store, sessionId, tool, "x", agent)).toBe("allow")
+  store.grantPermission(sessionId, "edit", "x")
+  expect(checkPermission(store, sessionId, tool, "x", agent)).toBe("allow")
+})

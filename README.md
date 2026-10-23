@@ -41,12 +41,13 @@ lugent reads the **first file found** — no merging between the two:
 | `providers.<name>.apiKey` | Optional. `{env:VAR}` is substituted at load; unknown vars become `""` |
 | `defaultProvider` | Key into `providers` used at startup |
 | `defaultModel` | Model id sent as `model` on every request |
+| `defaultAgent` | Optional agent id selected at startup. Defaults to `build`; unknown id → warning, then `build` |
 
 At startup each provider gets a health check (`GET /models`, 8s timeout) — unreachable ones are reported as `OFF` but lugent still starts.
 
 ## Usage
 
-In a terminal, `lugent` starts a **full-screen TUI** (React + Ink): scrollable transcript with live model reasoning (labeled `… pensando` block, indented), markdown-rendered answers (headings, tables, lists), tool lines, inline y/n/a permission dialogs, and a braille spinner below the input while the agent loop runs.
+In a terminal, `lugent` starts a **full-screen TUI** (React + Ink): scrollable transcript (items separated by blank lines, answers indented) with live model reasoning (labeled `… pensando` block, indented), markdown-rendered answers (headings, tables, lists), tool lines, inline y/n/a permission dialogs, and a braille spinner below the input while the agent loop runs.
 
 ```
 ╭─ lugent ───────────────────────────╮
@@ -59,8 +60,8 @@ In a terminal, `lugent` starts a **full-screen TUI** (React + Ink): scrollable t
 ```
 
 - **Ctrl+C once** aborts the running turn (and denies a pending permission); **twice** exits.
-- **PageUp/PageDown** scroll the transcript (window = one page). Scrolling up during streaming pins the view — new content grows below without jumping the screen; submitting a new message snaps back to the tail.
-- Slash commands: `/exit` quits; `/model` opens a two-level picker (provider → live model list via `listModels()`, `↑/↓`+Enter, Esc cancels, Ctrl+C closes); `/skills` browses loaded skills; `/resume` picks a past session of this directory (replays its transcript, next turn continues it — not a fork); `/permissions` toggles normal/yolo (yolo auto-approves every tool call, shown in the status bar). Typing `/` in the composer shows an autocomplete box — it filters as you type, `↑/↓` move, Enter or Tab completes. Others work in `--plain` mode.
+- **PageUp/PageDown** scroll the transcript (window = one page). Scrolling up during streaming pins the view — new content grows below without jumping the screen; submitting a new message snaps back to the tail. Scrolling past the very top keeps the oldest lines on screen (the view is never blank).
+- Slash commands: `/exit` quits; `/model` opens a two-level picker (provider → live model list via `listModels()`, `↑/↓`+Enter, Esc cancels, Ctrl+C closes); `/skills` browses loaded skills; `/resume` picks a past session of this directory (replays its transcript, next turn continues it — not a fork); `/permissions` toggles normal/yolo (yolo auto-approves every tool call, shown in the status bar); `/agent` opens the agent picker — the chosen profile's prompt, model and toolset apply from the next turn, and the status bar shows the active agent (`build` by default). Typing `/` in the composer shows an autocomplete box — it filters as you type, `↑/↓` move, Enter or Tab completes. Others work in `--plain` mode.
 - `--plain` forces the inline REPL below; piped stdin (non-TTY) falls back to it automatically.
 - **Image attachments**: mention a file with `@path/to.png` in your message (`.png` `.jpg` `.jpeg` `.gif` `.webp`, ≤20 MB, relative to the project root). It is sent to the model as an OpenAI vision `image_url` part — works with any multimodal model behind an OpenAI-compatible endpoint. Unresolvable markers stay literal text.
 
@@ -130,6 +131,52 @@ Using skills in a session:
 - **Force one:** mention the id in your message ("use skill git-release to …").
 - **Browse:** TUI `/skills` lists what is loaded (read-only, ↑/↓+Esc); plain REPL `/skills` lists ids. Toggling skills on/off is not implemented — every loaded skill is active in every session (selector design deferred, see `docs/future-features.md`).
 
+## Agents
+
+An agent is a named profile — system prompt, model, tool allowlist, permission overrides — defined in markdown, same shape as skills:
+
+```
+.agents/agents/reviewer.md         → id "reviewer"
+.agents/agents/team/audit.md       → id "team/audit" (nested path is the id)
+~/.agents/agents/reviewer.md       → user scope; project wins on the same id
+```
+
+### Built-in agents
+
+Two agents are always present, in every install (inspired by OpenCode's pair, adapted: no rule engine, no plan files):
+
+| Id | Prompt | Tools | Permissions |
+| --- | --- | --- | --- |
+| `build` | the base system prompt | all | tool defaults |
+| `plan` | "plan mode": explore and design, no file changes | all but `edit`/`write` | `{edit: deny, write: deny}` |
+
+Built-ins carry display colors (`build` magenta, `plan` yellow); the TUI context line — fixed above the input — shows a yellow `§ AGENTS.md loaded` when a project `AGENTS.md` was loaded, plus `· agent <id>` in the agent's color.
+
+`build` is the startup default, so there is always a way back to a normal session (`/agent build`). `plan` can read, search and run shell commands — shell stays permission-controlled, as in OpenCode — it just cannot modify files. Both load **first**, so a file with the same id (user or project) overrides the built-in without removing it: drop `.agents/agents/plan.md` to give your own plan agent.
+
+```markdown
+---
+description: Reviews changes read-only
+color: cyan
+model: 9router/glm-5.2
+tools: [read, glob, grep]
+permissions: {shell: ask}
+---
+You are a code reviewer. Report findings with file and line references.
+```
+
+| Field | Meaning | Default when absent |
+| --- | --- | --- |
+| `description` | shown by `/agent` | none |
+| `color` | TUI display color for the agent: an ink color name (`red`, `cyan`…) or `#rrggbb`; display-only, invalid warns and uses the default | `magenta` (build's) |
+| `model` | `provider/model`, both required — provider must exist in the config | inherit the session's |
+| `tools` | tool ids sent to the model; anything else is invisible to it — a `tools` key that parses to nothing (typo, block-style YAML) fails closed to **no** tools, with a warning | all tools |
+| `permissions` | per-tool `allow` / `ask` / `deny`; `deny` also removes the tool | tool default |
+
+The body is the agent's system prompt: it **replaces** the base prompt, and AGENTS.md plus the skills advertisement are still added on top. A permission override replaces the tool's default — a session `always` grant still wins over it, and the outside-project guard still forces an ask.
+
+Usage: `/agent` lists loaded agents (`build` and `plan` plus your file agents), `/agent reviewer` switches. Switching works mid-session — history is kept and the next turn runs with the new prompt, model and toolset; the switch line confirms provider/model/toolset, and the `# Tools` section of the prompt is filtered to match. An agent's `model` applies at startup (`defaultAgent`) and on `/resume`, not only when switched to. `/resume` restores the agent together with provider and model; `defaultAgent` picks the startup agent and defaults to `build` — an unknown id warns and falls back to `build`. Because `build` reuses the base prompt, the default system prefix stays byte-identical to a session with no agent (and sessions created before agents existed keep the base prompt). Bad frontmatter never breaks startup: an empty body drops that agent, and an unknown tool id or a `model` without `provider/` warns and falls back.
+
 ## Permissions & yolo
 
 Every tool has a default (`allow` / `ask`, table above). During a turn the model may trigger an inline dialog:
@@ -152,6 +199,6 @@ Sessions, messages and permission grants live in one SQLite file:
 bun test
 ```
 
-72 tests, including a golden snapshot pinning the system prompt byte-for-byte (provider prefix-cache stability) and an end-to-end turn with tool calls.
+The suite includes a golden snapshot pinning the system prompt byte-for-byte (provider prefix-cache stability) and an end-to-end turn with tool calls.
 
 Out-of-scope features and their triggers: [docs/future-features.md](docs/future-features.md) · Architecture: [docs/architecture.md](docs/architecture.md)

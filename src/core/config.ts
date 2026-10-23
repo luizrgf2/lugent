@@ -6,6 +6,7 @@ export interface AppConfig {
   providers: Record<string, ProviderConfig>
   defaultProvider: string
   defaultModel: string
+  defaultAgent?: string
 }
 
 export function subEnv(v: string): string {
@@ -26,5 +27,6 @@ export function loadConfig(root: string, globalPath = `${homedir()}/.config/luge
     providers,
     defaultProvider: raw.defaultProvider ?? "",
     defaultModel: raw.defaultModel ?? "",
+    defaultAgent: raw.defaultAgent,
   }
 }

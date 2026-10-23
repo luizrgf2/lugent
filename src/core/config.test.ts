@@ -49,4 +49,22 @@ describe("loadConfig", () => {
     rmSync(dir, { recursive: true, force: true })
     rmSync(global, { force: true })
   })
+
+  test("reads defaultAgent", () => {
+    const dir = `/tmp/opencode/cfg-agent-${Date.now()}`
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(`${dir}/lugent.json`, JSON.stringify({
+      providers: {}, defaultProvider: "", defaultModel: "", defaultAgent: "reviewer",
+    }))
+    expect(loadConfig(dir).defaultAgent).toBe("reviewer")
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("missing defaultAgent is undefined", () => {
+    const dir = `/tmp/opencode/cfg-noagent-${Date.now()}`
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(`${dir}/lugent.json`, JSON.stringify({ providers: {}, defaultProvider: "", defaultModel: "" }))
+    expect(loadConfig(dir).defaultAgent).toBeUndefined()
+    rmSync(dir, { recursive: true, force: true })
+  })
 })

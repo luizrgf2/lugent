@@ -39,6 +39,27 @@ test("null AGENTS.md skips section without blank residue", () => {
   expect(p).not.toContain("AGENTS.md")
 })
 
+test("agent prompt replaces the base prompt, later sections keep order", () => {
+  const p = buildPrefix({ ...input, agentPrompt: "You are a reviewer. Do not edit files." })
+  expect(p).toContain("You are a reviewer. Do not edit files.")
+  expect(p).not.toContain("You are lugent")
+  expect(p.indexOf("You are a reviewer.")).toBeLessThan(p.indexOf("Environment:"))
+  expect(p.indexOf("Environment:")).toBeLessThan(p.indexOf("# Rules"))
+  expect(p.indexOf("# Rules")).toBeLessThan(p.indexOf("git-release"))
+  expect(p.indexOf("git-release")).toBeLessThan(p.indexOf("- read:"))
+})
+
+test("golden: agent prefix is byte-stable and frozen", () => {
+  const withAgent = { ...input, agentPrompt: "You are a reviewer. Do not edit files." }
+  const a = buildPrefix(withAgent)
+  expect(a).toBe(buildPrefix(withAgent))
+  expect(a).toMatchSnapshot()
+})
+
+test("absent agentPrompt keeps the base prompt", () => {
+  expect(buildPrefix(input)).toContain("You are lugent")
+})
+
 test("buildMessages maps history roles to wire format", () => {
   const history: Message[] = [
     { id: "1", sessionId: "s", role: "user", content: "hi", createdAt: "2026-01-01T00:00:00Z" },

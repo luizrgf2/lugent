@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test"
-import { rmSync } from "node:fs"
+import { rmSync, mkdtempSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import { App } from "./app"
 import { renderTui } from "./harness"
 import { Store } from "../../core/store"
@@ -13,11 +14,21 @@ export function fakeEnv(over: Record<string, unknown> = {}): any {
     config: { defaultProvider: "9router", defaultModel: "glm/glm-5.2", providers: { "9router": { baseUrl: "http://x/v1" }, "ollama": { baseUrl: "http://y/v1" } } },
     tools: [],
     skills: [],
+    agents: [],
     projectRoot: "/tmp/opencode",
     store: new Store(db),
     offProviders: [],
     ...over,
   }
+}
+
+const CARET = "▏"   // composer caret: rendered only while no turn is running
+
+/** Polls until `cond` holds — keys typed during a turn are dropped, so tests must wait on state, not on sleeps. */
+async function waitFor(cond: () => boolean, ms = 3000) {
+  const t0 = Date.now()
+  while (!cond() && Date.now() - t0 < ms) await new Promise(r => setTimeout(r, 5))
+  expect(cond()).toBe(true)
 }
 
 test("app skeleton renders header and empty transcript", async () => {
@@ -130,50 +141,60 @@ test("pageUp scrolls transcript up; pageDown scrolls back; typing resets to tail
 })
 
 test("pageUp mid-stream pins the view: growth does not jump it back to the tail", async () => {
+  // The provider parks after 20 lines, so the pageUp is guaranteed to land
+  // mid-stream without depending on token timing.
+  let release: () => void = () => {}
+  const gate = new Promise<void>(r => { release = r })
   const prov = {
     chat: async (a: any) => {
-      for (let i = 0; i < 60; i++) {
-        a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
-        await new Promise(r => setTimeout(r, 4))
-      }
+      for (let i = 0; i < 20; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
+      await gate
+      for (let i = 20; i < 60; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
       return { content: "", toolCalls: [] }
     },
   }
   const env = fakeEnv({ tools: [], makeProvider: () => prov })
   const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
-  await new Promise(r => setTimeout(r, 30))
+  const idle = () => lastFrame().includes(CARET)
+
+  await waitFor(idle)
   type("go\r")
-  // wait until ~20 lines have streamed, then scroll up
-  const t0 = Date.now()
-  while (!lastFrame().includes("line-20") && Date.now() - t0 < 3000) await new Promise(r => setTimeout(r, 10))
-  await new Promise(r => setTimeout(r, 30))
-  type("\x1b[5~")
-  const pinned = lastFrame()
-  await new Promise(r => setTimeout(r, 500))   // stream finishes (60 lines)
+  await waitFor(() => lastFrame().includes("line-19"))   // the first 20 lines are on screen
+  type("\x1b[5~")                                        // pageUp, while the stream is parked
+  release()                                              // 40 more lines stream in under the pin
+  await waitFor(idle)                                    // the turn finished
   const f = lastFrame()
-  expect(pinned).toContain("line-1") || expect(pinned).toContain("line-0")   // sanity: not at tail
-  expect(f).not.toContain("line-59")           // still pinned, tail hidden
-  expect(f).toContain("line-")                 // view content present
+  expect(f).not.toContain("line-59")                     // still pinned: the tail stayed hidden
+  expect(f).toContain("line-")                           // and the view is not blank
 })
 
-test("ctrl+c on a later turn aborts instead of exiting (counter resets per turn)", async () => {  const hanging = {
-    chat: (a: any) => new Promise((_, rej) => a.signal?.addEventListener("abort", () => rej(new Error("aborted")))),
+test("ctrl+c on a later turn aborts instead of exiting (counter resets per turn)", async () => {
+  let calls = 0
+  const provider = {
+    chat: (a: any) => {
+      calls++
+      // The first turn hangs until ctrl+c aborts it; later turns finish at once.
+      if (calls === 1) return new Promise((_, rej) => a.signal?.addEventListener("abort", () => rej(new Error("aborted"))))
+      return Promise.resolve({ content: "done", toolCalls: [] })
+    },
   }
-  const ok = { chat: async () => ({ content: "done", toolCalls: [] }) }
-  let useHanging = true
-  const env = fakeEnv({ tools: [], makeProvider: () => (useHanging ? hanging : ok) })
-  const { type, lastFrame, waitUntilExit } = renderTui(<App env={env} />)
-  await new Promise(r => setTimeout(r, 30))
+  const env = fakeEnv({ tools: [], makeProvider: () => provider })
+  const { type, lastFrame, waitUntilExit } = renderTui(<App env={env} />, { rows: 30 })
+  // The composer ignores keys while a turn runs and the caret marks idle, so the
+  // test waits on those states instead of sleeping a fixed amount.
+  const idle = () => lastFrame().includes(CARET)
+
+  await waitFor(idle)
   type("turn1\r")
-  await new Promise(r => setTimeout(r, 60))
+  await waitFor(() => !idle())       // turn 1 is running
   type("\x03")                       // abort turn 1
-  await new Promise(r => setTimeout(r, 60))
-  useHanging = false
-  type("turn2\r")                    // complete a fresh turn
-  await new Promise(r => setTimeout(r, 80))
-  type("\x03")                       // single ctrl+c: must abort-nothing, NOT exit
-  await new Promise(r => setTimeout(r, 80))
-  const exited = await Promise.race([waitUntilExit().then(() => true), new Promise(r => setTimeout(() => r(false), 150))])
+  await waitFor(idle)                // the turn unwound
+  expect(calls).toBe(1)
+
+  type("turn2\r")                    // a fresh turn resets the ctrl+c counter
+  await waitFor(() => calls === 2)   // turn 2 started → submit already reset the counter (its busy state is too brief to poll)
+  type("\x03")                       // single ctrl+c: abort-nothing, NOT exit
+  const exited = await Promise.race([waitUntilExit().then(() => true), new Promise(r => setTimeout(() => r(false), 200))])
   expect(exited).toBe(false)
   expect(lastFrame()).toContain(">") // composer still alive
 })
@@ -195,6 +216,31 @@ const pathTool = {
   name: "edit", description: "edit", schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
   permission: "ask" as const, execute: async () => ({ output: "edited" }),
 }
+
+test("text before tool rounds is not duplicated by later rounds", async () => {
+  const allowTool = { ...pathTool, permission: "allow" as const }
+  let calls = 0
+  const provider = {
+    chat: async (a: any) => {
+      if (calls++ === 0) {
+        a.onToken?.("Vou ler o arquivo.\n")
+        return { content: "Vou ler o arquivo.\n", toolCalls: [{ id: "t1", name: "edit", args: { path: "a.ts" } }] }
+      }
+      a.onToken?.("Pronto. Feito.")
+      return { content: "Pronto. Feito.", toolCalls: [] }
+    },
+  }
+  const env = fakeEnv({ tools: [allowTool], makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  await new Promise(r => setTimeout(r, 150))
+  const f = lastFrame()
+  expect(f).toContain("Vou ler o arquivo.")
+  expect(f).toContain("Pronto. Feito.")
+  // duplication bug: round-1 text re-prefixed into the round-2 assistant item
+  expect(f.split("Vou ler o arquivo.").length - 1).toBe(1)
+})
 
 test("two ask tools in one batch: dialogs queue, both resolve, turn completes", async () => {
   let calls = 0
@@ -438,4 +484,99 @@ test("yolo mode: ask tool runs without a permission dialog", async () => {
   await waitFor("✎ edit a.ts")
   await waitFor("done")
   expect(lastFrame()).not.toContain("allow edit")     // no dialog ever appeared
+})
+
+test("/agent picker: pick switches the profile, status and toolset line follow", async () => {
+  const env = fakeEnv({
+    tools: [{
+      name: "read", description: "Read a file", schema: { type: "object", properties: {} },
+      permission: "allow", execute: async () => ({ output: "" }),
+    }, {
+      name: "shell", description: "Run a command", schema: { type: "object", properties: {} },
+      permission: "ask", execute: async () => ({ output: "" }),
+    }],
+    agents: [{ id: "reviewer", prompt: "review", description: "Reviews read-only", tools: ["read"] }],
+  })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("/agent\r")
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).toContain("choose agent")
+  expect(lastFrame()).toContain("Reviews read-only")
+  type("\r")   // pick the selected (first) agent
+  await new Promise(r => setTimeout(r, 80))
+  const f = lastFrame()
+  expect(f).toContain("agent reviewer")
+  expect(f).toContain("tools: read")     // switch line confirms the toolset result
+  expect(f).not.toContain("tools: read,shell")
+  expect(f).toContain("reviewer")
+})
+
+test("defaultAgent at startup applies the agent's model", async () => {
+  const env = fakeEnv({
+    config: {
+      defaultProvider: "9router", defaultModel: "base-model", defaultAgent: "reviewer",
+      providers: { "9router": { baseUrl: "http://x/v1" }, "ollama": { baseUrl: "http://y/v1" } },
+    },
+    agents: [{ id: "reviewer", prompt: "r", model: { provider: "ollama", model: "rev-model" } }],
+  })
+  const { lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("ollama · rev-model")
+  expect(lastFrame()).toContain("reviewer")
+})
+
+test("resume restores the agent's model, not the session's creation model", async () => {  const env = fakeEnv({ agents: [{ id: "reviewer", prompt: "r", model: { provider: "ollama", model: "rev-model" } }] })
+  const old = env.store.createSession("9router", "glm/glm-5.2", env.projectRoot, "reviewer")
+  env.store.appendMessage({ id: "u1", sessionId: old.id, role: "user", content: "past question", createdAt: new Date(0).toISOString() })
+
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  const waitFor = async (want: string, ms = 3000) => {
+    const t0 = Date.now()
+    while (!lastFrame().includes(want)) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout waiting for "${want}"`)
+      await new Promise(r => setTimeout(r, 20))
+    }
+    await new Promise(r => setTimeout(r, 30))
+  }
+  await new Promise(r => setTimeout(r, 30))
+  type("/resume\r")
+  await waitFor("past question")
+  type("\r")                                  // pick it
+  await waitFor("ollama · rev-model")          // agent's model, not glm/glm-5.2
+  expect(lastFrame()).toContain("reviewer")
+})
+
+test("context line shows AGENTS.md loaded and the current agent, above the input", async () => {
+  const root = mkdtempSync("/tmp/lugent-ctx-")
+  writeFileSync(join(root, "AGENTS.md"), "# rules")
+  const env = fakeEnv({ projectRoot: root, agents: [{ id: "reviewer", color: "cyan", prompt: "r" }] })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("/agent\r")
+  await new Promise(r => setTimeout(r, 80))
+  type("\r")                                  // pick the first listed agent
+  await new Promise(r => setTimeout(r, 80))
+  const f = lastFrame()
+  expect(f).toContain("AGENTS.md loaded")
+  expect(f).toContain("agent reviewer")
+  // fixed: banner stays above the composer in the same frame
+  expect(f.indexOf("AGENTS.md loaded")).toBeLessThan(f.lastIndexOf(">"))
+})
+
+test("no defaultAgent: the session starts on the build agent", async () => {
+  const env = fakeEnv({ agents: [{ id: "build", prompt: "base" }, { id: "plan", prompt: "p" }] })
+  const { lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("build")
+})
+
+test("an unknown defaultAgent falls back to build", async () => {
+  const env = fakeEnv({
+    config: { defaultProvider: "9router", defaultModel: "m", defaultAgent: "ghost", providers: { "9router": { baseUrl: "http://x/v1" } } },
+    agents: [{ id: "build", prompt: "base" }, { id: "plan", prompt: "p" }],
+  })
+  const { lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("build")
 })

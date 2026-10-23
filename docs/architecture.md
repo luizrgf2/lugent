@@ -13,6 +13,7 @@ src/core/
   types.ts                 Message, ToolCall, ChatMsg, SkillMeta, ...
   store.ts                 SQLite (bun:sqlite): sessions, messages, permissions
   skills.ts                .agents/skills loader (user ~/.agents + project) + frontmatter parser
+  agents.ts                .agents/agents loader (markdown profile: prompt, model, tools, permissions) + built-ins (build, plan)
   prompt.ts                system prefix builder + history→wire mapping
   provider.ts              OpenAI-compatible SSE client
   permissions.ts           allow/ask decision, resource extraction
@@ -26,9 +27,10 @@ src/core/
 user input
   → append user message (store)
   → loop:
-      prefix   = buildPrefix(promptInput)          # byte-stable
+      prefix   = buildPrefix(promptInput)          # byte-stable per agent
       history  = cleanHistory(store.getMessages)   # orphan repair
       messages = buildMessages(prefix, history)    # system + wire format
+      tools    = toolsForAgent(allTools, agent)    # agent allowlist minus denied
       res      = provider.chat(messages, tools)    # SSE stream
       if no toolCalls → append assistant text, done
       append assistant message (toolCalls)
@@ -40,13 +42,15 @@ user input
 
 ## Design decisions
 
-**Byte-stable prefix.** The system prompt is rebuilt from immutable inputs every iteration and pinned by a golden snapshot test. Identical bytes across requests let providers reuse their prompt cache — one changing line silently kills caching.
+**Built-in agents.** `BUILTIN_AGENTS` (`build`, `plan`) is hardcoded in `agents.ts` and merged *before* the file scopes, so every install has both and a file with the same id overrides one instead of removing it. `build.prompt` is `SYSTEM_PROMPT` itself — one source of truth, and the default prefix stays byte-identical (the golden snapshot keeps guarding it). `resolveAgent(agents, id)` is the single resolution point: requested id if it exists, else `build` (what `defaultAgent` unset and an unknown id both land on); sessions store the resolved id, and a `null` agent (a session created before agents shipped) keeps the base prompt. New sessions therefore start on `build`, which is also the way back from `plan`.
+
+**Byte-stable prefix.** The system prompt is rebuilt from immutable inputs every iteration and pinned by a golden snapshot test. Identical bytes across requests let providers reuse their prompt cache — one changing line silently kills caching. A selected agent's prompt *replaces* the base prompt and gets its own pinned snapshot, so the prefix is byte-stable per agent; switching agent invalidates the cache once.
 
 **Append-only store, repaired on read.** Messages are never edited after insert. `cleanHistory` normalizes at request time: unanswered `tool_calls` are stripped from assistant messages, results whose call vanished are dropped. This is what survives aborts and crashes — a stored assistant call without its result row would produce an orphan `tool_calls`/`tool` pair in the wire format and 400 the provider.
 
 **SSE fragment accumulation.** Streaming `delta.tool_calls` arrive name-first then arguments in arbitrary chunk splits. Provider accumulates by `index` and concatenates `arguments` before parsing. Malformed JSON arguments stay a raw string — the loop's `validateArgs` turns them into a schema-error tool result so the model can retry, instead of crashing the turn. Events are yielded as they arrive (`parseSSE` is an async generator), so `onToken`/`onReasoning` fire during the stream — never buffered until the end.
 
-**Permissions.** Four layers, first match wins: yolo flag (`runTurn(yolo)` — TUI-only `/permissions` toggle, auto-approves everything including outside-project, runtime state not persisted), tool default (`allow`/`ask`), session-scoped `always` grants in SQLite, and an outside-project guard (absolute/`..`/`~` resources force ask even for allow tools). The outside check is pattern-level — symlink escapes are a known ceiling, not yet audited.
+**Permissions.** Layers, first match wins: yolo flag (`runTurn(yolo)` — TUI-only `/permissions` toggle, auto-approves everything including outside-project, runtime state not persisted), session-scoped `always` grants in SQLite, the outside-project guard (absolute/`..`/`~` resources force ask even for allow tools), the selected agent's per-tool override (`permissions: {tool: allow|ask}`, replacing the registry default), and finally the tool default (`allow`/`ask`). `deny` never reaches a decision — `toolsForAgent` drops the tool from the request, so the model does not see it. The outside check is pattern-level — symlink escapes are a known ceiling, not yet audited.
 
 **Provider.** `stream: true` always; retries up to 3 attempts with exponential backoff; streams are idle-guarded — no bytes for 120s (`idleTimeoutMs`) aborts the read with `stream stalled`, surfaced as a provider error instead of a forever-hung turn; `GET /models` doubles as health check. Works with any OpenAI-compatible `/v1` endpoint.
 
@@ -57,7 +61,7 @@ user input
 ## Schema
 
 ```sql
-session    (id, title, created_at, provider, model, directory, aborted)   -- directory scopes /resume; legacy null rows are excluded
+session    (id, title, created_at, provider, model, agent, directory, aborted)   -- directory scopes /resume; legacy null rows are excluded; agent holds the resolved id (build for new sessions) and null only for rows created before agents shipped, where the base prompt applies; restored by /resume
 message    (id, session_id, role, content, tool_calls, tool_call_id, meta, created_at)
 permission (session_id, tool, resource)   -- "always" grants
 ```
@@ -78,7 +82,7 @@ provider.chat (SSE)
   onAsk              → Permissions dialogs, queued in order (parallel asks would race); y/n/a; Ctrl+C denies + aborts
 ```
 
-Files: `app.tsx` (state + turn flow + `runTui`), `status.tsx` (bar; shows provider/model/session/YOLO), `transcript.tsx` (`itemsFromHistory` maps stored messages back to TItems for `/resume` replay — reasoning is never persisted), `input.tsx` (refs mirror state — ink batches keys into one render, stale-closure hazard; optional `completions` prop renders a slash-command autocomplete box under the composer: prefix-filtered, `↑/↓` move, Tab completes), `permissions.tsx`, `model-picker.tsx` (`/model`: provider list → live `listModels()`, windowed 8 rows, pick updates provider+model state and appends a dim `system` line), `skill-list.tsx` (`/skills`: read-only windowed list of loaded skills), `session-picker.tsx` (`/resume`: windowed session list scoped to the project directory; picking one switches session state, restores provider/model and replays `itemsFromHistory`), `permission-mode.tsx` (`/permissions`: normal/yolo toggle, yolo sets `runTurn(yolo)`), `markdown.ts` (pure parser), `harness.tsx` (test-only renderer).
+Files: `app.tsx` (state + turn flow + `runTui`), `status.tsx` (bar; shows provider/model/session/YOLO, plus the agent id — always set: `build` by default), `transcript.tsx` (`itemsFromHistory` maps stored messages back to TItems for `/resume` replay — reasoning is never persisted), `input.tsx` (refs mirror state — ink batches keys into one render, stale-closure hazard; optional `completions` prop renders a slash-command autocomplete box under the composer: prefix-filtered, `↑/↓` move, Tab completes), `permissions.tsx`, `model-picker.tsx` (`/model`: provider list → live `listModels()`, windowed 8 rows, pick updates provider+model state and appends a dim `system` line), `skill-list.tsx` (`/skills`: read-only windowed list of loaded skills), `agent-picker.tsx` (`/agent`: windowed agent list with descriptions; picking switches the profile and persists it via `store.setAgent`), `session-picker.tsx` (`/resume`: windowed session list scoped to the project directory; picking one switches session state, restores provider/model and replays `itemsFromHistory`), `permission-mode.tsx` (`/permissions`: normal/yolo toggle, yolo sets `runTurn(yolo)`), `markdown.ts` (pure parser), `harness.tsx` (test-only renderer).
 
 Provider: `chat(args.onReasoning?)` forwards `delta.reasoning_content` chunks. Not accumulated into `content`, not persisted — replaying a session shows no reasoning (accepted).
 
