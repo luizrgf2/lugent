@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test"
 import { renderTui } from "./harness"
-import { Status } from "./status"
+import { Status, Spinner } from "./status"
 import { Transcript } from "./transcript"
 
 test("status shows provider, model, short session, OFF warn", () => {
@@ -29,6 +29,21 @@ test("status busy shows working indicator", () => {
     <Status provider="p" model="m" sessionId="ses_12345678-abc" off={[]} busy={true} />
   )
   expect(lastFrame()).toContain("working")
+})
+
+test("spinner hidden when idle, animates while busy", async () => {
+  const idle = renderTui(<Spinner busy={false} />)
+  expect(idle.lastFrame()).not.toContain("working…")
+  idle.unmount()
+
+  const { lastFrame, unmount } = renderTui(<Spinner busy={true} />)
+  const a = lastFrame()
+  expect(a).toContain("working…")
+  await new Promise(r => setTimeout(r, 120))   // > one frame tick (80ms)
+  const b = lastFrame()
+  expect(b).toContain("working…")
+  expect(b).not.toBe(a)                        // glyph advanced
+  unmount()
 })
 
 test("transcript renders kinds distinctly", () => {

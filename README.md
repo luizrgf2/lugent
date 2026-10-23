@@ -44,7 +44,7 @@ At startup each provider gets a health check (`GET /models`, 8s timeout) — unr
 
 ## Usage
 
-In a terminal, `lugent` starts a **full-screen TUI** (React + Ink): scrollable transcript with live model reasoning (dim italic), markdown-rendered answers, tool lines, and inline y/n/a permission dialogs.
+In a terminal, `lugent` starts a **full-screen TUI** (React + Ink): scrollable transcript with live model reasoning (dim italic), markdown-rendered answers, tool lines, inline y/n/a permission dialogs, and a braille spinner below the input while the agent loop runs.
 
 ```
 ╭─ lugent ───────────────────────────╮

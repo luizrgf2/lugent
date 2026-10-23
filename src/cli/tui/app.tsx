@@ -4,7 +4,7 @@ import type { ReplEnv } from "../repl"
 import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
 import { buildPromptInput } from "../context"
-import { Status } from "./status"
+import { Status, Spinner } from "./status"
 import { Transcript, clampItems, itemLines, itemsFromHistory, type TItem } from "./transcript"
 import { Input } from "./input"
 import { Permissions } from "./permissions"
@@ -216,6 +216,7 @@ export function App(props: { env: TuiEnv }) {
                   { cmd: "resume", desc: "resume a past session" },
                   { cmd: "permissions", desc: "permission mode (normal/yolo)" },
                 ]} />}
+      <Spinner busy={busy && !ask} />
     </Box>
   )
 }

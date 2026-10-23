@@ -1,4 +1,17 @@
-import { Box, Text } from "ink"
+import { Box, Text, useAnimation } from "ink"
+
+const FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".split("")
+
+export function Spinner(p: { busy: boolean; label?: string }) {
+  const { frame } = useAnimation({ interval: 80, isActive: p.busy })
+  if (!p.busy) return null
+  return (
+    <Box paddingX={2}>
+      <Text color="yellow">{FRAMES[frame % FRAMES.length]} </Text>
+      <Text dimColor>{p.label ?? "working…"}</Text>
+    </Box>
+  )
+}
 
 // Mini L-mark (▟▙) from the ANSI logo / docs/lugent.svg — gradient endpoints
 // as text colors: green chevron, cyan wordmark tail.
