@@ -1,9 +1,8 @@
 import type { ChatMsg, ChatResponse, ToolCall } from "./types"
 import type { ProviderConfig } from "./config"
 
-export async function parseSSE(res: Response): Promise<any[]> {
-  const events: any[] = []
-  if (!res.body) return events
+export async function* parseSSE(res: Response): AsyncGenerator<any> {
+  if (!res.body) return
   const reader = res.body.getReader()
   const dec = new TextDecoder()
   let buf = ""
@@ -18,12 +17,11 @@ export async function parseSSE(res: Response): Promise<any[]> {
       for (const line of block.split("\n")) {
         if (!line.startsWith("data:")) continue
         const payload = line.slice(5).trim()
-        if (payload === "[DONE]") return events
-        try { events.push(JSON.parse(payload)) } catch { /* skip malformed */ }
+        if (payload === "[DONE]") return
+        try { yield JSON.parse(payload) } catch { /* skip malformed */ }
       }
     }
   }
-  return events
 }
 
 export class Provider {
@@ -69,10 +67,9 @@ export class Provider {
           continue
         }
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`)
-        const events = await parseSSE(res)
         let content = ""
         const acc: Record<number, { id: string; name: string; args: string }> = {}
-        for (const ev of events) {
+        for await (const ev of parseSSE(res)) {
           const delta = ev.choices?.[0]?.delta
           if (!delta) continue
           if (typeof delta.content === "string") {

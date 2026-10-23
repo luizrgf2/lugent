@@ -90,3 +90,26 @@ test("provider without reasoning_content never calls onReasoning", async () => {
   await p.chat({ messages: [], tools: [], onReasoning: () => { called = true } })
   expect(called).toBe(false)
 })
+
+test("onToken fires while the stream is still open (real-time, not burst at end)", async () => {
+  // controllable stream: push chunk A, keep stream OPEN, assert onToken already fired
+  let ctrl!: ReadableStreamDefaultController<Uint8Array>
+  const enc = new TextEncoder()
+  const stream = new ReadableStream({ start(c) { ctrl = c } })
+  const res = new Response(stream, { status: 200 })
+  let firstTok = ""
+  let resolveFirst!: () => void
+  const first = new Promise<void>(r => { resolveFirst = r })
+  const p = new Provider({ baseUrl: "http://x/v1" }, "m", (async () => res) as any)
+  const chatP = p.chat({
+    messages: [], tools: [],
+    onToken: t => { if (!firstTok) { firstTok = t; resolveFirst() } },
+  })
+  ctrl.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: "a" } }] })}\n\n`))
+  await Promise.race([first, new Promise(r => setTimeout(r, 300))])
+  expect(firstTok).toBe("a")          // RED today: parseSSE buffers until stream end
+  ctrl.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: "b" } }] })}\n\n`))
+  ctrl.enqueue(enc.encode("data: [DONE]\n\n"))
+  ctrl.close()
+  expect((await chatP).content).toBe("ab")
+})
