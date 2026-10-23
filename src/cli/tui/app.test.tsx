@@ -10,7 +10,7 @@ export function fakeEnv(over: Record<string, unknown> = {}): any {
   const db = `/tmp/opencode/tui-env-${++dbN}.db`
   rmSync(db, { force: true })
   return {
-    config: { defaultProvider: "9router", defaultModel: "glm/glm-5.2", providers: { "9router": { baseUrl: "http://x/v1" } } },
+    config: { defaultProvider: "9router", defaultModel: "glm/glm-5.2", providers: { "9router": { baseUrl: "http://x/v1" }, "ollama": { baseUrl: "http://y/v1" } } },
     tools: [],
     skills: [],
     projectRoot: "/tmp/opencode",
@@ -193,4 +193,45 @@ test("ctrl+c while a queued ask waits ends the turn (no zombie dialog)", async (
   const f = lastFrame()
   expect(f).not.toContain("allow edit")   // dialog gone
   expect(f).toContain(">")                // composer back, turn ended
+})
+
+test("/model picker: provider → model → applied in status and transcript", async () => {
+  const provider = {
+    chat: async (a: any) => { a.onToken?.("ok"); return { content: "ok", toolCalls: [] } },
+    listModels: async () => ["qwen3.5:14b", "glm/glm-5.2"],
+  }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).toContain("ollama")            // provider list up (not in status)
+  type("\r")                                         // enter on 9router (current)
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).toContain("qwen3.5:14b")
+  type("\r")                                         // pick qwen3.5:14b
+  await new Promise(r => setTimeout(r, 60))
+  const f = lastFrame()
+  expect(f).not.toContain("❯")                       // picker closed
+  expect(f).toContain("9router · qwen3.5:14b")       // status updated
+  expect(f).toContain("→ 9router · qwen3.5:14b")     // transcript system line
+})
+
+test("ctrl+c while picker is open closes the picker, app stays alive", async () => {
+  const provider = {
+    chat: async () => ({ content: "ok", toolCalls: [] }),
+    listModels: async () => ["m1"],
+  }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const { type, lastFrame, waitUntilExit } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).toContain("ollama")
+  type("\x03")
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).not.toContain("❯")             // picker gone
+  expect(lastFrame()).toContain(">")                 // composer back
+  const exited = await Promise.race([waitUntilExit().then(() => true), new Promise(r => setTimeout(() => r(false), 150))])
+  expect(exited).toBe(false)
 })

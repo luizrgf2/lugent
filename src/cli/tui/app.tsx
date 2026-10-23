@@ -8,6 +8,7 @@ import { Status } from "./status"
 import { Transcript, clampItems, type TItem } from "./transcript"
 import { Input } from "./input"
 import { Permissions } from "./permissions"
+import { ModelPicker } from "./model-picker"
 
 export type TuiEnv = ReplEnv & {
   offProviders: string[]
@@ -37,11 +38,17 @@ export function App(props: { env: TuiEnv }) {
   const askRef = useRef<{ tool: string; resource: string; resolve(a: "y" | "n" | "a"): void } | null>(null)
   const [abort, setAbort] = useState<AbortController | null>(null)
   const [session] = useState(() => env.store.createSession(env.config.defaultProvider, env.config.defaultModel))
-  const [model] = useState(env.config.defaultModel)
+  const [provider, setProvider] = useState(env.config.defaultProvider)
+  const [model, setModel] = useState(env.config.defaultModel)
+  const [picker, setPicker] = useState(false)
+  const pickerRef = useRef(false)
   const { stdout } = useStdout()
+
+  const closePicker = () => { pickerRef.current = false; setPicker(false) }
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
+      if (pickerRef.current) { closePicker(); return }   // picker open: ctrl+c just closes it
       const n = sigintRef.current + 1
       sigintRef.current = n
       if (n === 1) {
@@ -60,10 +67,11 @@ export function App(props: { env: TuiEnv }) {
     setItems(is => [...is, { kind: "user", text }])
     if (text.startsWith("/")) {
       if (text.trim() === "/exit") return exit()
+      if (text.trim() === "/model") { pickerRef.current = true; setPicker(true); return }
       setItems(is => [...is, { kind: "error", text: `${text} — use --plain mode for slash commands in v1` }])
       return
     }
-    const cfg = env.config.providers[env.config.defaultProvider]
+    const cfg = env.config.providers[provider]
     if (!cfg) {
       setItems(is => [...is, { kind: "error", text: "no provider configured (lugent.json)" }])
       return
@@ -74,10 +82,10 @@ export function App(props: { env: TuiEnv }) {
     setBusy(true)
     let reasoning = ""
     let answer = ""
-    const provider = env.makeProvider?.(cfg, model) ?? new Provider(cfg, model)
+    const chatProvider = env.makeProvider?.(cfg, model) ?? new Provider(cfg, model)
     const r = await runTurn({
       store: env.store,
-      provider,
+      provider: chatProvider,
       tools: env.tools,
       promptInput: buildPromptInput(env, model),
       signal: ac.signal,
@@ -105,13 +113,31 @@ export function App(props: { env: TuiEnv }) {
 
   return (
     <Box flexDirection="column">
-      <Status provider={env.config.defaultProvider} model={model} sessionId={session.id} off={env.offProviders} busy={busy} />
+      <Status provider={provider} model={model} sessionId={session.id} off={env.offProviders} busy={busy} />
       <Box flexDirection="column">
         <Transcript items={visible} />
       </Box>
-      {ask
-        ? <Permissions tool={ask.tool} resource={ask.resource} onAnswer={a => { askRef.current = null; ask.resolve(a); setAsk(null) }} />
-        : <Input disabled={busy} onSubmit={submit} />}
+      {picker
+        ? <ModelPicker
+            providers={Object.keys(env.config.providers)}
+            currentProvider={provider}
+            currentModel={model}
+            loadModels={prov => {
+              const cfg = env.config.providers[prov]
+              if (!cfg) return Promise.resolve([])
+              const pr = env.makeProvider?.(cfg, model) ?? new Provider(cfg, model)
+              return (pr as any).listModels()
+            }}
+            onPick={(prov, m) => {
+              closePicker()
+              setProvider(prov)
+              setModel(m)
+              setItems(is => [...is, { kind: "system", text: `${prov} · ${m}` }])
+            }}
+            onClose={closePicker} />
+        : ask
+          ? <Permissions tool={ask.tool} resource={ask.resource} onAnswer={a => { askRef.current = null; ask.resolve(a); setAsk(null) }} />
+          : <Input disabled={busy} onSubmit={submit} />}
     </Box>
   )
 }

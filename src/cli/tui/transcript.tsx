@@ -2,7 +2,7 @@ import { Box, Text } from "ink"
 import { parseMarkdown, type Seg } from "./markdown"
 import { glyph } from "../ui"
 
-export type TItem = { kind: "user" | "reasoning" | "tool" | "assistant" | "error"; text: string; tool?: string }
+export type TItem = { kind: "user" | "reasoning" | "tool" | "assistant" | "error" | "system"; text: string; tool?: string }
 
 function itemLines(it: TItem): number {
   return it.kind === "assistant" ? Math.max(1, parseMarkdown(it.text).length) : 1
@@ -61,6 +61,7 @@ export function Transcript({ items }: { items: TItem[] }) {
           {it.kind === "tool" && <Text color="yellow">{glyph(it.tool ?? "")} {it.tool} {it.text}</Text>}
           {it.kind === "assistant" && <Markdown text={it.text} />}
           {it.kind === "error" && <Text color="red">error: {it.text}</Text>}
+          {it.kind === "system" && <Text dimColor>→ {it.text}</Text>}
         </Box>
       ))}
     </Box>

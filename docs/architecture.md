@@ -78,7 +78,7 @@ provider.chat (SSE)
   onAsk              → Permissions dialogs, queued in order (parallel asks would race); y/n/a; Ctrl+C denies + aborts
 ```
 
-Files: `app.tsx` (state + turn flow + `runTui`), `status.tsx`, `transcript.tsx`, `input.tsx` (refs mirror state — ink batches keys into one render, stale-closure hazard), `permissions.tsx`, `markdown.ts` (pure parser), `harness.tsx` (test-only renderer).
+Files: `app.tsx` (state + turn flow + `runTui`), `status.tsx`, `transcript.tsx`, `input.tsx` (refs mirror state — ink batches keys into one render, stale-closure hazard), `permissions.tsx`, `model-picker.tsx` (`/model`: provider list → live `listModels()`, windowed 8 rows, pick updates provider+model state and appends a dim `system` line), `markdown.ts` (pure parser), `harness.tsx` (test-only renderer).
 
 Provider: `chat(args.onReasoning?)` forwards `delta.reasoning_content` chunks. Not accumulated into `content`, not persisted — replaying a session shows no reasoning (accepted).
 
