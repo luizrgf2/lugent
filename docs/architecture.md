@@ -48,7 +48,7 @@ user input
 
 **Permissions.** Three layers: tool default (`allow`/`ask`), session-scoped `always` grants in SQLite, and an outside-project guard (absolute/`..`/`~` resources force ask even for allow tools). The outside check is pattern-level — symlink escapes are a known ceiling, not yet audited.
 
-**Provider.** `stream: true` always; retries up to 3 attempts with exponential backoff; `GET /models` doubles as health check. Works with any OpenAI-compatible `/v1` endpoint.
+**Provider.** `stream: true` always; retries up to 3 attempts with exponential backoff; streams are idle-guarded — no bytes for 120s (`idleTimeoutMs`) aborts the read with `stream stalled`, surfaced as a provider error instead of a forever-hung turn; `GET /models` doubles as health check. Works with any OpenAI-compatible `/v1` endpoint.
 
 **Zero dependencies.** `bun:sqlite`, `Bun.spawn`, `Bun.Glob.scanSync` (the async `scan()` is an AsyncGenerator — `Array.from` silently yields `[]`), `fetch`. No SDK, no framework.
 

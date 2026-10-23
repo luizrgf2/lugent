@@ -113,3 +113,21 @@ test("onToken fires while the stream is still open (real-time, not burst at end)
   ctrl.close()
   expect((await chatP).content).toBe("ab")
 })
+
+test("idle stream (no chunks) rejects with a stall error instead of hanging", async () => {
+  const enc = new TextEncoder()
+  let calls = 0
+  const fetchFn = (async () => {
+    calls++
+    const stream = new ReadableStream({
+      start(c) { c.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: "a" } }] })}\n\n`)) },
+    })
+    return new Response(stream, { status: 200 })
+  }) as any
+  const p = new Provider({ baseUrl: "http://x/v1" }, "m", fetchFn)
+  const chatP = p.chat({ messages: [], tools: [], idleTimeoutMs: 60 })
+  await expect(
+    Promise.race([chatP, new Promise((_, rej) => setTimeout(() => rej(new Error("test guard: chat never settled")), 2000))])
+  ).rejects.toThrow(/stalled/i)
+  expect(calls).toBe(3)   // stalls are retried like other chat failures
+})

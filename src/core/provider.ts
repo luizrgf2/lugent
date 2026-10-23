@@ -1,14 +1,29 @@
 import type { ChatMsg, ChatResponse, ToolCall } from "./types"
 import type { ProviderConfig } from "./config"
 
-export async function* parseSSE(res: Response): AsyncGenerator<any> {
+export async function* parseSSE(res: Response, idleMs = 120_000): AsyncGenerator<any> {
   if (!res.body) return
   const reader = res.body.getReader()
   const dec = new TextDecoder()
   let buf = ""
   while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
+    // Idle guard: an upstream that accepts the connection but never sends
+    // bytes would hang the turn forever otherwise.
+    let timeoutId!: ReturnType<typeof setTimeout>
+    const guard = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(`stream stalled: no data for ${idleMs}ms`)), idleMs)
+    })
+    let r: { done: boolean; value?: Uint8Array }
+    try {
+      r = await Promise.race([reader.read(), guard])
+    } catch (e) {
+      reader.cancel().catch(() => {})
+      throw e
+    } finally {
+      clearTimeout(timeoutId)
+    }
+    if (r.done) break
+    const value = r.value!
     buf += dec.decode(value, { stream: true })
     let i: number
     while ((i = buf.indexOf("\n\n")) !== -1) {
@@ -41,6 +56,7 @@ export class Provider {
     messages: ChatMsg[]
     tools: { name: string; description: string; schema: unknown }[]
     signal?: AbortSignal
+    idleTimeoutMs?: number
     onToken?: (t: string) => void
     onReasoning?: (t: string) => void
   }): Promise<ChatResponse> {
@@ -69,7 +85,7 @@ export class Provider {
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`)
         let content = ""
         const acc: Record<number, { id: string; name: string; args: string }> = {}
-        for await (const ev of parseSSE(res)) {
+        for await (const ev of parseSSE(res, args.idleTimeoutMs ?? 120_000)) {
           const delta = ev.choices?.[0]?.delta
           if (!delta) continue
           if (typeof delta.content === "string") {
