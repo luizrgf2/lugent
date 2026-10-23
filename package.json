@@ -2,6 +2,19 @@
   "name": "lugent",
   "version": "0.1.0",
   "type": "module",
-  "bin": { "lugent": "./src/main.ts" },
-  "scripts": { "test": "bun test", "start": "bun src/main.ts" }
+  "bin": {
+    "lugent": "./src/main.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "start": "bun src/main.ts"
+  },
+  "dependencies": {
+    "ink": "^8.0.0",
+    "react": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "ink-testing-library": "^4.0.0"
+  }
 }
