@@ -55,7 +55,7 @@ In a terminal, `lugent` starts a **full-screen TUI** (React + Ink): scrollable t
 ```
 
 - **Ctrl+C once** aborts the running turn (and denies a pending permission); **twice** exits.
-- Slash commands: `/exit` quits; `/model` opens a two-level picker (provider → live model list via `listModels()`, `↑/↓`+Enter, Esc cancels, Ctrl+C closes); `/skills` browses loaded skills. Others work in `--plain` mode.
+- Slash commands: `/exit` quits; `/model` opens a two-level picker (provider → live model list via `listModels()`, `↑/↓`+Enter, Esc cancels, Ctrl+C closes); `/skills` browses loaded skills. Typing `/` in the composer shows an autocomplete box — it filters as you type, `↑/↓` move, Tab completes. Others work in `--plain` mode.
 - `--plain` forces the inline REPL below; piped stdin (non-TTY) falls back to it automatically.
 
 Plain REPL:

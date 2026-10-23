@@ -141,7 +141,14 @@ export function App(props: { env: TuiEnv }) {
           ? <SkillList skills={env.skills} onClose={closeOverlay} />
           : ask
             ? <Permissions tool={ask.tool} resource={ask.resource} onAnswer={a => { askRef.current = null; ask.resolve(a); setAsk(null) }} />
-            : <Input disabled={busy} onSubmit={submit} />}
+            : <Input
+                disabled={busy}
+                onSubmit={submit}
+                completions={[
+                  { cmd: "exit", desc: "quit lugent" },
+                  { cmd: "model", desc: "switch provider/model" },
+                  { cmd: "skills", desc: "browse skills" },
+                ]} />}
     </Box>
   )
 }

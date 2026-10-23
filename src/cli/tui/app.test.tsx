@@ -155,17 +155,24 @@ test("two ask tools in one batch: dialogs queue, both resolve, turn completes", 
   }
   const env = fakeEnv({ tools: [pathTool], makeProvider: () => provider })
   const { type, lastFrame } = renderTui(<App env={env} />)
+  // Poll instead of fixed sleeps: ink commits a frame before its useInput
+  // subscription effect lands, so a key typed right after the frame appears
+  // can be dispatched before the dialog's handler exists (race → lost key).
+  const waitFor = async (want: string, ms = 3000) => {
+    const t0 = Date.now()
+    while (!lastFrame().includes(want)) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout waiting for "${want}"`)
+      await new Promise(r => setTimeout(r, 20))
+    }
+    await new Promise(r => setTimeout(r, 30))   // let the subscription effect flush
+  }
   await new Promise(r => setTimeout(r, 30))
   type("go\r")
-  await new Promise(r => setTimeout(r, 80))
-  expect(lastFrame()).toContain("allow edit")
-  type("y")                          // answer dialog 1
-  await new Promise(r => setTimeout(r, 80))
-  expect(lastFrame()).toContain("allow edit")   // dialog 2 now up (queued, not lost)
-  type("y")                          // answer dialog 2
-  await new Promise(r => setTimeout(r, 80))
-  const f = lastFrame()
-  expect(f).toContain("all edited")  // turn completed: second chat streamed
+  await waitFor('allow edit on "a.ts"')
+  type("y")
+  await waitFor('allow edit on "b.ts"')
+  type("y")
+  await waitFor("all edited")
 })
 
 test("ctrl+c while a queued ask waits ends the turn (no zombie dialog)", async () => {
@@ -262,4 +269,23 @@ test("/skills opens the skill list; esc closes; ctrl+c closes too", async () => 
   expect(lastFrame()).toContain(">")
   const exited = await Promise.race([waitUntilExit().then(() => true), new Promise(r => setTimeout(() => r(false), 150))])
   expect(exited).toBe(false)
+})
+
+test("slash autocomplete in composer: filter, tab-complete, enter opens picker", async () => {
+  const provider = {
+    chat: async () => ({ content: "ok", toolCalls: [] }),
+    listModels: async () => ["m1"],
+  }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("/sk")                       // filters to /skills while typing
+  await new Promise(r => setTimeout(r, 30))
+  const f1 = lastFrame()
+  expect(f1).toContain("/skills"); expect(f1).not.toContain("/exit")
+  type("\b\bmo\t\r")                // back to "/mo", tab completes /model, enter opens picker
+  await new Promise(r => setTimeout(r, 60))
+  const f2 = lastFrame()
+  expect(f2).toContain("ollama")    // provider list up
+  expect(f2).not.toContain("❯ /")   // composer suggestions gone (picker took over)
 })

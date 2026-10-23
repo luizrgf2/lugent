@@ -40,3 +40,59 @@ test("ctrl keys are not typed as characters", async () => {
   expect(got).toEqual([])
   expect(lastFrame()).not.toContain("c")   // ctrl+c never becomes a character
 })
+
+const CMDS = [
+  { cmd: "exit", desc: "quit lugent" },
+  { cmd: "model", desc: "switch provider/model" },
+  { cmd: "skills", desc: "browse skills" },
+]
+
+test("/ lists commands, prefix filters as you type", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={() => {}} completions={CMDS} />)
+  type("/")
+  await new Promise(r => setTimeout(r, 30))
+  const all = lastFrame()
+  expect(all).toContain("/exit"); expect(all).toContain("/model"); expect(all).toContain("/skills")
+  expect(all).toContain("quit lugent"); expect(all).toContain("browse skills")
+  type("mo")
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  expect(f).toContain("/model"); expect(f).toContain("switch provider/model")
+  expect(f).not.toContain("/exit"); expect(f).not.toContain("/skills")
+})
+
+test("tab completes the selected command and submits", async () => {
+  const got: string[] = []
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} completions={CMDS} />)
+  type("/mo\t\r")
+  await new Promise(r => setTimeout(r, 30))
+  expect(got).toEqual(["/model"])
+})
+
+test("arrows navigate suggestions, not history, while open", async () => {
+  const got: string[] = []
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} completions={CMDS} />)
+  type("older\r")
+  await new Promise(r => setTimeout(r, 30))
+  type("/e\u001b[A\t\r")   // ↑ with suggestions open: must NOT recall "older"
+  await new Promise(r => setTimeout(r, 30))
+  expect(got).toEqual(["older", "/exit"])
+})
+
+test("enter submits while suggestions open, box clears", async () => {
+  const got: string[] = []
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} completions={CMDS} />)
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 30))
+  expect(got).toEqual(["/model"])
+  expect(lastFrame()).not.toContain("switch provider/model")   // suggestions gone
+})
+
+test("no prefix match hides suggestions", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={() => {}} completions={CMDS} />)
+  type("/x")
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  expect(f).toContain("/x")
+  expect(f).not.toContain("/exit"); expect(f).not.toContain("/model"); expect(f).not.toContain("/skills")
+})
