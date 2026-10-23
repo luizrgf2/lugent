@@ -8,12 +8,12 @@ const stripAnsi = (s: string): string =>
  * Dev-only test harness rendering through ink's real renderer
  * (ink-testing-library targets ink ^5 and misbehaves on v8).
  */
-export function renderTui(tree: unknown) {
+export function renderTui(tree: unknown, opts: { rows?: number } = {}) {
   const frames: string[] = []
   const stdout: any = new EventEmitter()
   Object.assign(stdout, {
-    columns: 100, rows: 30, isTTY: true,
-    write(s: string) { frames.push(s); return true },
+    columns: 100, rows: opts.rows ?? 30, isTTY: true,
+    write(s: string, cb?: (err?: Error | null) => void) { frames.push(s); cb?.(null); return true },
   })
   const stdin: any = new EventEmitter()
   const pending: string[] = []
@@ -26,6 +26,7 @@ export function renderTui(tree: unknown) {
   const inst = render(tree as any, { stdout, stdin, stderr: stdout, exitOnCtrlC: false, debug: true })
   return {
     unmount: () => inst.unmount(),
+    waitUntilExit: () => inst.waitUntilExit(),
     /** Type one key per write — mirrors raw-mode terminals (1 key per read). */
     type(s: string) {
       for (const ch of s) { pending.push(ch); stdin.emit("readable") }

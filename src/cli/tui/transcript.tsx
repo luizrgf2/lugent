@@ -4,6 +4,33 @@ import { glyph } from "../ui"
 
 export type TItem = { kind: "user" | "reasoning" | "tool" | "assistant" | "error"; text: string; tool?: string }
 
+function itemLines(it: TItem): number {
+  return it.kind === "assistant" ? Math.max(1, parseMarkdown(it.text).length) : 1
+}
+
+/**
+ * Keep only the newest content that fits `maxLines` lines (a multi-line item is
+ * tailed, not dropped). Ink resolves height="100%" to auto, so the transcript
+ * window must be constrained manually from the real terminal rows.
+ */
+export function clampItems(items: TItem[], maxLines: number): TItem[] {
+  const out: TItem[] = []
+  let used = 0
+  for (let i = items.length - 1; i >= 0; i--) {
+    const lines = itemLines(items[i])
+    if (used + lines > maxLines) {
+      const room = maxLines - used
+      if (out.length === 0 && room > 0 && items[i].kind === "assistant") {
+        out.unshift({ ...items[i], text: items[i].text.split("\n").slice(-room).join("\n") })
+      }
+      break
+    }
+    out.unshift(items[i])
+    used += lines
+  }
+  return out
+}
+
 function Markdown({ text }: { text: string }) {
   return (
     <Box flexDirection="column">

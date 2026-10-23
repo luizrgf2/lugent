@@ -1,11 +1,11 @@
-import { useState } from "react"
-import { Box, Text, render, useApp, useInput } from "ink"
+import { useRef, useState } from "react"
+import { Box, render, useApp, useInput, useStdout } from "ink"
 import type { ReplEnv } from "../repl"
 import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
 import { buildPromptInput } from "../context"
 import { Status } from "./status"
-import { Transcript, type TItem } from "./transcript"
+import { Transcript, clampItems, type TItem } from "./transcript"
 import { Input } from "./input"
 import { Permissions } from "./permissions"
 
@@ -26,15 +26,18 @@ export function App(props: { env: TuiEnv }) {
   const [items, setItems] = useState<TItem[]>([])
   const [busy, setBusy] = useState(false)
   const [ask, setAsk] = useState<{ tool: string; resource: string; resolve(a: "y" | "n" | "a"): void } | null>(null)
-  const [sigint, setSigint] = useState(0)
+  // Ref mirrors state: ink batches keys into one render, so a useInput closure
+  // reading the sigint state can see a stale value (same hazard as input.tsx).
+  const sigintRef = useRef(0)
   const [abort, setAbort] = useState<AbortController | null>(null)
   const [session] = useState(() => env.store.createSession(env.config.defaultProvider, env.config.defaultModel))
   const [model] = useState(env.config.defaultModel)
+  const { stdout } = useStdout()
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
-      const n = sigint + 1
-      setSigint(n)
+      const n = sigintRef.current + 1
+      sigintRef.current = n
       if (n === 1) {
         abort?.abort()
         ask?.resolve("n")   // deny pending permission so the turn can unwind
@@ -46,6 +49,7 @@ export function App(props: { env: TuiEnv }) {
   })
 
   async function submit(text: string) {
+    sigintRef.current = 0   // new turn: single ctrl+c aborts again, doesn't exit
     setItems(is => [...is, { kind: "user", text }])
     if (text.startsWith("/")) {
       if (text.trim() === "/exit") return exit()
@@ -80,11 +84,15 @@ export function App(props: { env: TuiEnv }) {
     if (r.error) setItems(is => [...is, { kind: "error", text: r.error! }])
   }
 
+  // ink resolves height="100%" to auto — constrain manually from real rows.
+  const rows = (stdout as any)?.rows ?? 24
+  const visible = clampItems(items, Math.max(3, rows - 7))
+
   return (
-    <Box flexDirection="column" height="100%">
+    <Box flexDirection="column">
       <Status provider={env.config.defaultProvider} model={model} sessionId={session.id} off={env.offProviders} busy={busy} />
-      <Box flexDirection="column" flexGrow={1} overflow="hidden">
-        <Transcript items={items} />
+      <Box flexDirection="column">
+        <Transcript items={visible} />
       </Box>
       {ask
         ? <Permissions tool={ask.tool} resource={ask.resource} onAnswer={a => { ask.resolve(a); setAsk(null) }} />

@@ -70,3 +70,66 @@ test("ctrl-c during ask denies, dialog clears, turn ends", async () => {
   await new Promise(r => setTimeout(r, 80))
   expect(lastFrame()).not.toContain("allow askme") // dialog gone
 })
+
+test("transcript is screen-constrained: old items drop off, composer stays", async () => {
+  const provider = {
+    chat: async (_a: any) => {
+      for (let i = 0; i < 60; i++) { /* noop */ }
+      return { content: "done", toolCalls: [] }
+    },
+  }
+  // provider that emits 60 tool lines via a tool is overkill; emit via reasoning-free answer:
+  // use onToken with 60 newline-separated lines
+  const prov = {
+    chat: async (a: any) => {
+      for (let i = 0; i < 60; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
+      return { content: "", toolCalls: [] }
+    },
+  }
+  const env = fakeEnv({ tools: [], makeProvider: () => prov })
+  const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  await new Promise(r => setTimeout(r, 100))
+  const f = lastFrame()
+  expect(f).not.toContain("line-00")   // scrolled off / clipped
+  expect(f).toContain("line-59")       // latest content visible
+  const lineCount = f.split("\n").length
+  expect(lineCount).toBeLessThanOrEqual(30)   // frame never taller than screen
+})
+
+test("ctrl+c on a later turn aborts instead of exiting (counter resets per turn)", async () => {
+  const hanging = {
+    chat: (a: any) => new Promise((_, rej) => a.signal?.addEventListener("abort", () => rej(new Error("aborted")))),
+  }
+  const ok = { chat: async () => ({ content: "done", toolCalls: [] }) }
+  let useHanging = true
+  const env = fakeEnv({ tools: [], makeProvider: () => (useHanging ? hanging : ok) })
+  const { type, lastFrame, waitUntilExit } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("turn1\r")
+  await new Promise(r => setTimeout(r, 60))
+  type("\x03")                       // abort turn 1
+  await new Promise(r => setTimeout(r, 60))
+  useHanging = false
+  type("turn2\r")                    // complete a fresh turn
+  await new Promise(r => setTimeout(r, 80))
+  type("\x03")                       // single ctrl+c: must abort-nothing, NOT exit
+  await new Promise(r => setTimeout(r, 80))
+  const exited = await Promise.race([waitUntilExit().then(() => true), new Promise(r => setTimeout(() => r(false), 150))])
+  expect(exited).toBe(false)
+  expect(lastFrame()).toContain(">") // composer still alive
+})
+
+test("rapid double ctrl+c exits the app", async () => {
+  const ok = { chat: async () => ({ content: "done", toolCalls: [] }) }
+  const env = fakeEnv({ tools: [], makeProvider: () => ok })
+  const { type, waitUntilExit } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("hi\r")
+  await new Promise(r => setTimeout(r, 60))
+  type("\x03")
+  type("\x03")                       // same tick: second must exit
+  const exited = await Promise.race([waitUntilExit().then(() => true), new Promise(r => setTimeout(() => r(false), 200))])
+  expect(exited).toBe(true)
+})
