@@ -128,7 +128,7 @@ export async function runRepl(env: ReplEnv): Promise<void> {
         process.stdout.write(`\n${glyph(name)} ${dim(name)} ${cyan(truncate(resource, 64))}\n`)
       },
       onAsk: async (tool, resource) => { clearSpin(); return ask(tool, resource) },
-    }, session.id, input)
+    }, session.id, input, env.projectRoot)
     clearSpin()
     if (r.error) console.log(red(`error: ${r.error}`))
     process.stdout.write("\n")

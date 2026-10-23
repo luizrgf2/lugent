@@ -27,18 +27,29 @@ export function buildPrefix(input: PromptInput): string {
   return parts.join("\n\n")
 }
 
-export function buildMessages(prefix: string, history: Message[]): ChatMsg[] {
+export function buildMessages(prefix: string, history: Message[], lastUserContent?: import("./types").UserContent): ChatMsg[] {
   const msgs: ChatMsg[] = [{ role: "system", content: prefix }]
-  for (const m of history) {
-    if (m.role === "user") msgs.push({ role: "user", content: m.content ?? "" })
-    else if (m.role === "assistant") msgs.push({
-      role: "assistant", content: m.content,
-      tool_calls: m.toolCalls?.map(tc => ({
-        id: tc.id, type: "function" as const,
-        function: { name: tc.name, arguments: JSON.stringify(tc.args ?? {}) },
-      })),
-    })
-    else msgs.push({ role: "tool", tool_call_id: m.toolCallId, content: m.content ?? "" })
+  let pendingUser = lastUserContent   // only the newest user message carries expanded parts
+  const tail: ChatMsg[] = []
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].role === "user" && pendingUser !== undefined) {
+      tail.unshift({ role: "user", content: pendingUser })
+      pendingUser = undefined
+      continue
+    }
+    tail.unshift(toChatMsg(history[i]))
   }
-  return msgs
+  return [...msgs, ...tail]
+}
+
+function toChatMsg(m: Message): ChatMsg {
+  if (m.role === "user") return { role: "user", content: m.content ?? "" }
+  if (m.role === "assistant") return {
+    role: "assistant", content: m.content,
+    tool_calls: m.toolCalls?.map(tc => ({
+      id: tc.id, type: "function" as const,
+      function: { name: tc.name, arguments: JSON.stringify(tc.args ?? {}) },
+    })),
+  }
+  return { role: "tool", tool_call_id: m.toolCallId, content: m.content ?? "" }
 }

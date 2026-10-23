@@ -12,7 +12,7 @@ export function itemsFromHistory(messages: Message[]): TItem[] {
   for (const m of messages) for (const tc of m.toolCalls ?? []) callInfo.set(tc.id, tc)
   const out: TItem[] = []
   for (const m of messages) {
-    if (m.role === "user" && m.content) out.push({ kind: "user", text: m.content })
+    if (m.role === "user" && m.content) out.push({ kind: "user", text: m.content.replace(/@(\S+\.(?:png|jpe?g|gif|webp))/gi, "🖼 $1") })
     else if (m.role === "assistant" && m.content) out.push({ kind: "assistant", text: m.content })
     else if (m.role === "tool") {
       const tc = callInfo.get(m.toolCallId ?? "")

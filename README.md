@@ -62,6 +62,7 @@ In a terminal, `lugent` starts a **full-screen TUI** (React + Ink): scrollable t
 - **PageUp/PageDown** scroll the transcript (window = one page). Scrolling up during streaming pins the view — new content grows below without jumping the screen; submitting a new message snaps back to the tail.
 - Slash commands: `/exit` quits; `/model` opens a two-level picker (provider → live model list via `listModels()`, `↑/↓`+Enter, Esc cancels, Ctrl+C closes); `/skills` browses loaded skills; `/resume` picks a past session of this directory (replays its transcript, next turn continues it — not a fork); `/permissions` toggles normal/yolo (yolo auto-approves every tool call, shown in the status bar). Typing `/` in the composer shows an autocomplete box — it filters as you type, `↑/↓` move, Enter or Tab completes. Others work in `--plain` mode.
 - `--plain` forces the inline REPL below; piped stdin (non-TTY) falls back to it automatically.
+- **Image attachments**: mention a file with `@path/to.png` in your message (`.png` `.jpg` `.jpeg` `.gif` `.webp`, ≤20 MB, relative to the project root). It is sent to the model as an OpenAI vision `image_url` part — works with any multimodal model behind an OpenAI-compatible endpoint. Unresolvable markers stay literal text.
 
 Plain REPL:
 

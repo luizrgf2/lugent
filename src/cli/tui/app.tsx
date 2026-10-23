@@ -141,7 +141,7 @@ export function App(props: { env: TuiEnv }) {
           setAsk(askRef.current)
         }))
       }),
-    }, session.id, text)
+    }, session.id, text, env.projectRoot)
     setBusy(false)
     abortRef.current = null
     setAbort(null)
