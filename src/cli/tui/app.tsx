@@ -1,6 +1,7 @@
 import { useRef, useState } from "react"
 import { Box, render, useApp, useInput, useStdout } from "ink"
 import type { ReplEnv } from "../repl"
+import type { Agent } from "../../core/types"
 import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
 import { buildPromptInput } from "../context"
@@ -9,6 +10,7 @@ import { Transcript, clampItems, itemLines, itemsFromHistory, type TItem } from 
 import { Input } from "./input"
 import { Permissions } from "./permissions"
 import { ModelPicker } from "./model-picker"
+import { AgentPicker } from "./agent-picker"
 import { SkillList } from "./skill-list"
 import { PermissionMode } from "./permission-mode"
 import { SessionPicker } from "./session-picker"
@@ -47,11 +49,12 @@ export function App(props: { env: TuiEnv }) {
   const askChainRef = useRef<Promise<void>>(Promise.resolve())
   const askRef = useRef<{ tool: string; resource: string; resolve(a: "y" | "n" | "a"): void } | null>(null)
   const [abort, setAbort] = useState<AbortController | null>(null)
-  const [session, setSession] = useState(() => env.store.createSession(env.config.defaultProvider, env.config.defaultModel, env.projectRoot))
+  const [agent, setAgentState] = useState<Agent | undefined>(() => env.agents.find(a => a.id === env.config.defaultAgent))
+  const [session, setSession] = useState(() => env.store.createSession(env.config.defaultProvider, env.config.defaultModel, env.projectRoot, agent?.id ?? null))
   const [provider, setProvider] = useState(env.config.defaultProvider)
   const [model, setModel] = useState(env.config.defaultModel)
-  const [overlay, setOverlay] = useState<null | "model" | "skills" | "resume" | "permissions">(null)
-  const overlayRef = useRef<null | "model" | "skills" | "resume" | "permissions">(null)
+  const [overlay, setOverlay] = useState<null | "model" | "skills" | "resume" | "permissions" | "agent">(null)
+  const overlayRef = useRef<null | "model" | "skills" | "resume" | "permissions" | "agent">(null)
   const [yolo, setYolo] = useState(false)
   // Ref mirrors state: submit reads it — ink batching can make state stale.
   const yoloRef = useRef(false)
@@ -92,6 +95,10 @@ export function App(props: { env: TuiEnv }) {
       if (text.trim() === "/skills") { overlayRef.current = "skills"; setOverlay("skills"); return }
       if (text.trim() === "/permissions") {
         if (!busy) { overlayRef.current = "permissions"; setOverlay("permissions") }
+        return
+      }
+      if (text.trim() === "/agent") {
+        if (!busy) { overlayRef.current = "agent"; setOverlay("agent") }
         return
       }
       if (text.trim() === "/resume") {
@@ -135,9 +142,10 @@ export function App(props: { env: TuiEnv }) {
       store: env.store,
       provider: { chat },
       tools: env.tools,
-      promptInput: buildPromptInput(env, model),
+      promptInput: buildPromptInput(env, model, agent),
       signal: ac.signal,
       yolo: yoloRef.current,
+      agent,
       onReasoning: t => { reasoning += t; grow(is => patchTail(is, { kind: "reasoning", text: reasoning })) },
       onToken: t => { answer += t; grow(is => patchTail(is, { kind: "assistant", text: answer })) },
       onToolStart: (name, resource) => setItems(is => [...is, { kind: "tool", tool: name, text: resource }]),
@@ -162,11 +170,26 @@ export function App(props: { env: TuiEnv }) {
 
   return (
     <Box flexDirection="column">
-      <Status provider={provider} model={model} sessionId={session.id} off={env.offProviders} busy={busy} yolo={yolo} />
+      <Status provider={provider} model={model} sessionId={session.id} off={env.offProviders} busy={busy} yolo={yolo} agent={agent?.id} />
       <Box flexDirection="column">
         <Transcript items={visible} />
       </Box>
-      {overlay === "model"
+      {overlay === "agent"
+        ? <AgentPicker
+            agents={env.agents}
+            current={agent?.id}
+            onClose={closeOverlay}
+            onPick={a => {
+              closeOverlay()
+              setAgentState(a)
+              env.store.setAgent(session.id, a.id)
+              if (a.model && env.config.providers[a.model.provider]) {
+                setProvider(a.model.provider)
+                setModel(a.model.model)
+              }
+              setItems(is => [...is, { kind: "system", text: `agent ${a.id}${a.model ? ` · ${a.model.provider}/${a.model.model}` : ""}` }])
+            }} />
+        : overlay === "model"
         ? <ModelPicker
             providers={Object.keys(env.config.providers)}
             currentProvider={provider}
@@ -198,6 +221,7 @@ export function App(props: { env: TuiEnv }) {
                   setSession({ ...row, id })
                   setProvider(row.provider)
                   if (row.model) setModel(row.model)
+                  setAgentState(row.agent ? env.agents.find(a => a.id === row.agent) : undefined)
                   setItems(itemsFromHistory(env.store.getMessages(id)).map(it =>
                     it.kind === "assistant" ? { ...it, kind: "system" } : it))
                 }} />
@@ -222,6 +246,7 @@ export function App(props: { env: TuiEnv }) {
                   { cmd: "skills", desc: "browse skills" },
                   { cmd: "resume", desc: "resume a past session" },
                   { cmd: "permissions", desc: "permission mode (normal/yolo)" },
+                  { cmd: "agent", desc: "switch agent profile" },
                 ]} />}
       <Spinner busy={busy && !ask} />
     </Box>

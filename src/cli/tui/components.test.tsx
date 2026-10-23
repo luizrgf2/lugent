@@ -98,3 +98,11 @@ test("transcript renders assistant markdown: fence and inline code", () => {
   expect(f).toContain("let y = 2")
   expect(f).not.toContain("```")
 })
+
+test("status shows the selected agent when set", async () => {
+  const { lastFrame } = renderTui(
+    <Status provider="p" model="m" sessionId="ses_12345678-abc" off={[]} busy={false} yolo={false} agent="reviewer" />
+  )
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("reviewer")
+})

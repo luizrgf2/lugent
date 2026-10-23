@@ -15,12 +15,13 @@ export function Spinner(p: { busy: boolean; label?: string }) {
 
 // Mini L-mark (▟▙) from the ANSI logo / docs/lugent.svg — gradient endpoints
 // as text colors: green chevron, cyan wordmark tail.
-export function Status(p: { provider: string; model: string; sessionId: string; off: string[]; busy: boolean; yolo: boolean }) {
+export function Status(p: { provider: string; model: string; sessionId: string; off: string[]; busy: boolean; yolo: boolean; agent?: string }) {
   return (
     <Box borderStyle="round" borderDimColor paddingX={1} justifyContent="space-between">
       <Box>
         <Text bold color="cyan">lugent</Text>
         <Text dimColor> {p.provider} · {p.model} </Text>
+        {p.agent && <Text color="magenta">{p.agent} </Text>}
         {p.off.includes(p.provider) && <Text color="red">OFF</Text>}
       </Box>
       <Text bold>

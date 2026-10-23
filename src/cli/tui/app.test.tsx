@@ -13,6 +13,7 @@ export function fakeEnv(over: Record<string, unknown> = {}): any {
     config: { defaultProvider: "9router", defaultModel: "glm/glm-5.2", providers: { "9router": { baseUrl: "http://x/v1" }, "ollama": { baseUrl: "http://y/v1" } } },
     tools: [],
     skills: [],
+    agents: [],
     projectRoot: "/tmp/opencode",
     store: new Store(db),
     offProviders: [],
@@ -463,4 +464,19 @@ test("yolo mode: ask tool runs without a permission dialog", async () => {
   await waitFor("✎ edit a.ts")
   await waitFor("done")
   expect(lastFrame()).not.toContain("allow edit")     // no dialog ever appeared
+})
+
+test("/agent picker: pick switches the profile and shows it in the status bar", async () => {
+  const env = fakeEnv({ agents: [{ id: "reviewer", prompt: "review", description: "Reviews read-only" }] })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("/agent\r")
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).toContain("choose agent")
+  expect(lastFrame()).toContain("Reviews read-only")
+  type("\r")   // pick the selected (first) agent
+  await new Promise(r => setTimeout(r, 80))
+  const f = lastFrame()
+  expect(f).toContain("agent reviewer")
+  expect(f).toContain("reviewer")
 })
