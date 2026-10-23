@@ -22,6 +22,7 @@ deferred, and the trigger that justifies adding it.
 | Feature | Why deferred | Add when |
 | --- | --- | --- |
 | HTTP server (client-server split, OpenCode-style) | Doubles surface area (routes, local auth, SSE events) before any feature needs it | A second client exists (web UI, SDK consumer) |
+| Per-item transcript virtualization (stable ids, measured heights, arbitrary anchor) | Line-based tail-clamped window already renders O(viewport); virtualization adds bookkeeping without a felt win | Users report jank on huge single messages or want pixel-scroll/mouse-wheel anchors |
 | Plugin / hook system | No extension consumers yet | External contributors or per-project behavior injection needed |
 | Config layering (global + project merge, nested `AGENTS.md` discovery on exploration) | Single config + root `AGENTS.md` covers v1 | Monorepo / multi-package use appears |
 
@@ -33,12 +34,21 @@ deferred, and the trigger that justifies adding it.
 | Provider-native compaction (encrypted checkpoints) | Tied to specific provider APIs | OpenAI Responses-style models become primary |
 | Tool output pagination to managed files (OpenCode's 2k lines / 50 KiB pages) | Simple truncation suffices at v1 scale | Tool outputs regularly blow past truncation limit |
 
+### Skills
+
+Existing baseline: user (`~/.agents/skills/`) + project (`.agents/skills/`) scopes, same id → project wins; frontmatter `description` advertised in the system prompt (body on demand via the `skill` tool); TUI `/skills` is a read-only browser.
+
+| Feature | What it would be | Why deferred | Add when |
+| --- | --- | --- | --- |
+| Skill selector (enable/disable per session or per project) | Toggle skills on/off from `/skills` (space to toggle, state shown inline); disabled skills drop out of the system prompt advertisement. Per-project persistent selection (e.g. `.agents/skills.json`) + per-session ephemeral override. | Every installed skill is currently wanted in every session; a toggle is UI + prompt-rebuild surface with no user yet | Installed skill count makes the advertisement block visibly bloat the prompt, or conflicting skills (two coding-style guides) need scoping |
+| Skill packs / grouping (select a named set, e.g. `frontend`) | Group skills by frontmatter `tags` or dir, toggle the group as one | Speculative taxonomy — no multi-domain skill collections installed | Heterogeneous skill libraries (10+ across domains) appear |
+| Skill priority / ordering beyond project-wins | Explicit `priority` frontmatter overriding the same-id shadowing rule | One resolution rule (project wins) covers all known cases | Two non-shadowing skills must apply in a defined order |
+
 ### Agents
 
 | Feature | Why deferred | Add when |
 | --- | --- | --- |
 | Subagents (child sessions, fresh context, parallel work) | Significant session-model complexity | Long tasks need context isolation or parallelism |
-| Multiple agents / agent selection (primary vs subagent modes, frontmatter config) | v1 ships a single build agent | Distinct personas (plan/review/explore) prove useful |
 | Hidden maintenance agents (title, summary generation) | Cosmetic | Session lists get unwieldy |
 | Steps limit (remove tools on final step, force text answer) | Loop discipline not yet a problem | Agents loop excessively on hard tasks |
 
