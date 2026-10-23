@@ -8,6 +8,7 @@ import type { AppConfig } from "../core/config"
 import type { ToolDef } from "../core/tools/registry"
 import type { SkillMeta } from "../core/types"
 import { parseSlash, parseAnswer } from "./commands"
+import { box, glyph, truncate, dim, cyan, red, Spinner } from "./ui"
 
 export interface ReplEnv {
   store: Store
@@ -46,7 +47,11 @@ export async function runRepl(env: ReplEnv): Promise<void> {
     return parseAnswer(answer)
   }
 
-  console.log(`session ${session.id} | /model /skills /clear /exit | Ctrl+C aborts turn`)
+  console.log(box("lugent", [
+    `session ${session.id.slice(0, 8)}…`,
+    `${env.config.defaultProvider} · ${model}`,
+  ]))
+  console.log(dim("/model /skills /clear /exit · Ctrl+C aborts turn"))
 
   while (true) {
     let input: string
@@ -96,6 +101,8 @@ export async function runRepl(env: ReplEnv): Promise<void> {
 
     abortCtrl = new AbortController()
     const provider = new Provider(providerCfg, model)
+    const spin = new Spinner("thinking…").start()
+    const clearSpin = () => spin.stop("")
     const promptInput: PromptInput = {
       cwd: env.projectRoot,
       os: process.platform,
@@ -108,11 +115,15 @@ export async function runRepl(env: ReplEnv): Promise<void> {
     const r = await runTurn({
       store: env.store, provider, tools: env.tools, promptInput,
       signal: abortCtrl.signal,
-      onToken: t => process.stdout.write(t),
-      onToolStart: (name, resource) => process.stdout.write(`\n⚙ ${name} ${resource}\n`),
-      onAsk: ask,
+      onToken: t => { clearSpin(); process.stdout.write(t) },
+      onToolStart: (name, resource) => {
+        clearSpin()
+        process.stdout.write(`\n${glyph(name)} ${dim(name)} ${cyan(truncate(resource, 64))}\n`)
+      },
+      onAsk: async (tool, resource) => { clearSpin(); return ask(tool, resource) },
     }, session.id, input)
-    if (r.error) console.log(`error: ${r.error}`)
+    clearSpin()
+    if (r.error) console.log(red(`error: ${r.error}`))
     process.stdout.write("\n")
   }
   rl.close()

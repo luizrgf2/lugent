@@ -43,7 +43,13 @@ At startup each provider gets a health check (`GET /models`, 8s timeout) — unr
 ## Usage
 
 ```
+┌─ lugent ──────────────┐
+│ session ses_676f…     │      banner on startup
+│ 9router · glm/glm-5.2 │
+└───────────────────────┘
 > read src/main.ts            # plain message: the model drives the tools
+▸ read  src/main.ts           # tool lines use glyphs (▸ read, ✎ edit, $ shell…)
+⠙ thinking…                   # spinner while the turn runs
 > /model                      # list models of the current provider
 > /model ollama qwen3.5:14b   # switch provider (+ optional model)
 > /skills                     # list advertised skills
@@ -51,6 +57,7 @@ At startup each provider gets a health check (`GET /models`, 8s timeout) — unr
 > /exit                       # quit
 ```
 
+- UI is hand-rolled ANSI (`src/cli/ui.ts`, zero deps); colors/spinner auto-disable when output is piped.
 - **Ctrl+C once** aborts the running turn; **twice** exits.
 - Permission prompts answer `y` / `n` / `a` (always, session-scoped). Anything else — including Enter — denies.
 - `--db <path>` overrides the database location.
