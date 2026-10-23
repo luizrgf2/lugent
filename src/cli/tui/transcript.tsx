@@ -1,8 +1,32 @@
 import { Box, Text } from "ink"
 import { parseMarkdown, type Seg } from "./markdown"
 import { glyph } from "../ui"
+import type { Message } from "../../core/types"
 
 export type TItem = { kind: "user" | "reasoning" | "tool" | "assistant" | "error" | "system"; text: string; tool?: string }
+
+/** Map stored history to transcript items on resume (reasoning is never persisted). */
+export function itemsFromHistory(messages: Message[]): TItem[] {
+  const callInfo = new Map<string, { name: string; args: unknown }>()
+  for (const m of messages) for (const tc of m.toolCalls ?? []) callInfo.set(tc.id, tc)
+  const out: TItem[] = []
+  for (const m of messages) {
+    if (m.role === "user" && m.content) out.push({ kind: "user", text: m.content })
+    else if (m.role === "assistant" && m.content) out.push({ kind: "assistant", text: m.content })
+    else if (m.role === "tool") {
+      const tc = callInfo.get(m.toolCallId ?? "")
+      out.push({ kind: "tool", tool: tc?.name ?? "?", text: describeArgs(tc?.args) })
+    }
+  }
+  return out
+}
+
+function describeArgs(args: unknown): string {
+  if (!args || typeof args !== "object") return ""
+  const a = args as Record<string, unknown>
+  const res = a.path ?? a.pattern ?? a.command ?? a.id ?? a.resource ?? Object.values(a)[0]
+  return typeof res === "string" ? res : JSON.stringify(args)
+}
 
 function itemLines(it: TItem): number {
   return it.kind === "assistant" ? Math.max(1, parseMarkdown(it.text).length) : 1

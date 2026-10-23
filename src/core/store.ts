@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite"
 import type { Message } from "./types"
 
 export interface SessionRow { id: string; provider: string; model: string; aborted: boolean }
+export interface SessionSummary { id: string; provider: string; model: string; createdAt: string; preview: string }
 
 export class Store {
   private db: Database
@@ -10,7 +11,9 @@ export class Store {
     this.db = new Database(dbPath, { create: true })
     this.db.run(`CREATE TABLE IF NOT EXISTS session (
       id TEXT PRIMARY KEY, title TEXT, created_at TEXT,
-      provider TEXT, model TEXT, aborted INTEGER DEFAULT 0)`)
+      provider TEXT, model TEXT, directory TEXT, aborted INTEGER DEFAULT 0)`)
+    // migrate pre-/resume databases; "duplicate column" error means already migrated
+    try { this.db.run(`ALTER TABLE session ADD COLUMN directory TEXT`) } catch {}
     this.db.run(`CREATE TABLE IF NOT EXISTS message (
       id TEXT PRIMARY KEY, session_id TEXT REFERENCES session(id),
       role TEXT, content TEXT, tool_calls JSON, tool_call_id TEXT,
@@ -20,16 +23,28 @@ export class Store {
       PRIMARY KEY (session_id, tool, resource))`)
   }
 
-  createSession(provider: string, model: string): SessionRow {
+  createSession(provider: string, model: string, directory?: string): SessionRow {
     const id = `ses_${crypto.randomUUID()}`
-    this.db.run(`INSERT INTO session (id, created_at, provider, model) VALUES (?, ?, ?, ?)`,
-      [id, new Date().toISOString(), provider, model])
+    this.db.run(`INSERT INTO session (id, created_at, provider, model, directory) VALUES (?, ?, ?, ?, ?)`,
+      [id, new Date().toISOString(), provider, model, directory ?? null])
     return { id, provider, model, aborted: false }
   }
 
   loadSession(id: string): SessionRow | undefined {
     const row = this.db.query(`SELECT id, provider, model, aborted FROM session WHERE id = ?`).get(id) as any
     return row ? { id: row.id, provider: row.provider, model: row.model, aborted: !!row.aborted } : undefined
+  }
+
+  /** Sessions of one directory, newest first, preview = first user message. Empty/legacy (null directory) rows excluded. */
+  listSessions(directory: string): SessionSummary[] {
+    const rows = this.db.query(`
+      SELECT s.id, s.provider, s.model, s.created_at,
+             (SELECT content FROM message m WHERE m.session_id = s.id AND m.role = 'user' ORDER BY m.created_at, m.rowid LIMIT 1) AS preview
+      FROM session s
+      WHERE s.directory = ?
+        AND EXISTS (SELECT 1 FROM message m WHERE m.session_id = s.id)
+      ORDER BY s.created_at DESC`).all(directory) as any[]
+    return rows.map(r => ({ id: r.id, provider: r.provider, model: r.model, createdAt: r.created_at, preview: r.preview ?? "" }))
   }
 
   appendMessage(m: Message): void {

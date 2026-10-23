@@ -20,7 +20,7 @@ export interface ReplEnv {
 
 export async function runRepl(env: ReplEnv): Promise<void> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-  let session = env.store.createSession(env.config.defaultProvider, env.config.defaultModel)
+  let session = env.store.createSession(env.config.defaultProvider, env.config.defaultModel, env.projectRoot)
   let model = env.config.defaultModel
   let providerCfg = env.config.providers[env.config.defaultProvider]
   let abortCtrl = new AbortController()
@@ -41,7 +41,7 @@ export async function runRepl(env: ReplEnv): Promise<void> {
     `session ${session.id.slice(0, 8)}…`,
     `${env.config.defaultProvider} · ${model}`,
   ]))
-  console.log(dim("/model /skills /clear /exit · Ctrl+C aborts turn"))
+  console.log(dim("/model /skills /clear /resume /exit · Ctrl+C aborts turn"))
 
   while (true) {
     let input: string
@@ -57,8 +57,24 @@ export async function runRepl(env: ReplEnv): Promise<void> {
     if (slash) {
       if (slash.cmd === "exit") break
       if (slash.cmd === "clear") {
-        session = env.store.createSession(env.config.defaultProvider, model)
+        session = env.store.createSession(env.config.defaultProvider, model, env.projectRoot)
         console.log(`new session ${session.id}`)
+        continue
+      }
+      if (slash.cmd === "resume") {
+        const list = env.store.listSessions(env.projectRoot)
+        if (!list.length) { console.log("no sessions in this directory"); continue }
+        list.forEach((s, i) =>
+          console.log(`${i + 1}. ${s.id.slice(0, 8)} · ${s.model} · ${truncate(s.preview, 48)}`))
+        const answer = await rl.question("resume which? [1] ")
+        const i = parseInt(answer.trim(), 10) - 1
+        const pick = list[Number.isNaN(i) ? 0 : i]
+        if (!pick) { console.log("no such session"); continue }
+        const row = env.store.loadSession(pick.id)
+        if (!row) { console.log("no such session"); continue }
+        session = row
+        if (row.model) model = row.model
+        console.log(`resumed ${row.id} (${env.store.getMessages(row.id).length} messages)`)
         continue
       }
       if (slash.cmd === "skills") {

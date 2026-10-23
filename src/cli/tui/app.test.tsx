@@ -289,3 +289,96 @@ test("slash autocomplete in composer: filter, tab-complete, enter opens picker",
   expect(f2).toContain("ollama")    // provider list up
   expect(f2).not.toContain("❯ /")   // composer suggestions gone (picker took over)
 })
+
+test("/resume: pick session, history replays, next turn continues it", async () => {
+  // seed a past session in the same project directory
+  const env = fakeEnv()
+  const old = env.store.createSession("9router", "glm/glm-5.2", env.projectRoot)
+  env.store.appendMessage({ id: "u1", sessionId: old.id, role: "user", content: "past question", createdAt: new Date(0).toISOString() })
+  env.store.appendMessage({ id: "a1", sessionId: old.id, role: "assistant", content: "past answer", createdAt: new Date(1).toISOString() })
+
+  const ok = { chat: async (a: any) => { a.onToken?.("new answer"); return { content: "new answer", toolCalls: [] } } }
+  const env2 = fakeEnv({ makeProvider: () => ok })
+  Object.assign(env2, { store: env.store })
+  const { type, lastFrame } = renderTui(<App env={env2} />)
+  const waitFor = async (want: string, ms = 3000) => {
+    const t0 = Date.now()
+    while (!lastFrame().includes(want)) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout waiting for "${want}"`)
+      await new Promise(r => setTimeout(r, 20))
+    }
+    await new Promise(r => setTimeout(r, 30))   // let the useInput subscription effect flush
+  }
+  await new Promise(r => setTimeout(r, 30))
+  type("/resume\r")
+  await waitFor("past question")                     // picker shows preview
+  type("\r")                                        // pick newest
+  await waitFor("past answer")                       // history replayed
+  type("next turn\r")
+  await waitFor("new answer")
+  const msgs = env.store.getMessages(old.id)
+  expect(msgs.some(m => m.content === "next turn")).toBe(true)   // continued, not forked
+})
+
+const pathTool2 = {
+  name: "edit", description: "edit", schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+  permission: "ask" as const, execute: async () => ({ output: "edited" }),
+}
+
+test("/permissions panel: switch to yolo and back, status reflects it", async () => {
+  const provider = { chat: async () => ({ content: "ok", toolCalls: [] }) }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  const waitFor = async (want: string, ms = 3000) => {
+    const t0 = Date.now()
+    while (!lastFrame().includes(want)) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout waiting for "${want}"`)
+      await new Promise(r => setTimeout(r, 20))
+    }
+    await new Promise(r => setTimeout(r, 30))
+  }
+  await new Promise(r => setTimeout(r, 30))
+  type("/permissions\r")
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).toContain("normal")
+  expect(lastFrame()).toContain("yolo")
+  type("\u001b[B\r")                      // ↓ to yolo, enter
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).not.toContain("❯ /")            // panel closed
+  expect(lastFrame()).toContain("YOLO")               // status shows mode
+  type("/permissions\r")                    // back to normal
+  await new Promise(r => setTimeout(r, 60))
+  type("\u001b[A\r")                         // sel starts at current (yolo) — ↑ to normal
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).not.toContain("YOLO")
+})
+
+test("yolo mode: ask tool runs without a permission dialog", async () => {
+  let calls = 0
+  const provider = {
+    chat: async (a: any) => {
+      if (calls++ === 0) return { content: "", toolCalls: [{ id: "t1", name: "edit", args: { path: "a.ts" } }] }
+      a.onToken?.("done")
+      return { content: "done", toolCalls: [] }
+    },
+  }
+  const env = fakeEnv({ tools: [pathTool2], makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  const waitFor = async (want: string, ms = 3000) => {
+    const t0 = Date.now()
+    while (!lastFrame().includes(want)) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout waiting for "${want}"`)
+      await new Promise(r => setTimeout(r, 20))
+    }
+    await new Promise(r => setTimeout(r, 30))
+  }
+  await new Promise(r => setTimeout(r, 30))
+  type("/permissions\r")
+  await waitFor("yolo")
+  type("\u001b[B\r")
+  await waitFor("YOLO")
+  type("go\r")
+  await waitFor("✎ edit a.ts")
+  await waitFor("done")
+  expect(lastFrame()).not.toContain("allow edit")     // no dialog ever appeared
+})
