@@ -5,7 +5,7 @@ import { buildPrefix, type PromptInput } from "../core/prompt"
 import type { Store } from "../core/store"
 import type { AppConfig } from "../core/config"
 import type { ToolDef } from "../core/tools/registry"
-import type { SkillMeta } from "../core/types"
+import type { SkillMeta, Agent } from "../core/types"
 import { parseSlash, parseAnswer } from "./commands"
 import { box, glyph, truncate, dim, cyan, red, Spinner, logo } from "./ui"
 import { safeBranch, safeAgentsMd } from "./context"
@@ -15,12 +15,14 @@ export interface ReplEnv {
   config: AppConfig
   tools: ToolDef[]
   skills: SkillMeta[]
+  agents: Agent[]
   projectRoot: string
 }
 
 export async function runRepl(env: ReplEnv): Promise<void> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-  let session = env.store.createSession(env.config.defaultProvider, env.config.defaultModel, env.projectRoot)
+  let agent = env.agents.find(a => a.id === env.config.defaultAgent)
+  let session = env.store.createSession(env.config.defaultProvider, env.config.defaultModel, env.projectRoot, agent?.id ?? null)
   let model = env.config.defaultModel
   let providerCfg = env.config.providers[env.config.defaultProvider]
   let abortCtrl = new AbortController()
@@ -42,7 +44,7 @@ export async function runRepl(env: ReplEnv): Promise<void> {
     `session ${session.id.slice(0, 8)}…`,
     `${env.config.defaultProvider} · ${model}`,
   ]))
-  console.log(dim("/model /skills /clear /resume /exit · Ctrl+C aborts turn"))
+  console.log(dim("/model /agent /skills /clear /resume /exit · Ctrl+C aborts turn"))
 
   while (true) {
     let input: string
@@ -58,7 +60,7 @@ export async function runRepl(env: ReplEnv): Promise<void> {
     if (slash) {
       if (slash.cmd === "exit") break
       if (slash.cmd === "clear") {
-        session = env.store.createSession(env.config.defaultProvider, model, env.projectRoot)
+        session = env.store.createSession(env.config.defaultProvider, model, env.projectRoot, agent?.id ?? null)
         console.log(`new session ${session.id}`)
         continue
       }
@@ -75,11 +77,29 @@ export async function runRepl(env: ReplEnv): Promise<void> {
         if (!row) { console.log("no such session"); continue }
         session = row
         if (row.model) model = row.model
-        console.log(`resumed ${row.id} (${env.store.getMessages(row.id).length} messages)`)
+        agent = row.agent ? env.agents.find(a => a.id === row.agent) : undefined
+        console.log(`resumed ${row.id} (${env.store.getMessages(row.id).length} messages)${agent ? ` · agent ${agent.id}` : ""}`)
         continue
       }
       if (slash.cmd === "skills") {
         console.log(env.skills.map(s => `- ${s.id}: ${s.description}`).join("\n") || "(none)")
+        continue
+      }
+      if (slash.cmd === "agent") {
+        const [id] = slash.args
+        if (!id) {
+          console.log(env.agents.map(a => `- ${a.id}${a.description ? `: ${a.description}` : ""}`).join("\n") || "(none)")
+          continue
+        }
+        const found = env.agents.find(a => a.id === id)
+        if (!found) { console.log(`unknown agent "${id}" — /agent lists them`); continue }
+        agent = found
+        env.store.setAgent(session.id, found.id)
+        if (found.model && env.config.providers[found.model.provider]) {
+          providerCfg = env.config.providers[found.model.provider]
+          model = found.model.model
+        }
+        console.log(`agent ${found.id}${found.model ? ` · ${found.model.provider}/${found.model.model}` : ""}`)
         continue
       }
       if (slash.cmd === "model") {
@@ -118,6 +138,7 @@ export async function runRepl(env: ReplEnv): Promise<void> {
       agentsMd: safeAgentsMd(env.projectRoot),
       skills: env.skills,
       tools: env.tools.map(t => ({ name: t.name, description: t.description, schema: t.schema })),
+      agentPrompt: agent?.prompt,
     }
     const r = await runTurn({
       store: env.store, provider, tools: env.tools, promptInput,

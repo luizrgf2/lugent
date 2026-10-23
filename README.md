@@ -41,6 +41,7 @@ lugent reads the **first file found** — no merging between the two:
 | `providers.<name>.apiKey` | Optional. `{env:VAR}` is substituted at load; unknown vars become `""` |
 | `defaultProvider` | Key into `providers` used at startup |
 | `defaultModel` | Model id sent as `model` on every request |
+| `defaultAgent` | Optional agent id (`.agents/agents/<id>.md`) selected at startup. Unknown id → warning, base agent |
 
 At startup each provider gets a health check (`GET /models`, 8s timeout) — unreachable ones are reported as `OFF` but lugent still starts.
 
@@ -130,6 +131,37 @@ Using skills in a session:
 - **Force one:** mention the id in your message ("use skill git-release to …").
 - **Browse:** TUI `/skills` lists what is loaded (read-only, ↑/↓+Esc); plain REPL `/skills` lists ids. Toggling skills on/off is not implemented — every loaded skill is active in every session (selector design deferred, see `docs/future-features.md`).
 
+## Agents
+
+An agent is a named profile — system prompt, model, tool allowlist, permission overrides — defined in markdown, same shape as skills:
+
+```
+.agents/agents/reviewer.md         → id "reviewer"
+.agents/agents/team/audit.md       → id "team/audit" (nested path is the id)
+~/.agents/agents/reviewer.md       → user scope; project wins on the same id
+```
+
+```markdown
+---
+description: Reviews changes read-only
+model: 9router/glm-5.2
+tools: [read, glob, grep]
+permissions: {shell: ask}
+---
+You are a code reviewer. Report findings with file and line references.
+```
+
+| Field | Meaning | Default when absent |
+| --- | --- | --- |
+| `description` | shown by `/agent` | none |
+| `model` | `provider/model`, both required — provider must exist in the config | inherit the session's |
+| `tools` | tool ids sent to the model; anything else is invisible to it | all tools |
+| `permissions` | per-tool `allow` / `ask` / `deny`; `deny` also removes the tool | tool default |
+
+The body is the agent's system prompt: it **replaces** the base prompt, and AGENTS.md plus the skills advertisement are still added on top. A permission override replaces the tool's default — a session `always` grant still wins over it, and the outside-project guard still forces an ask.
+
+Usage: `/agent` lists loaded agents, `/agent reviewer` switches. Switching works mid-session — history is kept and the next turn runs with the new prompt, model and toolset. `/resume` restores the agent together with provider and model; `defaultAgent` picks the startup agent. Nothing installed → behavior is identical to no agents at all. Bad frontmatter never breaks startup: an empty body drops that agent, and an unknown tool id or a `model` without `provider/` warns and falls back.
+
 ## Permissions & yolo
 
 Every tool has a default (`allow` / `ask`, table above). During a turn the model may trigger an inline dialog:
@@ -152,6 +184,6 @@ Sessions, messages and permission grants live in one SQLite file:
 bun test
 ```
 
-72 tests, including a golden snapshot pinning the system prompt byte-for-byte (provider prefix-cache stability) and an end-to-end turn with tool calls.
+The suite includes a golden snapshot pinning the system prompt byte-for-byte (provider prefix-cache stability) and an end-to-end turn with tool calls.
 
 Out-of-scope features and their triggers: [docs/future-features.md](docs/future-features.md) · Architecture: [docs/architecture.md](docs/architecture.md)
