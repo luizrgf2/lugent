@@ -1,8 +1,9 @@
 import type { ToolDef } from "./registry"
+import { shellCommand } from "../platform"
 
 export const shellTool: ToolDef = {
   name: "shell",
-  description: "Execute a shell command with bash. Default timeout 2 minutes. background: true for long-running processes.",
+  description: "Execute a shell command (bash on unix, cmd on Windows). Default timeout 2 minutes. background: true for long-running processes.",
   schema: {
     type: "object",
     properties: {
@@ -14,7 +15,7 @@ export const shellTool: ToolDef = {
   permission: "ask",
   async execute(args, ctx) {
     try {
-      const proc = Bun.spawn(["bash", "-c", args.command], {
+      const proc = Bun.spawn([...shellCommand(process.platform), args.command], {
         cwd: args.workdir ?? ctx.cwd,
         stdout: "pipe", stderr: "pipe", stdin: "ignore",
       })

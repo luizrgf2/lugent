@@ -1,18 +1,20 @@
 import { mkdirSync } from "node:fs"
+import { dirname } from "node:path"
 import { homedir } from "node:os"
 import { loadConfig } from "./core/config"
 import { Store } from "./core/store"
 import { makeTools } from "./core/tools"
 import { loadSkills } from "./core/skills"
 import { Provider } from "./core/provider"
+import { defaultDbPath } from "./core/platform"
 import { runRepl } from "./cli/repl"
 
 const args = process.argv.slice(2)
 const dbFlag = args.indexOf("--db")
-const dbPath = dbFlag !== -1 ? args[dbFlag + 1] : `${homedir()}/.local/share/lugent/db.sqlite`
+const dbPath = dbFlag !== -1 ? args[dbFlag + 1] : defaultDbPath(process.env, homedir(), process.platform)
 const projectRoot = process.cwd()
 
-mkdirSync(dbPath.split("/").slice(0, -1).join("/"), { recursive: true })
+mkdirSync(dirname(dbPath), { recursive: true })
 
 const config = loadConfig(projectRoot)
 const store = new Store(dbPath)
