@@ -97,6 +97,22 @@ describe("parseMcpServer", () => {
     const cfg = parseMcpServer("s", { type: "remote", url: "https://x/mcp", timeout: 5000, headers: { Authorization: "Bearer {env:MCP_TEST_TOKEN}" } })
     expect(cfg).toEqual({ type: "remote", url: "https://x/mcp", timeout: 5000, headers: { Authorization: "Bearer tok" } })
   })
+  test("scopes is an optional string array", () => {
+    expect(parseMcpServer("s", { type: "remote", url: "https://x/mcp", scopes: ["agents:read", "knowledge:write"] }))
+      .toEqual({ type: "remote", url: "https://x/mcp", scopes: ["agents:read", "knowledge:write"] })
+    // absent stays absent: "no scopes" and "these scopes" are different requests
+    expect(parseMcpServer("s", { type: "remote", url: "https://x/mcp" })).toEqual({ type: "remote", url: "https://x/mcp" })
+  })
+  test("a bad scopes value warns and drops", () => {
+    const warns: string[] = []
+    const orig = console.warn
+    console.warn = (m: string) => { warns.push(String(m)) }
+    try {
+      expect(parseMcpServer("s", { type: "remote", url: "https://x/mcp", scopes: "agents:read" }))
+        .toEqual({ type: "remote", url: "https://x/mcp" })
+      expect(warns.join("\n")).toMatch(/scopes/)
+    } finally { console.warn = orig }
+  })
 })
 
 describe("loadMcpConfig", () => {

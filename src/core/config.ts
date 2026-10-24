@@ -11,7 +11,7 @@ export interface AppConfig {
 
 export interface McpCommon { enabled?: boolean; timeout?: number }
 export interface McpLocal extends McpCommon { type: "local"; command: string[]; environment?: Record<string, string>; cwd?: string }
-export interface McpRemote extends McpCommon { type: "remote" | "http"; url: string; headers?: Record<string, string> }
+export interface McpRemote extends McpCommon { type: "remote" | "http"; url: string; headers?: Record<string, string>; scopes?: string[] }
 export type McpServerConfig = McpLocal | McpRemote
 export type McpServerConfigMap = Record<string, McpServerConfig>
 
@@ -72,6 +72,13 @@ export function parseMcpServer(name: string, raw: unknown): McpServerConfig | un
     const cfg: McpRemote = { type, url: r.url, ...common }
     const headers = subEnvMap(r.headers)
     if (headers) cfg.headers = headers
+    // Optional: without it the flow sends no scope at all and the consent screen decides.
+    if (r.scopes !== undefined) {
+      const list = Array.isArray(r.scopes) ? r.scopes : []
+      const scopes = list.filter((s: unknown): s is string => typeof s === "string" && s !== "")
+      if (scopes.length && scopes.length === list.length) cfg.scopes = scopes
+      else console.warn(`mcp ${name}: "scopes" must be a non-empty array of strings, ignored`)
+    }
     return cfg
   }
   console.warn(`mcp ${name}: unknown type ${JSON.stringify(rawType)}, dropped`)
