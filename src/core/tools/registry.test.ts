@@ -19,3 +19,18 @@ test("validateArgs: null/non-object args", () => {
 test("validateArgs: valid passes", () => {
   expect(validateArgs({ path: "a" }, { type: "object", properties: { path: { type: "string" } }, required: ["path"] })).toBeNull()
 })
+
+test("validateArgs: nested/object properties are not type-judged", () => {
+  const schema = { type: "object" as const, properties: { filter: { type: "object" } }, required: ["filter"] }
+  expect(validateArgs({ filter: { a: 1 } }, schema)).toBeNull()
+  expect(validateArgs({ filter: [1, 2] }, schema)).toBeNull()
+})
+
+test("validateArgs: required is enforced on a raw schema", () => {
+  const schema = { type: "object" as const, properties: { text: { type: "string" } }, required: ["text"] }
+  expect(validateArgs({}, schema)).toBe("missing required field: text")
+})
+
+test("validateArgs: a schema without properties only checks required", () => {
+  expect(validateArgs({ anything: 1 }, { type: "object" as const })).toBeNull()
+})

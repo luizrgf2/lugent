@@ -31,7 +31,7 @@ Documentation pattern for this repo: **one small doc per topic, never one big fi
 
 | If you touch… | Read |
 | --- | --- |
-| `src/core/prompt.ts` (prefix, buildMessages) | `docs/architecture.md` § "Byte-stable prefix" — snapshot must stay byte-identical unless the change is deliberate |
+| `src/core/prompt.ts` (prefix, buildMessages, the always-present `# MCP` section) | `docs/architecture.md` § "Byte-stable prefix" — snapshot must stay byte-identical unless the change is deliberate; before growing the `# MCP` section, read `docs/decisions.md` (2026-10-24, always-loaded prompt section) for the promotion trigger |
 | `src/core/provider.ts` (SSE, retry, health) | `docs/architecture.md` § "SSE fragment accumulation" |
 | `src/core/loop.ts` / abort / history repair | `docs/architecture.md` § "Append-only store, repaired on read" + § "Turn flow" |
 | `src/core/store.ts` | `docs/architecture.md` § "Schema" |
@@ -40,6 +40,7 @@ Documentation pattern for this repo: **one small doc per topic, never one big fi
 | config loading (`config.ts`) | `README.md` § "Configuration" (precedence, `{env:VAR}`) |
 | `src/core/skills.ts` (skill loading) | `README.md` § "Skills" — user `~/.agents/skills` + project `.agents/skills`; same id → project wins |
 | `src/core/agents.ts` (agent format, tools/permissions, built-ins `build`/`plan`, `/agent`) | `README.md` § "Agents" |
+| `src/core/mcp/*` (transports, client, tool bridge, manager) | `docs/architecture.md` § "MCP" — transport seam + legacy `initialize` revision; `README.md` § "MCP" |
 | branch or commit | `.agents/skills/git-conventions/SKILL.md` |
 | `src/cli/ui.ts` (ANSI, box, spinner) | zero-dep: no color/TUI lib; gate all styling on `isTTY` so piped output stays plain; keep pure formatters tested in `ui.test.ts` |
 | `src/cli/tui/*` (Ink TUI) | reasoning is display-only (never persisted); core must not import react/ink; test via `harness.tsx` (ink-testing-library is incompatible with ink v8) |

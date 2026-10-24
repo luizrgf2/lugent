@@ -17,10 +17,12 @@ bun src/main.ts
 
 ## Configuration
 
-lugent reads the **first file found** — no merging between the two:
+For `providers`, `defaultProvider`, `defaultModel` and `defaultAgent` lugent reads the **first file found** — no merging between the two:
 
 1. `<project>/lugent.json` (wins)
 2. `~/.config/lugent/config.json` (global fallback; works on Windows too)
+
+(`mcp`, agents and skills merge both files instead — see below.)
 
 ```json
 {
@@ -31,7 +33,15 @@ lugent reads the **first file found** — no merging between the two:
     }
   },
   "defaultProvider": "ollama",
-  "defaultModel": "qwen3.5:14b"
+  "defaultModel": "qwen3.5:14b",
+  "mcp": {
+    "chrome-devtools": { "type": "local", "command": ["npx", "-y", "chrome-devtools-mcp@latest"] },
+    "takeflow": {
+      "type": "remote",
+      "url": "https://chatback.takeflow.com.br/mcp",
+      "headers": { "X-Tenant": "{env:TAKEFLOW_TENANT}" }
+    }
+  }
 }
 ```
 
@@ -42,6 +52,15 @@ lugent reads the **first file found** — no merging between the two:
 | `defaultProvider` | Key into `providers` used at startup |
 | `defaultModel` | Model id sent as `model` on every request |
 | `defaultAgent` | Optional agent id selected at startup. Defaults to `build`; unknown id → warning, then `build` |
+| `mcp.<name>.type` | `local` (spawns `command`) or `remote` (`url`); `http` is an alias for `remote`. Inferred when absent |
+| `mcp.<name>.command` | `local`: argv array, e.g. `["npx","-y","pkg@latest"]` |
+| `mcp.<name>.environment` / `.cwd` | `local`: extra env (values support `{env:VAR}`) and working dir relative to the project |
+| `mcp.<name>.url` | `remote`: Streamable HTTP endpoint |
+| `mcp.<name>.headers` | `remote`: extra headers (values support `{env:VAR}`) |
+| `mcp.<name>.enabled` | `false` skips the server at startup (the entry stays, listed `disabled` by `/mcp`, so it can be re-enabled for the session) |
+| `mcp.<name>.timeout` | Per-request timeout in ms (default `30000`) |
+
+Unlike `providers` (first file found wins), `mcp` **merges** both config files — global first, project wins per server — the same way agents and skills merge. A project entry replaces the whole global entry; to disable a server declared in the other file, repeat it with `enabled: false` — either the whole entry, or just `{ "enabled": false }` as a marker. Markers are applied last and win wherever the server was declared, so your global config can switch off a server a repo declares.
 
 At startup each provider gets a health check (`GET /models`, 8s timeout) — unreachable ones are reported as `OFF` but lugent still starts.
 
@@ -61,7 +80,7 @@ In a terminal, `lugent` starts a **full-screen TUI** (React + Ink): scrollable t
 
 - **Ctrl+C once** aborts the running turn (and denies a pending permission); **twice** exits.
 - **PageUp/PageDown** scroll the transcript (window = one page). Scrolling up during streaming pins the view — new content grows below without jumping the screen; submitting a new message snaps back to the tail. Scrolling past the very top keeps the oldest lines on screen (the view is never blank).
-- Slash commands: `/exit` quits; `/model` opens a two-level picker (provider → live model list via `listModels()`, `↑/↓`+Enter, Esc cancels, Ctrl+C closes); `/skills` browses loaded skills; `/resume` picks a past session of this directory (replays its transcript, next turn continues it — not a fork); `/permissions` toggles normal/yolo (yolo auto-approves every tool call, shown in the status bar); `/agent` opens the agent picker — the chosen profile's prompt, model and toolset apply from the next turn, and the status bar shows the active agent (`build` by default). Typing `/` in the composer shows an autocomplete box — it filters as you type, `↑/↓` move, Enter or Tab completes. Others work in `--plain` mode.
+- Slash commands: `/exit` quits; `/model` opens a two-level picker (provider → live model list via `listModels()`, `↑/↓`+Enter, Esc cancels, Ctrl+C closes); `/skills` browses loaded skills; `/mcp` lists the MCP servers with their status and lets you reconnect, disable or enable one; `/resume` picks a past session of this directory (replays its transcript, next turn continues it — not a fork); `/permissions` toggles normal/yolo (yolo auto-approves every tool call, shown in the status bar); `/agent` opens the agent picker — the chosen profile's prompt, model and toolset apply from the next turn, and the status bar shows the active agent (`build` by default). Typing `/` in the composer shows an autocomplete box — it filters as you type, `↑/↓` move, Enter or Tab completes. Others work in `--plain` mode.
 - `--plain` forces the inline REPL below; piped stdin (non-TTY) falls back to it automatically.
 - **Image attachments**: mention a file with `@path/to.png` in your message (`.png` `.jpg` `.jpeg` `.gif` `.webp`, ≤20 MB, relative to the project root). It is sent to the model as an OpenAI vision `image_url` part — works with any multimodal model behind an OpenAI-compatible endpoint. Unresolvable markers stay literal text.
 
@@ -83,6 +102,8 @@ LUGENT
 > /model                      # list models of the current provider
 > /model ollama qwen3.5:14b   # switch provider (+ optional model)
 > /skills                     # list advertised skills
+> /mcp                        # list MCP servers and their status
+> /mcp disable echo           # take a server (and its tools) out of the session
 > /clear                      # start a fresh session
 > /resume                     # list this directory's sessions, pick one to continue
 > /exit                       # quit
@@ -105,6 +126,33 @@ LUGENT
 | `skill` | allow | Load a skill body by id |
 
 **Extra guard:** any resource outside the project root (absolute path, `..`, `~`) forces an `ask` even for `allow` tools, unless already granted for the session.
+
+MCP tools are added on top, named `<server>_<tool>` (non-`[A-Za-z0-9_-]` characters become `_`, runs of `_` collapse to one, capped at 64 chars); a name collision drops the later tool, not the server. They always default to `ask` — see [MCP](#mcp) below.
+
+## MCP
+
+lugent speaks the Model Context Protocol over two transports, declared in the `mcp` map (see [Configuration](#configuration)):
+
+- **`local`** — spawns a child process and talks newline-delimited JSON-RPC over its stdio (e.g. `chrome-devtools`, `browsermcp`).
+- **`remote`** (alias `http`) — Streamable HTTP: one POST per JSON-RPC message, with `Mcp-Session-Id` handling, SSE responses and `202` notifications.
+
+At startup every enabled server is connected in parallel, its tools are listed and bridged into the tool registry as `<server>_<tool>`. A server that fails to start is reported as `mcp: <name>: <reason>` and **never stops lugent** — the rest keep working. A `local` server whose child dies later flips to `failed` on its own, so `/mcp` can bring it back (a `remote` server is only noticed on its next failed call). MCP servers are untrusted third parties, so their tools are permission-gated (`ask` by default) and an agent's `tools`/`permissions` can allow, ask or deny them by name.
+
+**Trust note:** a project `lugent.json` can declare `local` servers, whose `command` is spawned at startup with no prompt — same trust channel as a project `AGENTS.md`, skills or agents (see `docs/decisions.md`, 2026-10-24). Read a repo's `mcp` block before running lugent in it; every server is listed by `/mcp` and any failure is printed at startup.
+
+`/mcp` lists every server with its status — `connected` (with a tool count), `connecting` (a handshake still in flight), `failed` (with the error) or `disabled` — and lets you act on one:
+
+- `connected` → **disable** (drops its tools from the session)
+- `disabled` → **enable** (reconnects)
+- `failed` → **reconnect** or **disable**
+
+In `--plain` mode the same actions are explicit: `/mcp`, `/mcp reconnect <name>`, `/mcp disable <name>`, `/mcp enable <name>`.
+
+Enabling and disabling is **session-scoped** — lugent never rewrites `lugent.json` (a turn must not silently edit a file that can hold secrets). Restart to fall back to the configured state; persistence is deferred (see `docs/future-features.md`).
+
+**The agent knows this surface.** lugent's system prompt carries a short `# MCP` section — always present, and *outside* the agent prompt, so it stays when you switch to `plan` or a custom agent. You can therefore ask how MCP works here or where the config lives, and ask it to install a server: it edits `lugent.json` with the normal `write`/`edit` tools (both `ask`, so nothing is rewritten without your approval) and tells you to restart. Put tokens in `{env:VAR}`, never inline — especially in a project file that may be committed.
+
+**OAuth for remote servers is not implemented yet.** A `remote` server that answers `401` fails closed with a clear message (the browser flow is Phase 2); configure a static `headers` token if the endpoint supports one.
 
 ## Skills
 

@@ -5,8 +5,9 @@ import { toolsForAgent, agentModelTarget, resolveAgent } from "../core/agents"
 import type { Store } from "../core/store"
 import type { AppConfig } from "../core/config"
 import type { ToolDef } from "../core/tools/registry"
+import type { McpManager } from "../core/mcp/manager"
 import type { SkillMeta, Agent } from "../core/types"
-import { parseSlash, parseAnswer } from "./commands"
+import { parseSlash, parseAnswer, mcpActions, formatMcpState } from "./commands"
 import { box, glyph, truncate, dim, cyan, red, Spinner, logo } from "./ui"
 import { buildPromptInput } from "./context"
 
@@ -17,6 +18,7 @@ export interface ReplEnv {
   skills: SkillMeta[]
   agents: Agent[]
   projectRoot: string
+  mcp: McpManager
 }
 
 export async function runRepl(env: ReplEnv): Promise<void> {
@@ -46,7 +48,7 @@ export async function runRepl(env: ReplEnv): Promise<void> {
     `session ${session.id.slice(0, 8)}…`,
     `${providerName} · ${model}`,
   ]))
-  console.log(dim("/model /agent /skills /clear /resume /exit · Ctrl+C aborts turn"))
+  console.log(dim("/model /agent /skills /mcp /clear /resume /exit · Ctrl+C aborts turn"))
 
   while (true) {
     let input: string
@@ -87,6 +89,29 @@ export async function runRepl(env: ReplEnv): Promise<void> {
       }
       if (slash.cmd === "skills") {
         console.log(env.skills.map(s => `- ${s.id}: ${s.description}`).join("\n") || "(none)")
+        continue
+      }
+      if (slash.cmd === "mcp") {
+        const [action, name] = slash.args
+        if (!action) {
+          const list = env.mcp.states()
+          console.log(list.map(formatMcpState).join("\n") || "(no MCP servers configured)")
+          continue
+        }
+        if (!name) { console.log("usage: /mcp [reconnect|disable|enable] <name>"); continue }
+        if (action !== "reconnect" && action !== "disable" && action !== "enable") {
+          console.log("usage: /mcp [reconnect|disable|enable] <name>")
+          continue
+        }
+        const before = env.mcp.states().find(s => s.name === name)
+        if (!before) { console.log(`unknown MCP server "${name}" — /mcp lists them`); continue }
+        if (!mcpActions(before.status).includes(action)) {
+          console.log(`cannot ${action} ${name} (${before.status})`)
+          continue
+        }
+        await env.mcp[action](name)
+        const after = env.mcp.states().find(s => s.name === name)!
+        console.log(`mcp ${name}: ${after.status}${after.error ? ` — ${after.error}` : ""}`)
         continue
       }
       if (slash.cmd === "agent") {

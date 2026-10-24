@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test"
-import { parseSlash, parseAnswer } from "./commands"
+import { parseSlash, parseAnswer, mcpActions, formatMcpState } from "./commands"
 
 test("plain message is not a command", () => {
   expect(parseSlash("hello world")).toBeNull()
@@ -23,4 +23,19 @@ test("parseAnswer: only explicit y/a allows (review F3)", () => {
   expect(parseAnswer("n")).toBe("n")
   expect(parseAnswer("garbage")).toBe("n")
   expect(parseAnswer("\n")).toBe("n")
+})
+
+test("mcpActions: one action set per status", () => {
+  expect(mcpActions("connected")).toEqual(["disable"])
+  expect(mcpActions("disabled")).toEqual(["enable"])
+  expect(mcpActions("failed")).toEqual(["reconnect", "disable"])
+})
+
+test("formatMcpState: tool count when connected, error when failed", () => {
+  expect(formatMcpState({ name: "a", type: "local", status: "connected", toolCount: 1 }))
+    .toBe("a (local) — connected, 1 tool")
+  expect(formatMcpState({ name: "b", type: "remote", status: "failed", error: "boom", toolCount: 0 }))
+    .toBe("b (remote) — failed: boom")
+  expect(formatMcpState({ name: "c", type: "remote", status: "disabled", toolCount: 0 }))
+    .toBe("c (remote) — disabled")
 })

@@ -79,7 +79,9 @@ Loader: `src/core/agents.ts`; usage and fields: `README.md` § "Agents".
 
 | Feature | Why deferred | Add when |
 | --- | --- | --- |
-| MCP client (external tool servers) | Protocol implementation is its own project | Third-party tools (browser, DB, APIs) wanted |
+| MCP client (external tool servers) | **Phase 1 shipped** (`local` + `remote` transports, tool bridging, `/mcp`); OAuth for remote servers is Phase 2 | OAuth when a target server refuses static tokens |
+| MCP OAuth (browser authorization flow for `remote` servers) | Phase 2 — Phase 1 fails closed on `401` and a turn never opens a browser | A `remote` server (e.g. takeflow) requires OAuth with no static-token option |
+| MCP disable/enable persistence | `/mcp` toggles are session-scoped; lugent never rewrites `lugent.json` | Users want a server off permanently without editing the file (a `--persist` flag or `/mcp save`) |
 | Skills HTTP catalogs (remote `index.json` sources) | Local skills suffice | Team-shared skill distribution needed |
 | Snapshots / checkpoints (revert session state) | Requires storage + UI design | Destructive mistakes become common |
 

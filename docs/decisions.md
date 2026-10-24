@@ -121,3 +121,41 @@ Cost if wrong: cloning a hostile repo and switching to (or defaulting into) its 
 Decision: `Agent.color` (optional, frontmatter `color:`) accepts an ink color name or `#rrggbb`; invalid warns and falls back. Built-ins carry defaults (`build` magenta, `plan` yellow) and agents without a color inherit magenta. The TUI shows a fixed context line above the input: yellow `§ AGENTS.md loaded` when a project `AGENTS.md` was read, plus `· agent <id>` in the agent's color.
 Why: the user asked "does lugent support per-agent colors?" — it didn't; the status bar already showed the agent id, so the color slot existed visually but not in data. Defaults on built-ins mean the line is colored out of the box; fallback keeps legacy agent files valid without touching them.
 Cost if wrong: two agents can pick the same color (no uniqueness check) — acceptable, color is a hint not an identity; hex parsing accepts `#rgb` shorthand ink also accepts, so no divergence.
+
+## 2026-10-24 — `mcp` merges both config files; a disabled entry stays listed
+Decision: the `mcp` map merges global then project (project wins per server, replacing the whole entry), matching agents/skills; `enabled: false` keeps the entry and is reported as `disabled` instead of being dropped. `providers`' first-file-wins is untouched.
+Why: a project often needs to *disable* one global server, which is only expressible if the entry survives the merge; dropping disabled entries would also make `/mcp` unable to re-enable them. Keeping `providers` as-is avoids an unrelated behavior change.
+Cost if wrong: a project cannot delete a global server, only disable it (an unused entry lingers in `/mcp`); if a merge-vs-override semantics change is ever wanted for `providers`, the two paths diverge and both need revisiting.
+
+## 2026-10-24 — MCP v1 targets the legacy `initialize` + `Mcp-Session-Id` revision
+Decision: the client sends `2025-06-18`, accepts `2025-03-26`/`2024-11-05`, performs the `initialize` handshake and echoes `Mcp-Session-Id`; the later stateless revision is not implemented.
+Why: every real server we target (chrome-devtools, browsermcp, takeflow) predates the stateless revision and still requires the handshake; implementing only the newest revision would fail against all of them.
+Cost if wrong: a server that requires the stateless revision would need a second code path (`protocol.ts` centralizes the version constants, so the addition is localized).
+
+## 2026-10-24 — MCP tools default to `ask`
+Decision: every tool bridged from an MCP server gets the `ask` permission; an agent's `tools`/`permissions` can allow, ask or deny it by name.
+Why: MCP servers are untrusted third parties whose tools often shell out, browse, or write; defaulting them to `allow` would let any server in `lugent.json` act without a prompt.
+Cost if wrong: a server used every turn prompts repeatedly unless the user grants `a` (session-scoped) or allows it in an agent — acceptable friction versus silent third-party execution.
+
+## 2026-10-24 — `ToolDef.schema` is a passthrough JSON Schema; `validateArgs` checks top-level primitives only
+Decision: `ToolDef.schema` widened from the built-in tool shape to `JsonSchema`; `validateArgs` enforces only `required` presence and top-level `string`/`number`/`boolean` types, leaving nested/object properties unchecked.
+Why: MCP servers supply arbitrary schemas; a strict validator would have to reimplement JSON Schema (a dependency, against the zero-dep core) and any divergence would *reject a valid call* — worse than passing it through for the server to validate, which is the server's own contract anyway.
+Cost if wrong: a malformed nested argument reaches the server and comes back as its own error (a tool result the model can retry on), instead of being caught locally; built-in tools keep their exact schemas, so nothing there loosens.
+
+## 2026-10-24 — `/mcp` enable/disable is session-scoped, never rewrites `lugent.json`
+Decision: `/mcp` reconnects/disables/enables servers in the running `McpManager` only; the choice is not persisted, and lugent never writes `lugent.json`.
+Why: a config file can hold secrets (tokens in `headers`), so having a turn silently rewrite it is a hazard the user did not ask for; toggling is a runtime convenience, and restart is a clear, predictable way back to the configured state. Persisting a global server from inside a project was also ambiguous about *which* file to edit.
+Cost if wrong: a user who wants a server off permanently must edit the file by hand; a `--persist` flag or an explicit `/mcp save` is the upgrade path, deliberately deferred.
+
+## 2026-10-24 — a project `lugent.json` may declare MCP servers that execute at startup
+Decision: project scope is trusted for `mcp`: a `local` server's `command` is spawned at startup (via `loadMcpConfig` reading the project file) with no trust prompt, exactly like a project `AGENTS.md`, skill or agent is trusted. `enabled: false` is the opt-out.
+Why: consistency — this repo already decided project `AGENTS.md`/skills are trusted-repo channels and that a project agent may grant `allow`, so gating only MCP would be inconsistent; and a per-repo trust store is a new subsystem nobody asked for. Local MCP servers are *inherently* commands, so the capability cannot be removed without removing the transport.
+Cost if wrong: cloning a hostile repo and running lugent executes its `lugent.json` commands before any prompt or permission dialog — the `ask` default covers tool *calls*, not the transport. Mitigation today is visibility: `/mcp` lists every server and its failure, and this note is in the README. Upgrade path if it bites: require `enabled: true` for project-declared servers, or a first-run trust prompt per repo.
+
+## 2026-10-24 — MCP knowledge lives in an always-loaded prompt section, not a skill
+
+Decision: a short `# MCP` section is the **first** part of the system prefix (`prompt.ts`), unconditional and independent of the agent; it is not a built-in skill.
+
+Why: an agent prompt *replaces* `SYSTEM_PROMPT`, so MCP knowledge placed there would vanish under `plan` or any user-defined agent — the section has to be its own prefix part, like `# Tools`. The primary use case is answering a factual question ("where does the MCP config live?") and installing on request; the lazy route (a skill) depends on the model *deciding* to load the body, which is exactly the decision that fails on a factual question — it would answer from the one-line description. It is unconditional so a user with no server configured — precisely the user who asks how to add one — still gets the answer, and short (~12 lines) so the cost is small and prefix-cacheable. Built-in skills do not exist today (skills load from the filesystem only), so the lazy route would also mean `BUILTIN_SKILLS` plus a `SkillMeta.body` seam.
+
+Cost if wrong: every request pays ~12 lines of context, including for users who never touch MCP; the section is part of the frozen prefix, so growing it invalidates the provider cache once per change. Promotion trigger: if this becomes a *procedure* (validate the server, choose npx/uvx, confirm it actually started) or passes ~15 lines, move the body to a built-in skill and leave only a one-line pointer in the prefix.

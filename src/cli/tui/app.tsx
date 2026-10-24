@@ -15,6 +15,8 @@ import { AgentPicker } from "./agent-picker"
 import { SkillList } from "./skill-list"
 import { PermissionMode } from "./permission-mode"
 import { SessionPicker } from "./session-picker"
+import { McpList } from "./mcp-list"
+import type { McpServerState } from "../../core/mcp/manager"
 
 export type TuiEnv = ReplEnv & {
   offProviders: string[]
@@ -55,8 +57,9 @@ export function App(props: { env: TuiEnv }) {
   // A defaultAgent's model (when its provider is configured) wins over the config default at startup.
   const [provider, setProvider] = useState(() => agentModelTarget(agent, env.config.providers)?.provider ?? env.config.defaultProvider)
   const [model, setModel] = useState(() => agentModelTarget(agent, env.config.providers)?.model ?? env.config.defaultModel)
-  const [overlay, setOverlay] = useState<null | "model" | "skills" | "resume" | "permissions" | "agent">(null)
-  const overlayRef = useRef<null | "model" | "skills" | "resume" | "permissions" | "agent">(null)
+  const [overlay, setOverlay] = useState<null | "model" | "skills" | "resume" | "permissions" | "agent" | "mcp">(null)
+  const overlayRef = useRef<null | "model" | "skills" | "resume" | "permissions" | "agent" | "mcp">(null)
+  const [mcpStates, setMcpStates] = useState<McpServerState[]>([])
   const [yolo, setYolo] = useState(false)
   // Ref mirrors state: submit reads it — ink batching can make state stale.
   const yoloRef = useRef(false)
@@ -95,6 +98,10 @@ export function App(props: { env: TuiEnv }) {
       if (text.trim() === "/exit") return exit()
       if (text.trim() === "/model") { overlayRef.current = "model"; setOverlay("model"); return }
       if (text.trim() === "/skills") { overlayRef.current = "skills"; setOverlay("skills"); return }
+      if (text.trim() === "/mcp") {
+        if (!busy) { setMcpStates(env.mcp.states()); overlayRef.current = "mcp"; setOverlay("mcp") }
+        return
+      }
       if (text.trim() === "/permissions") {
         if (!busy) { overlayRef.current = "permissions"; setOverlay("permissions") }
         return
@@ -214,6 +221,14 @@ export function App(props: { env: TuiEnv }) {
             onClose={closeOverlay} />
         : overlay === "skills"
           ? <SkillList skills={env.skills} onClose={closeOverlay} />
+          : overlay === "mcp"
+            ? <McpList
+                states={mcpStates}
+                onAction={async (name, action) => {
+                  await env.mcp[action](name)
+                  setMcpStates(env.mcp.states())
+                }}
+                onClose={closeOverlay} />
           : overlay === "resume"
             ? <SessionPicker
                 sessions={env.store.listSessions(env.projectRoot)}
@@ -254,6 +269,7 @@ export function App(props: { env: TuiEnv }) {
                   { cmd: "exit", desc: "quit lugent" },
                   { cmd: "model", desc: "switch provider/model" },
                   { cmd: "skills", desc: "browse skills" },
+                  { cmd: "mcp", desc: "MCP servers (status/reconnect)" },
                   { cmd: "resume", desc: "resume a past session" },
                   { cmd: "permissions", desc: "permission mode (normal/yolo)" },
                   { cmd: "agent", desc: "switch agent profile" },
