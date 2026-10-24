@@ -40,6 +40,7 @@ Documentation pattern for this repo: **one small doc per topic, never one big fi
 | config loading (`config.ts`) | `README.md` § "Configuration" (precedence, `{env:VAR}`) |
 | `src/core/skills.ts` (skill loading) | `README.md` § "Skills" — user `~/.agents/skills` + project `.agents/skills`; same id → project wins |
 | `src/core/agents.ts` (agent format, tools/permissions, built-ins `build`/`plan`, `/agent`) | `README.md` § "Agents" |
+| `src/core/mcp/*` (transports, client, tool bridge, manager) | `docs/architecture.md` § "MCP" — transport seam + legacy `initialize` revision; `README.md` § "MCP" |
 | branch or commit | `.agents/skills/git-conventions/SKILL.md` |
 | `src/cli/ui.ts` (ANSI, box, spinner) | zero-dep: no color/TUI lib; gate all styling on `isTTY` so piped output stays plain; keep pure formatters tested in `ui.test.ts` |
 | `src/cli/tui/*` (Ink TUI) | reasoning is display-only (never persisted); core must not import react/ink; test via `harness.tsx` (ink-testing-library is incompatible with ink v8) |
