@@ -24,7 +24,9 @@ export function McpList(p: {
 
   const run = async (name: string, action: McpAction) => {
     setBusy(true)
-    try { await p.onAction(name, action) } finally { setBusy(false); setOpen(null); setActionBoth(0) }
+    try { await p.onAction(name, action) }
+    catch { /* the owner reports the result through `states`; never reject into the void */ }
+    finally { setBusy(false); setOpen(null); setActionBoth(0) }
   }
 
   useInput((_input, key) => {

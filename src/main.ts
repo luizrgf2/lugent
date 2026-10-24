@@ -27,9 +27,21 @@ const baseTools = makeTools(projectRoot)
 const allTools: ToolDef[] = [...baseTools]
 const mcp = new McpManager(loadMcpConfig(projectRoot), projectRoot)
 mcp.onChange = tools => { allTools.length = 0; allTools.push(...baseTools, ...tools) }
-await mcp.connectAll()
-for (const s of mcp.states()) if (s.status === "failed") console.log(`mcp: ${s.name}: ${s.error}`)
+// Register cleanup BEFORE connecting: a server that spawns and then hangs is
+// mid-connect, so its child must already be reachable by closeSync.
 process.on("exit", () => mcp.closeSync())
+// SIGTERM/SIGHUP keep a handler for the whole process lifetime: their default
+// action terminates without running exit handlers, which would orphan children.
+// SIGINT only needs covering during startup — afterwards the REPL/TUI owns
+// Ctrl+C and leaves through the normal exit path (which runs the handler above).
+const onTerm = () => { mcp.closeSync(); process.exit(143) }
+process.on("SIGTERM", onTerm)
+process.on("SIGHUP", onTerm)
+const onInt = () => { mcp.closeSync(); process.exit(130) }
+process.on("SIGINT", onInt)
+await mcp.connectAll()
+process.removeListener("SIGINT", onInt)
+for (const s of mcp.states()) if (s.status === "failed") console.log(`mcp: ${s.name}: ${s.error}`)
 
 const agents = loadAgents(projectRoot, homedir(), allTools.map(t => t.name))
 if (config.defaultAgent && !agents.some(a => a.id === config.defaultAgent))

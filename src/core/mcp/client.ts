@@ -16,14 +16,22 @@ export class McpClient {
   private pending = new Map<JsonRpcId, Pending>()
   private closed = false
   private protocolVersion = CLIENT_PROTOCOL_VERSION
+  /** Fires when the transport dies on its own (not from our close()) so the owner can flip the server to failed. */
+  onClosed?: (err: Error) => void
 
   constructor(private name: string, private transport: Transport, private timeout = MCP_TIMEOUT) {}
 
   async connect(): Promise<{ protocolVersion: string; serverInfo: unknown }> {
+    const died = (err: Error) => {
+      if (this.closed) return   // our own close(): not a crash
+      this.closed = true
+      this.failAll(err)
+      this.onClosed?.(err)
+    }
     const handlers: TransportHandlers = {
       onMessage: m => this.onMessage(m),
-      onError: e => this.failAll(e),
-      onClose: () => this.failAll(new Error(`server ${this.name} closed the connection`)),
+      onError: e => died(e),
+      onClose: () => died(new Error(`server ${this.name} closed the connection`)),
     }
     await this.transport.start(handlers)
     const res: any = await this.request("initialize", {

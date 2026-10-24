@@ -46,6 +46,33 @@ test("calls after close fail fast", async () => {
   await expect(c.callTool("echo", { text: "x" })).rejects.toThrow(/not connected/)
 })
 
+test("a server that dies rejects the in-flight call and fails later ones fast", async () => {
+  const c = connect()
+  await c.connect()
+  await expect(c.callTool("echo", { text: "__exit__" })).rejects.toThrow(/closed the connection/)
+  await expect(c.callTool("echo", { text: "x" })).rejects.toThrow(/not connected/)
+})
+
+test("onClosed fires once when the server dies on its own", async () => {
+  const c = connect()
+  const errs: string[] = []
+  c.onClosed = e => errs.push(e.message)
+  await c.connect()
+  await c.callTool("echo", { text: "__exit__" }).catch(() => {})
+  expect(errs.length).toBe(1)
+  expect(errs[0]).toMatch(/closed the connection/)
+})
+
+test("an intentional close is not reported as a crash", async () => {
+  const c = connect()
+  const errs: string[] = []
+  c.onClosed = e => errs.push(e.message)
+  await c.connect()
+  await c.close()
+  await Bun.sleep(50)   // let the child's exit settle; a crash report would land here
+  expect(errs).toEqual([])
+})
+
 test("a json-rpc error rejects with the server message", async () => {
   const c = connect()
   await c.connect()

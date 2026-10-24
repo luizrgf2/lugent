@@ -30,6 +30,8 @@ interface Entry {
  */
 export class McpManager {
   private entries = new Map<string, Entry>()
+  /** Clients not yet attached to an entry (a spawn that can still be hanging) — closeSync must reach these too. */
+  private inflight = new Set<McpClient>()
   onChange?: (tools: ToolDef[]) => void
 
   constructor(config: McpServerConfigMap, private projectRoot: string) {
@@ -61,7 +63,9 @@ export class McpManager {
 
   async enable(name: string): Promise<void> {
     const e = this.entries.get(name)
-    if (!e || e.status === "connecting") return
+    // Never reconnect a server that is already up (or on its way): tryConnect
+    // would drop the live client without closing it.
+    if (!e || e.status === "connecting" || e.status === "connected") return
     await this.tryConnect(name)
     this.emit()
   }
@@ -87,15 +91,43 @@ export class McpManager {
   }
 
   closeSync(): void {
+    for (const c of this.inflight) c.closeSync()
+    this.inflight.clear()
     for (const [, e] of this.entries) { e.client?.closeSync(); e.client = undefined }
   }
 
   private async tryConnect(name: string): Promise<void> {
     const e = this.entries.get(name)!
     e.status = "connecting"
-    const r = await connectServer(name, e.cfg, this.projectRoot)
-    if (r.ok) { e.client = r.client; e.infos = r.tools; e.status = "connected"; e.error = undefined }
-    else { e.client = undefined; e.infos = undefined; e.status = "failed"; e.error = r.error }
+    let pending: McpClient | undefined
+    // connectServer never throws — it returns a result — so the handle is
+    // always released here, even when the server spawns and then hangs.
+    const r = await connectServer(name, e.cfg, this.projectRoot, c => { pending = c; this.inflight.add(c) })
+    if (pending) this.inflight.delete(pending)
+    if (r.ok) {
+      this.watch(r.client, e)
+      e.client = r.client
+      e.infos = r.tools
+      e.status = "connected"
+      e.error = undefined
+    } else {
+      e.client = undefined
+      e.infos = undefined
+      e.status = "failed"
+      e.error = r.error
+    }
+  }
+
+  /** A server that dies on its own is no longer connected: flip it to failed so /mcp offers reconnect. */
+  private watch(client: McpClient, e: Entry): void {
+    client.onClosed = err => {
+      if (e.client !== client) return   // already replaced/disabled
+      e.client = undefined
+      e.infos = undefined
+      e.status = "failed"
+      e.error = err.message
+      this.emit()
+    }
   }
 
   private async disconnect(e: Entry): Promise<void> {
