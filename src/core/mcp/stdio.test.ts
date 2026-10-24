@@ -42,3 +42,14 @@ test("stdio: bad command rejects start", async () => {
   const c = collect()
   await expect(t.start(c.handlers)).rejects.toThrow()
 })
+
+test("stdio: an oversized unterminated payload errors instead of growing the buffer", async () => {
+  const t = new StdioTransport(["bun", fixture], { cwd: process.cwd() })
+  const c = collect()
+  await t.start(c.handlers)
+  await t.send({ jsonrpc: "2.0", id: 1, method: "test/flood", params: {} } as any)
+  const deadline = Date.now() + 15_000
+  while (c.errors.length === 0 && Date.now() < deadline) await Bun.sleep(20)
+  expect(c.errors[0]?.message).toMatch(/no message boundary/)
+  await t.close()
+})

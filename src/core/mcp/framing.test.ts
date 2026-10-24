@@ -19,6 +19,13 @@ test("LineBuffer: malformed line is skipped, the rest still parses", () => {
   expect(b.push('not json\n{"ok":1}\n')).toEqual([{ ok: 1 }])
 })
 
+test("LineBuffer: an oversized unterminated payload is dropped, not buffered forever", () => {
+  const b = new LineBuffer(64)
+  expect(b.push("x".repeat(100))).toEqual([])
+  expect(b.overflowed).toBe(true)
+  expect(b.push('{"ok":1}\n')).toEqual([])   // buffer was discarded, not merged with the next message
+})
+
 test("message guards", () => {
   expect(isResponse({ jsonrpc: "2.0", id: 1, result: {} })).toBe(true)
   expect(isResponse({ jsonrpc: "2.0", id: 1, method: "x" })).toBe(false)

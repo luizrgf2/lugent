@@ -40,6 +40,10 @@ export class StdioTransport implements Transport {
     try {
       for await (const chunk of proc.stdout as ReadableStream<Uint8Array>) {
         for (const msg of this.buf.push(dec.decode(chunk, { stream: true }))) this.handlers?.onMessage(msg)
+        if (this.buf.overflowed) {
+          this.handlers?.onError(new Error(`server sent more than ${this.buf.maxBytes} bytes with no message boundary — dropping the stream`))
+          return
+        }
       }
     } catch (e: any) {
       this.handlers?.onError(e instanceof Error ? e : new Error(String(e)))
