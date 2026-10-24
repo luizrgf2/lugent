@@ -175,6 +175,8 @@ The port is fixed on purpose — it must match the registered redirect URI — a
 
 **The agent knows this surface.** lugent's system prompt carries a short `# MCP` section — always present, and *outside* the agent prompt, so it stays when you switch to `plan` or a custom agent. You can therefore ask how MCP works here or where the config lives, and ask it to install a server: it edits `lugent.json` with the normal `write`/`edit` tools (both `ask`, so nothing is rewritten without your approval) and tells you to restart. Put tokens in `{env:VAR}`, never inline — especially in a project file that may be committed.
 
+**Index:** [`docs/architecture/mcp.md`](docs/architecture/mcp.md) (transports, client, tool bridge) · [`docs/architecture/mcp-oauth.md`](docs/architecture/mcp-oauth.md) (sign-in, token store, refresh) · [`docs/decisions/mcp.md`](docs/decisions/mcp.md) (why each choice) · [`docs/future-features.md`](docs/future-features.md) (what is deferred).
+
 ## Skills
 
 Drop markdown files in `.agents/skills/` — nested dir or flat. Both scopes load (user `~/.agents/skills/` + project `.agents/skills/`; on Windows the user scope is `%USERPROFILE%\.agents\skills` — same layout). Same id → project wins:
@@ -199,6 +201,8 @@ Using skills in a session:
 - **Let the model pick them.** Advertised skills appear in the system prompt; when your request matches a description ("prepare a release"), the model calls `skill git-release` itself — you see the `▸ skill` line in the transcript.
 - **Force one:** mention the id in your message ("use skill git-release to …").
 - **Browse:** TUI `/skills` lists what is loaded (read-only, ↑/↓+Esc); plain REPL `/skills` lists ids. Toggling skills on/off is not implemented — every loaded skill is active in every session (selector design deferred, see `docs/future-features.md`).
+
+**Index:** [`docs/architecture/prompt-and-agents.md`](docs/architecture/prompt-and-agents.md) (how skills reach the prefix) · [`docs/future-features.md`](docs/future-features.md) § Skills (selector, deferred).
 
 ## Agents
 

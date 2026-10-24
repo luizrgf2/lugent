@@ -1,0 +1,7 @@
+# Permissions
+
+**Permissions.** Layers, first match wins: yolo flag (`runTurn(yolo)` — TUI-only `/permissions` toggle, auto-approves everything including outside-project, runtime state not persisted), session-scoped `always` grants in SQLite, the outside-project guard (absolute/`..`/`~` resources force ask even for allow tools), the selected agent's per-tool override (`permissions: {tool: allow|ask}`, replacing the registry default), and finally the tool default (`allow`/`ask`). `deny` never reaches a decision — `toolsForAgent` drops the tool from the request, so the model does not see it. The outside check is pattern-level — symlink escapes are a known ceiling, not yet audited.
+
+---
+
+Index: [`docs/architecture.md`](../architecture.md)

@@ -1,0 +1,48 @@
+# Decisions — CLI & TUI
+
+## 2026-10-22 — CLI UI: hand-rolled ANSI, not Ink
+Decision: all terminal styling (`src/cli/ui.ts`) is hand-rolled — `util.styleText`, raw escapes, box-drawing chars, frame-based spinner. No Ink/ora/chalk/picocolors.
+Why: zero runtime dependencies is a declared constraint of the project; `util.styleText` is native in Bun; a REPL needs a small subset (colors, one box, one spinner, per-tool glyphs) that fits ~90 lines. Styling is gated on `isTTY` so piped output stays plain for tests/scripts.
+Cost if wrong: no full-screen reactive layout or resize handling — if lugent ever wants panes/full TUI, Ink (what Claude Code uses) is the upgrade, but it breaks the zero-dep constraint and should be its own decision.
+
+## 2026-10-22 — Break zero-dep for the TUI: react + ink
+Decision: the CLI TUI layer uses react@19 + ink@8; the pure core (`src/core/`) stays zero-dependency.
+Why: full-screen reactive UIs (Claude Code, Gemini CLI, Shopify CLI) are built on React renderers; hand-rolled ANSI cannot do scrollable transcript + fixed composer + dialogs without cursor-math debt. Ink is the most documented choice. The constraint is now scoped to where it buys something (core testability, no supply chain in the engine).
+Cost if wrong: ~2-3MB of deps and a React upgrade surface on the CLI layer; if the TUI experiment regresses, `--plain` REPL is the always-working fallback.
+
+## 2026-10-22 — Model reasoning is display-only
+Decision: `provider.chat` forwards `delta.reasoning_content` via `onReasoning` for live display; reasoning is never written to the store nor replayed.
+Why: persisting it means a message-schema migration for marginal value — reasoning is most useful while streaming, and next-turn history works better with final content only.
+Cost if wrong: session replay shows no reasoning (accepted until a replay feature exists); if a provider requires reasoning echoed back in history, a schema change is needed.
+
+## 2026-10-22 — Own ink test harness instead of ink-testing-library
+Decision: `src/cli/tui/harness.tsx` renders through ink's real `render()` against fake stdin/stdout; ink-testing-library removed.
+Why: ink-testing-library@4 declares `ink: ^5` — on ink v8 it triplicates input events and returns stale frames. The harness is ~40 lines, dev-only, and exercises the production renderer.
+Cost if wrong: harness maintenance is ours; replace it when a testing lib with v8 support ships.
+
+## 2026-10-22 — TUI v1: deliberate deferrals from final review
+Decision: ship the Ink TUI without (a) deduplicating reasoning across loop iterations, (b) case-insensitive/word answers in permission dialogs, (c) alt-screen mode.
+Why: all three are cosmetic edge paths (reasoning repeats only when the model reasons after a tool result; the REPL already accepts `yes`/`always` and caps; scrollback pollution on exit is minor). None blocks the core flow, and each risks touching the just-stabilized input/permission plumbing.
+Cost if wrong: minor UX roughness until addressed; revisit when (a) a model streams reasoning mid-tool-loop regularly, (b) users complain about capital Y, (c) scrollback complaints start.
+
+## 2026-10-23 — /resume is scoped by directory; legacy sessions excluded
+Decision: sessions store their working directory; `/resume` lists only sessions of the current directory and skips rows created before the column existed (null directory).
+Why: cross-directory resumes mix unrelated projects' context and permissions; a null-directory fallback would flood the picker with unscoped legacy rows.
+Cost if wrong: databases from before this change never become resumable — acceptable one-time loss; upgrade path is backfilling directory from message metadata if ever needed.
+
+## 2026-10-23 — TUI transcript scroll is tail-clamped window + skipBottom, not per-item virtualization
+Decision: transcript keeps rendering only a manual window (`clampItems(items, budget, skipBottom)`); PageUp/PageDown move `skipBottom`, streaming growth is compensated by the same delta while scrolled up (view pin), submit snaps to tail. Markdown parse is LRU-cached (300 entries) and the `Markdown` component is `memo`ized. (Amended: a skip that would swallow the whole transcript — pageUp pressed early in a long stream, where the pin compensation outgrows the item — falls back to the head window, so the view is never blank and the oldest lines stay reachable.)
+Why: opencode-style per-item virtualization needs stable item ids + measured heights; ink has neither cheaply. Line-based clamping reuses the existing tail-clamp, renders O(viewport) regardless of history size, and the parse cache removes the O(n²) streaming re-parse.
+Cost if wrong: cache misses on straddled slices (clamped texts differ per scroll position) re-parse — bounded by the 300-entry LRU; no arbitrary anchor (scroll is page-quantized only).
+
+## 2026-10-24 — The consent URL is rendered outside the `/mcp` box, on one logical line
+
+Decision: in the TUI picker the pending consent URL is a sibling *below* the bordered box (a wrapper `Box alignItems="flex-start"` holds the bordered panel with `width="100%"` plus the URL in an explicit huge-width, `flexShrink={0}` box with `Text wrap="truncate"`); it is never a child of the border. The REPL already prints it with `console.log` (no box).
+
+Why: the URL is ~300 chars, so ink hard-wraps it at the container width and draws `│` on every visual line — copying the block yields a URL salted with border characters and mid-token newlines (observed live: `…%3` / `│ A48762…`). Outside the border, with a width the URL always fits, ink emits it as a single logical line and the terminal soft-wraps it for display only; terminals join soft wraps when copying, so the pasted URL is intact. A clipboard helper was rejected as the primary mechanism: it is absent on the machine this was reported from (no `wl-copy`/`xclip`/`xsel`/`pbcopy`) and would add a dependency-shaped code path for a fallback-only affordance.
+
+Cost if wrong: the URL line visibly overflows past the panel's right edge on narrow terminals (accepted: readability of the box beats a URL you cannot copy), and the `width={100000}` + `wrap="truncate"` combination is load-bearing ink trivia — if ink changes how it measures oversized text, the URL truncates instead of overflowing, which the regression test in `mcp-list.test.tsx` catches by asserting the whole URL sits on one line with no `│`.
+
+---
+
+Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.
