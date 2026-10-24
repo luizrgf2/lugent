@@ -1,5 +1,5 @@
 import { test, expect, afterEach } from "bun:test"
-import { escapeHtml, redirectUri, startCallbackServer } from "./callback"
+import { errorPage, escapeHtml, redirectUri, startCallbackServer, successPage } from "./callback"
 
 const open: { close(): void }[] = []
 afterEach(() => { for (const s of open) s.close(); open.length = 0 })
@@ -83,4 +83,35 @@ test("a busy port fails before any browser is opened", async () => {
 
 test("escapeHtml covers the five metacharacters", () => {
   expect(escapeHtml(`&<>"'`)).toBe("&amp;&lt;&gt;&quot;&#39;")
+})
+
+test("both pages are self-contained: no external asset or URL", () => {
+  // The pages are served by the loopback listener and the browser may be offline;
+  // core is dependency-free, so nothing may be fetched to render them.
+  for (const html of [successPage("tf"), errorPage("boom")]) {
+    expect(html).not.toMatch(/https?:\/\//)
+    expect(html).not.toContain("src=")
+    expect(html).not.toContain("@import")
+  }
+})
+
+test("both pages are mobile-ready and follow the system colour scheme", () => {
+  for (const html of [successPage("tf"), errorPage("boom")]) {
+    expect(html).toContain('<html lang="en">')
+    expect(html).toContain('name="viewport"')
+    expect(html).toContain("prefers-color-scheme")
+  }
+})
+
+test("the success page names the server and tells the user to close the tab", () => {
+  const html = successPage("tf")
+  expect(html).toContain("tf")
+  expect(html).toContain("close this tab")
+})
+
+test("the error page shows the escaped message and a next step", () => {
+  const html = errorPage('<script>alert("x")</script>')
+  expect(html).toContain("&lt;script&gt;")
+  expect(html).not.toContain("<script>")
+  expect(html).toContain("close this tab")
 })

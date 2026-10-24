@@ -15,20 +15,90 @@ export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!))
 }
 
-function page(title: string, body: string): string {
+/** Inline SVG glyphs — an emoji or an icon font would need no asset either, but these inherit `currentColor`. */
+const ICON = {
+  success: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`,
+  error: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4.5"/><path d="M12 16h.01"/></svg>`,
+} as const
+
+/**
+ * Inline CSS on purpose: the browser that lands here may be offline and `src/core`
+ * is dependency-free, so the page must render with no external asset — no CDN, no
+ * web font, no image. Dark by default (it is a terminal tool), auto-switching to
+ * light from `prefers-color-scheme`; `color-scheme` keeps the browser chrome in step.
+ */
+const STYLE = `
+:root { color-scheme: dark light; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; padding: 2rem; display: grid; place-items: center;
+  background: #0d1117; color: #e6edf3; line-height: 1.5; -webkit-font-smoothing: antialiased;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.card { width: 100%; max-width: 26rem; padding: 2.25rem 2rem; text-align: center;
+  background: #161b22; border: 1px solid #30363d; border-radius: 14px; }
+.brand { margin: 0 0 1.75rem; color: #8b949e; font-size: 0.7rem; font-weight: 600;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.icon { width: 3rem; height: 3rem; margin: 0 auto 1.25rem; display: grid; place-items: center; border-radius: 50%; }
+.icon svg { width: 1.75rem; height: 1.75rem; }
+.icon.success { background: rgba(63,185,80,0.14); color: #3fb950; }
+.icon.error { background: rgba(248,81,73,0.14); color: #f85149; }
+h1 { margin: 0 0 0.75rem; font-size: 1.25rem; font-weight: 600; }
+p { margin: 0 0 0.75rem; color: #8b949e; }
+p:last-child { margin-bottom: 0; }
+.hint { font-size: 0.85rem; }
+/* The raw protocol string (error / error_description), unlike lugent's own prose. */
+.message { color: #e6edf3; font-size: 0.9rem; word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.server { padding: 0.1rem 0.45rem; border-radius: 6px; color: #e6edf3; font-size: 0.9em;
+  background: #21262d; border: 1px solid #30363d;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+@media (prefers-color-scheme: light) {
+  body { background: #f6f8fa; color: #1f2328; }
+  .card { background: #fff; border-color: #d0d7de; }
+  .brand, p { color: #59636e; }
+  .message { color: #1f2328; }
+  .server { color: #1f2328; background: #f6f8fa; border-color: #d0d7de; }
+  .icon.success { background: rgba(26,127,55,0.12); color: #1a7f37; }
+  .icon.error { background: rgba(207,34,46,0.12); color: #cf222e; }
+}
+`
+
+function page(o: { title: string; kind: "success" | "error"; body: string }): string {
   return `<!doctype html>
-<html><head><meta charset="utf-8"><title>${title}</title></head>
-<body style="font-family:system-ui;margin:3rem;line-height:1.5"><h1>${title}</h1>${body}</body></html>`
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${o.title}</title>
+<style>${STYLE}</style>
+</head>
+<body>
+<main class="card">
+<p class="brand">lugent · mcp</p>
+<div class="icon ${o.kind}">${ICON[o.kind]}</div>
+<h1>${o.title}</h1>
+${o.body}
+</main>
+</body>
+</html>`
 }
 
 export function successPage(serverName: string): string {
-  return page("Authorization complete",
-    `<p><strong>${escapeHtml(serverName)}</strong> is connected to lugent.</p><p>You can close this tab and go back to your terminal.</p>`)
+  return page({
+    title: "Authorization complete",
+    kind: "success",
+    body: `<p><span class="server">${escapeHtml(serverName)}</span> is connected to lugent.</p>`
+      + `<p class="hint">You can close this tab and go back to your terminal.</p>`,
+  })
 }
 
 export function errorPage(message: string): string {
-  return page("Authorization failed",
-    `<p>${escapeHtml(message)}</p><p>You can close this tab and try again from lugent.</p>`)
+  return page({
+    title: "Authorization failed",
+    kind: "error",
+    body: `<p class="message">${escapeHtml(message)}</p>`
+      + `<p class="hint">You can close this tab and try again from lugent.</p>`,
+  })
 }
 
 export interface CallbackResult { code: string; iss?: string }
