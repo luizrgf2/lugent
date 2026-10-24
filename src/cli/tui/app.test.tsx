@@ -18,6 +18,7 @@ export function fakeEnv(over: Record<string, unknown> = {}): any {
     projectRoot: "/tmp/opencode",
     store: new Store(db),
     offProviders: [],
+    mcp: { states: () => [], reconnect: async () => {}, disable: async () => {}, enable: async () => {} },
     ...over,
   }
 }
@@ -579,4 +580,39 @@ test("an unknown defaultAgent falls back to build", async () => {
   const { lastFrame } = renderTui(<App env={env} />)
   await new Promise(r => setTimeout(r, 30))
   expect(lastFrame()).toContain("build")
+})
+
+test("/mcp overlay lists servers, and disabling one refreshes the list", async () => {
+  const statuses: Record<string, string> = { echo: "connected", tf: "failed" }
+  const calls: string[] = []
+  const env = fakeEnv({
+    mcp: {
+      states: () => [
+        { name: "echo", type: "local", status: statuses.echo, toolCount: statuses.echo === "connected" ? 1 : 0 },
+        { name: "tf", type: "remote", status: statuses.tf, error: statuses.tf === "failed" ? "boom" : undefined, toolCount: 0 },
+      ],
+      reconnect: async (n: string) => { calls.push(`reconnect:${n}`); statuses[n] = "connected" },
+      disable: async (n: string) => { calls.push(`disable:${n}`); statuses[n] = "disabled" },
+      enable: async (n: string) => { calls.push(`enable:${n}`); statuses[n] = "connected" },
+    },
+  })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  const waitFor = async (want: string, ms = 3000) => {
+    const t0 = Date.now()
+    while (!lastFrame().includes(want)) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout waiting for "${want}"`)
+      await new Promise(r => setTimeout(r, 20))
+    }
+    await new Promise(r => setTimeout(r, 30))   // let the useInput subscription effect flush
+  }
+  await new Promise(r => setTimeout(r, 30))
+  type("/mcp\r")
+  await waitFor("echo (local) — connected, 1 tool")
+  expect(lastFrame()).toContain("tf (remote) — failed: boom")
+
+  type("\r")                                   // enter → action menu for the selected server
+  await waitFor("disable")
+  type("\r")                                   // pick disable
+  await waitFor("echo (local) — disabled")
+  expect(calls).toEqual(["disable:echo"])
 })
