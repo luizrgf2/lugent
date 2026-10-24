@@ -30,17 +30,17 @@ mcp.onChange = tools => { allTools.length = 0; allTools.push(...baseTools, ...to
 // Register cleanup BEFORE connecting: a server that spawns and then hangs is
 // mid-connect, so its child must already be reachable by closeSync.
 process.on("exit", () => mcp.closeSync())
-// SIGTERM/SIGHUP keep a handler for the whole process lifetime: their default
-// action terminates without running exit handlers, which would orphan children.
-// SIGINT only needs covering during startup — afterwards the REPL/TUI owns
-// Ctrl+C and leaves through the normal exit path (which runs the handler above).
+// SIGTERM/SIGHUP/SIGINT are handled for the whole process lifetime. Their
+// default action terminates without running exit handlers, which would orphan
+// children. This does NOT take Ctrl+C away from the REPL/TUI: a raw-mode TTY
+// (readline and ink both set it) delivers ^C as a keystroke, not a signal, so
+// the process handler only ever sees a real `kill -INT`. Verified under a pty.
 const onTerm = () => { mcp.closeSync(); process.exit(143) }
 process.on("SIGTERM", onTerm)
 process.on("SIGHUP", onTerm)
 const onInt = () => { mcp.closeSync(); process.exit(130) }
 process.on("SIGINT", onInt)
 await mcp.connectAll()
-process.removeListener("SIGINT", onInt)
 for (const s of mcp.states()) if (s.status === "failed") console.log(`mcp: ${s.name}: ${s.error}`)
 
 const agents = loadAgents(projectRoot, homedir(), allTools.map(t => t.name))

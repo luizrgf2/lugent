@@ -54,4 +54,9 @@ process.stdin.on("data", (c: Uint8Array) => {
     }
   }
 })
-process.stdin.on("end", () => process.exit(0))
+// MCP_FIXTURE_IGNORE_EOF models a server that does NOT clean itself up when its
+// stdin closes — the case only an explicit kill (closeSync) can reap. It takes
+// both halves: skipping the `end` handler AND holding a handle open, because
+// with an empty event loop a process exits on its own, handler or not.
+if (process.env.MCP_FIXTURE_IGNORE_EOF === "1") setInterval(() => {}, 1000)
+else process.stdin.on("end", () => process.exit(0))
