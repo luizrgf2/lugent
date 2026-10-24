@@ -1,18 +1,20 @@
 import { parseSSE } from "../provider"
 import type { JsonRpcId, JsonRpcMessage } from "./protocol"
-import { MCP_TIMEOUT, isRequest, isResponse } from "./protocol"
+import { CLIENT_PROTOCOL_VERSION, MCP_TIMEOUT, isRequest, isResponse } from "./protocol"
 import type { Transport, TransportHandlers } from "./transport"
 
 /** Raised on 401: the Phase 2 OAuth hook. No turn ever opens a browser. */
 export class McpAuthError extends Error {
   constructor(public server: string, public wwwAuthenticate?: string) {
     super(`server ${server} requires OAuth authorization (not implemented yet) — configure a static token in its "headers", or wait for Phase 2`)
+    this.name = "McpAuthError"
   }
 }
 
 export class McpHttpError extends Error {
   constructor(public status: number, public body: string) {
     super(`HTTP ${status}: ${body.slice(0, 200)}`)
+    this.name = "McpHttpError"
   }
 }
 
@@ -48,12 +50,12 @@ export class HttpTransport implements Transport {
   }
 
   private deliver(m: JsonRpcMessage): void {
-    if (isResponse(m)) {
-      if (this.initId !== undefined && m.id === this.initId) {
-        const pv = (m as any).result?.protocolVersion
-        if (typeof pv === "string") this.protocolVersion = pv
-        this.initId = undefined
-      }
+    if (isResponse(m) && this.initId !== undefined && m.id === this.initId) {
+      const pv = (m as any).result?.protocolVersion
+      // Spec requires the header on every post-initialize request; if a server
+      // omits it in the result we keep sending the revision we asked for.
+      this.protocolVersion = typeof pv === "string" ? pv : CLIENT_PROTOCOL_VERSION
+      this.initId = undefined
     }
     this.handlers?.onMessage(m)
   }

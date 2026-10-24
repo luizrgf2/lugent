@@ -80,3 +80,19 @@ test("http: a stalled server times out", async () => {
   await expect(t.send({ jsonrpc: "2.0", id: 1, method: "initialize" })).rejects.toThrow(/timed out/)
   await t.close()
 })
+
+test("http: the protocol version header is still sent when the server omits it", async () => {
+  const seen: (string | null)[] = []
+  const url = serve(async req => {
+    const body = await req.json()
+    if (body.method === "initialize") return Response.json({ jsonrpc: "2.0", id: body.id, result: { serverInfo: { name: "stub" } } })   // no protocolVersion
+    seen.push(req.headers.get("mcp-protocol-version"))
+    return Response.json({ jsonrpc: "2.0", id: body.id, result: {} })
+  })
+  const t = new HttpTransport("stub", url)
+  await started(t)
+  await t.send(INIT as any)
+  await t.send({ jsonrpc: "2.0", id: 2, method: "x" })
+  expect(seen).toEqual(["2025-06-18"])
+  await t.close()
+})
