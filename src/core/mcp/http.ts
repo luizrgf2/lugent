@@ -6,7 +6,7 @@ import type { Transport, TransportHandlers } from "./transport"
 /** Raised on 401: the Phase 2 OAuth hook. No turn ever opens a browser. */
 export class McpAuthError extends Error {
   constructor(public server: string, public wwwAuthenticate?: string) {
-    super(`server ${server} requires OAuth authorization — run "/mcp auth ${server}"`)
+    super(`server ${server} requires OAuth authorization (not implemented yet) — configure a static token in its "headers", or wait for Phase 2`)
   }
 }
 
