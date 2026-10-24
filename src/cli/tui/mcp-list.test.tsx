@@ -85,3 +85,32 @@ test("an auth_required server offers authenticate and shows the consent URL whil
   release()
   await wait(60)
 })
+
+test("the consent URL stays on one logical line, outside the box border", async () => {
+  // Regression: a long URL used to wrap inside the bordered box, so every visual
+  // line got a `│` and a hard newline — copy-paste produced an unusable URL.
+  const url =
+    "https://chatback.takeflow.com.br/oauth/authorize?response_type=code&client_id=tfmcp_68e2dd9d32a902e8d7892f10e9c85681&redirect_uri=http%3A%2F%2F127.0.0.1%3A48762%2Foauth%2Fcallback&state=25afa61b2440989360120fc4f146e10744ffab2c47bbedfe01e468e3bba1de83&code_challenge=mZ-0CFdcdGfcj2v1bKamkZrZDgOjlkeA0vTk03XiZ6E&code_challenge_method=S256&resource=https%3A%2F%2Fchatback.takeflow.com.br%2Fmcp"
+  let release: () => void = () => {}
+  const gate = new Promise<void>(r => { release = r })
+  const authStates: McpServerState[] = [{ name: "tf", type: "remote", status: "auth_required", toolCount: 0 }]
+  const { type, lastFrame } = renderTui(
+    <McpList
+      states={authStates}
+      onAction={async (_n, _a, onUrl) => { onUrl(url); await gate }}
+      onClose={() => {}}
+    />,
+  )
+  await wait()
+  type("\r")
+  await wait()
+  type("\r")
+  await wait(60)
+  const lines = lastFrame().split("\n")
+  const urlLine = lines.find(l => l.includes("authorize"))
+  expect(urlLine).toBeDefined()
+  expect(urlLine).toContain(url)       // whole URL on one logical line: no hard wrap
+  expect(urlLine).not.toContain("│")   // and no box border mixed into it
+  release()
+  await wait(60)
+})

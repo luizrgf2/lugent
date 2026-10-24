@@ -45,29 +45,42 @@ export function McpList(p: {
     if (key.escape) p.onClose()
   })
 
+  // The consent URL is rendered outside the bordered box: inside it, ink wraps the
+  // long URL at the box width and draws `│` on every visual line, so copying the
+  // wrapped text yields border characters and hard line breaks. Outside the border,
+  // with a width the URL always fits, it is emitted as one logical line and the
+  // terminal soft-wraps it (copy joins soft wraps).
+  const showUrl = busy && pendingUrl !== null
   return (
-    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1}>
-      <Text dimColor>/mcp · servers</Text>
-      {p.states.length === 0
-        ? <Text dimColor>(no MCP servers — declare one in lugent.json under "mcp")</Text>
-        : p.states.map((s, i) => (
-            <Text key={s.name} color={i === sel ? "cyan" : undefined}>
-              {i === sel ? "❯" : " "} {formatMcpState(s)}{s.status === "connected" ? " ●" : ""}
-            </Text>
-          ))}
-      {busy && pendingUrl
-        ? <Box flexDirection="column" marginTop={1}>
-            <Text dimColor>waiting for authorization… (ctrl+c cancels)</Text>
-            <Text>if the browser did not open, visit:{"\n"}{pendingUrl}</Text>
-          </Box>
-        : open
+    <Box flexDirection="column" alignItems="flex-start">
+      <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1} width="100%">
+        <Text dimColor>/mcp · servers</Text>
+        {p.states.length === 0
+          ? <Text dimColor>(no MCP servers — declare one in lugent.json under "mcp")</Text>
+          : p.states.map((s, i) => (
+              <Text key={s.name} color={i === sel ? "cyan" : undefined}>
+                {i === sel ? "❯" : " "} {formatMcpState(s)}{s.status === "connected" ? " ●" : ""}
+              </Text>
+            ))}
+        {showUrl
           ? <Box flexDirection="column" marginTop={1}>
-              <Text dimColor>{open} · action</Text>
-              {actions.map((a, i) => (
-                <Text key={a} color={i === actionSel ? "cyan" : undefined}>{i === actionSel ? "❯" : " "} {a}</Text>
-              ))}
+              <Text dimColor>waiting for authorization… (ctrl+c cancels)</Text>
+              <Text dimColor>browser did not open? copy the link below</Text>
             </Box>
-          : <Text dimColor>{busy ? "working…" : "↑/↓ move · enter actions · esc cancel"}</Text>}
+          : open
+            ? <Box flexDirection="column" marginTop={1}>
+                <Text dimColor>{open} · action</Text>
+                {actions.map((a, i) => (
+                  <Text key={a} color={i === actionSel ? "cyan" : undefined}>{i === actionSel ? "❯" : " "} {a}</Text>
+                ))}
+              </Box>
+            : <Text dimColor>{busy ? "working…" : "↑/↓ move · enter actions · esc cancel"}</Text>}
+      </Box>
+      {showUrl
+        ? <Box width={100000} flexShrink={0} marginTop={1}>
+            <Text wrap="truncate">{pendingUrl}</Text>
+          </Box>
+        : undefined}
     </Box>
   )
 }
