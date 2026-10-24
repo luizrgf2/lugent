@@ -20,8 +20,9 @@ Shape (\`type\` is inferred from \`command\`/\`url\`; \`http\` is an alias for \
     "local-one": { "type": "local", "command": ["npx", "-y", "some-mcp@latest"] },
     "remote-one": { "type": "remote", "url": "https://host/mcp", "headers": { "X-Tenant": "{env:TENANT}" } }
   }
-Optional keys: \`environment\` and \`cwd\` (local), \`headers\` (remote), \`enabled: false\`, \`timeout\` in ms (default 30000); \`environment\`/\`headers\` values support \`{env:VAR}\`.
-A connected server's tools appear as \`<server>_<tool>\` and ask for permission by default. \`/mcp\` lists servers (connected/failed/disabled) and can reconnect, disable or enable one — session-only, it never rewrites the config; config edits take effect on the next start.
+Optional keys: \`environment\` and \`cwd\` (local), \`headers\` and \`scopes\` (remote), \`enabled: false\`, \`timeout\` in ms (default 30000); \`environment\`/\`headers\` values support \`{env:VAR}\`.
+A connected server's tools appear as \`<server>_<tool>\` and ask for permission by default. \`/mcp\` lists servers (connected/failed/disabled/auth_required) and can reconnect, disable or enable one, sign one in (\`/mcp auth <name>\`) or forget its token (\`/mcp logout <name>\`) — session-only, it never rewrites the config; config edits take effect on the next start.
+A remote server that refuses the configured headers shows as \`auth_required\`: tell me to run \`/mcp\`, pick the server and choose \`authenticate\` — the consent page opens in the browser, and the token is stored in \`~/.local/share/lugent/mcp-oauth.json\` with mode 0600. Optional per server: \`scopes\` (an array; without it the authorization server's consent screen decides, and no \`scope\` parameter is sent).
 Only when I ask you to install a server: edit that file with write/edit (they ask first), keep tokens as \`{env:VAR}\` — never inline a secret, especially in a project file that may be committed — then tell me to restart.`
 
 export interface PromptInput {

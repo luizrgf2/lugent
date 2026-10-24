@@ -73,7 +73,7 @@ McpManager ──connectServer──▶ Transport (stdio | http)
                             mcpToolDefs ──▶ ToolDef[]  (into the registry)
 ```
 
-**Transport seam.** `Transport` (`transport.ts`) is three methods — `start(handlers)`, `send(msg)`, `close()` — plus `closeSync()` for the process-exit path (never awaits). `StdioTransport` spawns the child with `Bun.spawn`, frames stdout through `LineBuffer` (`framing.ts`, capped so an unterminated oversized payload surfaces an error instead of growing the heap) and drains stderr so a chatty server cannot block on a full pipe; `HttpTransport` posts one JSON-RPC message per request, keeps the `Mcp-Session-Id` it receives and echoes it, accepts `application/json` or `text/event-stream` (parsed reusing the provider's `parseSSE`), treats `202` as "notification accepted, no reply", and raises `McpAuthError` on `401`. The client is transport-agnostic: it owns the id counter, the pending map, per-request timeouts (default 30s) and fail-fast once closed.
+**Transport seam.** `Transport` (`transport.ts`) is three methods — `start(handlers)`, `send(msg)`, `close()` — plus `closeSync()` for the process-exit path (never awaits). `StdioTransport` spawns the child with `Bun.spawn`, frames stdout through `LineBuffer` (`framing.ts`, capped so an unterminated oversized payload surfaces an error instead of growing the heap) and drains stderr so a chatty server cannot block on a full pipe; `HttpTransport` posts one JSON-RPC message per request, keeps the `Mcp-Session-Id` it receives and echoes it, accepts `application/json` or `text/event-stream` (parsed reusing the provider's `parseSSE`), treats `202` as "notification accepted, no reply", and raises `McpAuthRequiredError` on `401`. When a token provider is supplied the transport asks it **per send**, so a refresh between two messages is picked up, and a `401` triggers exactly one forced refresh + retry before giving up. The client is transport-agnostic: it owns the id counter, the pending map, per-request timeouts (default 30s) and fail-fast once closed.
 
 **Legacy revision.** v1 speaks the `initialize` handshake + `Mcp-Session-Id` revision (`2025-06-18`, with `2025-03-26`/`2024-11-05` accepted), not the later stateless one — every real server we target predates it. After `initialize` the client sends the `notifications/initialized` notification, then `tools/list` (following `nextCursor`) and `tools/call`.
 
@@ -82,6 +82,34 @@ McpManager ──connectServer──▶ Transport (stdio | http)
 The config `mcp` map merges both config files (global first, project wins per server) rather than `providers`' first-file-wins — see `docs/decisions.md`.
 
 The agent is told this surface by the always-present `# MCP` prompt section (`prompt.ts`), so it can answer questions about it and install a server on request: it edits the config with `write`/`edit` (both `ask`, so nothing is rewritten silently) and tells the user to restart. That is the deliberate split — `/mcp` toggles for the session without touching the file, the file tools persist but always with a permission prompt. The section shows the literal entry JSON rather than describing it in prose: a model given only prose invented `{"local": {...}}` instead of `{"type": "local", "command": [...]}` (observed in a live turn, pinned by a test).
+
+### OAuth for remote servers
+
+`remote` servers that refuse static headers get an interactive OAuth 2.1 sign-in, driven entirely from `/mcp` (no turn ever opens a browser). `src/core/mcp/oauth/` is the subsystem:
+
+```
+pkce.ts       verifier / S256 challenge / state          errors.ts   McpOAuthError, McpAuthRequiredError
+request.ts    FetchImpl seam + getJson/postJson/postForm store.ts    0600 atomic store, URL-bound getEntry
+discovery.ts  RFC 9728 PRM + RFC 8414 AS metadata        register.ts RFC 7591 dynamic client registration
+callback.ts   single-use loopback listener (port 48762)  token.ts    exchange / refresh / revoke
+flow.ts       the interactive sequence                   session.ts  runtime token provider
+```
+
+```
+probe(401 + WWW-Authenticate) → PRM → AS metadata → register (DCR, reused per issuer)
+  → consent URL (PKCE S256, resource, optional scope) + open browser
+  → loopback callback (state check, iss check) → token exchange → store → reconnect
+```
+
+**Why an injected `fetchImpl`.** Every networked module takes `FetchImpl` instead of calling `fetch` directly, so the tests drive the whole authorization-server protocol through a *function* — real `https://` URLs, no TLS server, and no relaxation of the https-only rule. The only real socket in the tests is the loopback callback listener, which the fake `openBrowser` hits exactly like a browser would.
+
+**https only, checked before fetching.** PRM, the AS issuer, and the metadata URL must be `https`; the check runs *before* the request, so a plain-`http` hint is refused without ever being fetched. RFC 8414 §3.3 is enforced too: the metadata's own `issuer` must equal the URL it was fetched from.
+
+**Token storage.** `~/.local/share/lugent/mcp-oauth.json` (from `defaultMcpOAuthPath`, same directory rules as the DB), mode `0600`, written atomically (temp + rename) and re-read + merged before every write so a concurrent writer's other servers survive. Entry keys are the server name, but `getEntry` also requires the stored `serverUrl` to match the one being connected — a project `lugent.json` shadowing a global name must never send the global token. The entry keeps `tokenEndpoint`/`revocationEndpoint` so a refresh needs no second discovery round-trip and `logout` needs no network call to know where to revoke.
+
+**Status and the runtime token provider.** `McpManager` maps `McpAuthRequiredError` to the `auth_required` status (not `failed`: the fix is a sign-in, and `/mcp` offers `authenticate`). `makeTokenProvider` reads the store per request and refreshes **proactively** (60 s of skew) or **forcibly** on a `401`, serialized per server so concurrent requests share one refresh. `invalid_grant`/`invalid_client`/`unauthorized_client` clears the tokens (`auth_required` on the next `/mcp`); any other failure propagates without logging the user out. Tokens live in the store only — `code_verifier` and `state` stay in memory.
+
+`/mcp` actions by `(status, type)` live in one place (`mcpActions` in `src/cli/commands.ts`) so the REPL and the TUI cannot drift: `connected`+remote → logout/disable, `connected`+local → disable, `auth_required` → authenticate/disable, `failed` → reconnect/disable, `disabled` → enable. Ctrl+C during a sign-in cancels the waiting listener (both REPL and TUI) instead of counting toward the double-Ctrl+C exit.
 
 ## Schema
 

@@ -79,8 +79,10 @@ Loader: `src/core/agents.ts`; usage and fields: `README.md` § "Agents".
 
 | Feature | Why deferred | Add when |
 | --- | --- | --- |
-| MCP client (external tool servers) | **Phase 1 shipped** (`local` + `remote` transports, tool bridging, `/mcp`); OAuth for remote servers is Phase 2 | OAuth when a target server refuses static tokens |
-| MCP OAuth (browser authorization flow for `remote` servers) | Phase 2 — Phase 1 fails closed on `401` and a turn never opens a browser | A `remote` server (e.g. takeflow) requires OAuth with no static-token option |
+| MCP client (external tool servers) | **Shipped** (`local` + `remote` transports, tool bridging, `/mcp`, OAuth sign-in for `remote`) | — |
+| MCP OAuth (browser authorization flow for `remote` servers) | **Shipped 2026-10-24** — DCR + PKCE S256, loopback callback on 48762, token store at `~/.local/share/lugent/mcp-oauth.json` (0600), `auth_required` status with `authenticate`/`logout` | — |
+| MCP OAuth for an AS without dynamic client registration | Deferred: the flow assumes RFC 7591 DCR (takeflow offers it). A server that hands out a `client_id` out of band would need a config field, and a confidential client would need `client_secret_post` | A real target refuses DCR, or an AS demands a pre-registered confidential client |
+| Per-server OAuth scope editor | Deferred: `scopes` is a config array; there is no interactive picker and no scope upgrade mid-session | Users hit a tool that needs a scope the consent screen did not grant |
 | MCP disable/enable persistence | `/mcp` toggles are session-scoped; lugent never rewrites `lugent.json` | Users want a server off permanently without editing the file (a `--persist` flag or `/mcp save`) |
 | Skills HTTP catalogs (remote `index.json` sources) | Local skills suffice | Team-shared skill distribution needed |
 | Snapshots / checkpoints (revert session state) | Requires storage + UI design | Destructive mistakes become common |
