@@ -41,6 +41,9 @@ export class StdioTransport implements Transport {
       for await (const chunk of proc.stdout as ReadableStream<Uint8Array>) {
         for (const msg of this.buf.push(dec.decode(chunk, { stream: true }))) this.handlers?.onMessage(msg)
         if (this.buf.overflowed) {
+          // Framing is lost and the server is untrusted: kill it here, so the
+          // owner dropping its handle cannot orphan the child.
+          this.closeSync()
           this.handlers?.onError(new Error(`server sent more than ${this.buf.maxBytes} bytes with no message boundary — dropping the stream`))
           return
         }
