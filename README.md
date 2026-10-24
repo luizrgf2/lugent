@@ -60,7 +60,7 @@ For `providers`, `defaultProvider`, `defaultModel` and `defaultAgent` lugent rea
 | `mcp.<name>.enabled` | `false` skips the server at startup (the entry stays, listed `disabled` by `/mcp`, so it can be re-enabled for the session) |
 | `mcp.<name>.timeout` | Per-request timeout in ms (default `30000`) |
 
-Unlike `providers` (first file found wins), `mcp` **merges** both config files — global first, project wins per server — the same way agents and skills merge. A project entry replaces the whole global entry; to disable a server declared in the other file, repeat it with `enabled: false` — either the whole entry, or just `{ "enabled": false }` as a marker.
+Unlike `providers` (first file found wins), `mcp` **merges** both config files — global first, project wins per server — the same way agents and skills merge. A project entry replaces the whole global entry; to disable a server declared in the other file, repeat it with `enabled: false` — either the whole entry, or just `{ "enabled": false }` as a marker. Markers are applied last and win wherever the server was declared, so your global config can switch off a server a repo declares.
 
 At startup each provider gets a health check (`GET /models`, 8s timeout) — unreachable ones are reported as `OFF` but lugent still starts.
 
@@ -136,7 +136,7 @@ lugent speaks the Model Context Protocol over two transports, declared in the `m
 - **`local`** — spawns a child process and talks newline-delimited JSON-RPC over its stdio (e.g. `chrome-devtools`, `browsermcp`).
 - **`remote`** (alias `http`) — Streamable HTTP: one POST per JSON-RPC message, with `Mcp-Session-Id` handling, SSE responses and `202` notifications.
 
-At startup every enabled server is connected in parallel, its tools are listed and bridged into the tool registry as `<server>_<tool>`. A server that fails to start is reported as `mcp: <name>: <reason>` and **never stops lugent** — the rest keep working. A server that spawns and then dies flips to `failed` on its own, so `/mcp` can bring it back. MCP servers are untrusted third parties, so their tools are permission-gated (`ask` by default) and an agent's `tools`/`permissions` can allow, ask or deny them by name.
+At startup every enabled server is connected in parallel, its tools are listed and bridged into the tool registry as `<server>_<tool>`. A server that fails to start is reported as `mcp: <name>: <reason>` and **never stops lugent** — the rest keep working. A `local` server whose child dies later flips to `failed` on its own, so `/mcp` can bring it back (a `remote` server is only noticed on its next failed call). MCP servers are untrusted third parties, so their tools are permission-gated (`ask` by default) and an agent's `tools`/`permissions` can allow, ask or deny them by name.
 
 **Trust note:** a project `lugent.json` can declare `local` servers, whose `command` is spawned at startup with no prompt — same trust channel as a project `AGENTS.md`, skills or agents (see `docs/decisions.md`, 2026-10-24). Read a repo's `mcp` block before running lugent in it; every server is listed by `/mcp` and any failure is printed at startup.
 
