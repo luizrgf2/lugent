@@ -1,10 +1,17 @@
+import { homedir } from "node:os"
 import type { McpServerConfig, McpServerConfigMap } from "../config"
 import type { ToolDef } from "../tools/registry"
+import { defaultMcpOAuthPath } from "../platform"
 import { connectServer } from "./connect"
 import type { McpClient, McpToolInfo } from "./client"
 import { mcpToolDefs } from "./tools"
+import { makeTokenProvider } from "./oauth/session"
+import { getEntry, removeEntry } from "./oauth/store"
+import { revokeToken } from "./oauth/token"
+import { authenticate as runOAuthFlow } from "./oauth/flow"
+import type { FetchImpl } from "./oauth/request"
 
-export type McpServerStatus = "connected" | "failed" | "disabled" | "connecting"
+export type McpServerStatus = "connected" | "failed" | "disabled" | "connecting" | "auth_required"
 
 export interface McpServerState {
   name: string
@@ -36,7 +43,11 @@ export class McpManager {
   private connecting = new Set<string>()
   onChange?: (tools: ToolDef[]) => void
 
-  constructor(config: McpServerConfigMap, private projectRoot: string) {
+  constructor(
+    config: McpServerConfigMap,
+    private projectRoot: string,
+    private oauthStorePath = defaultMcpOAuthPath(process.env, homedir(), process.platform),
+  ) {
     for (const [name, cfg] of Object.entries(config))
       this.entries.set(name, { cfg, status: cfg.enabled === false ? "disabled" : "connecting" })
   }
@@ -70,6 +81,56 @@ export class McpManager {
     if (!e || e.status === "connecting" || e.status === "connected") return
     await this.tryConnect(name)
     this.emit()
+  }
+
+  /** Interactive OAuth: the caller owns the UI (URL printing, browser, cancellation). */
+  async authenticate(
+    name: string,
+    opts: {
+      onUrl?: (url: string) => void
+      openBrowser?: (url: string) => void | Promise<void>
+      signal?: AbortSignal
+      fetchImpl?: FetchImpl
+    } = {},
+  ): Promise<void> {
+    const e = this.entries.get(name)
+    if (!e || e.cfg.type === "local") return
+    try {
+      await runOAuthFlow({
+        name, serverUrl: e.cfg.url, storePath: this.oauthStorePath, scopes: e.cfg.scopes,
+        timeout: e.cfg.timeout, onUrl: opts.onUrl, openBrowser: opts.openBrowser,
+        signal: opts.signal, fetchImpl: opts.fetchImpl,
+      })
+    } catch (err) {
+      e.status = "auth_required"
+      e.error = (err as Error).message
+      this.emit()
+      throw err
+    }
+    await this.reconnect(name)
+  }
+
+  /** Revoke at the AS (best effort), forget the credential, then re-derive the real status. */
+  async logout(name: string, opts: { fetchImpl?: FetchImpl } = {}): Promise<void> {
+    const e = this.entries.get(name)
+    if (!e || e.cfg.type === "local") return
+    const stored = getEntry(this.oauthStorePath, name, e.cfg.url)
+    if (stored?.tokens) {
+      const token = stored.tokens.refreshToken ?? stored.tokens.accessToken
+      if (stored.revocationEndpoint) {
+        try {
+          await revokeToken({
+            revocationEndpoint: stored.revocationEndpoint, clientId: stored.clientId,
+            token, timeout: e.cfg.timeout, fetchImpl: opts.fetchImpl,
+          })
+        } catch (err) {
+          // The local copy still goes: the user asked to sign out.
+          console.warn(`mcp ${name}: token revocation failed (${(err as Error).message}) — removing the local copy anyway`)
+        }
+      }
+    }
+    removeEntry(this.oauthStorePath, name)
+    await this.reconnect(name)
   }
 
   states(): McpServerState[] {
@@ -109,7 +170,11 @@ export class McpManager {
       let pending: McpClient | undefined
       // connectServer never throws — it returns a result — so the handle is
       // always released here, even when the server spawns and then hangs.
-      const r = await connectServer(name, e.cfg, this.projectRoot, c => { pending = c; this.inflight.add(c) })
+      const r = await connectServer(name, e.cfg, this.projectRoot, c => { pending = c; this.inflight.add(c) }, {
+        // A local child has no OAuth: only a remote server ever asks for a token.
+        token: e.cfg.type === "local" ? undefined
+          : makeTokenProvider({ storePath: this.oauthStorePath, name, serverUrl: e.cfg.url, timeout: e.cfg.timeout }),
+      })
       if (pending) this.inflight.delete(pending)
       if (r.ok && !r.client.isClosed) {
         this.watch(r.client, e)
@@ -122,8 +187,10 @@ export class McpManager {
         if (r.ok) r.client.closeSync()
         e.client = undefined
         e.infos = undefined
-        e.status = "failed"
-        e.error = why
+        const authRequired = !r.ok && r.authRequired === true
+        e.status = authRequired ? "auth_required" : "failed"
+        // auth_required is not a failure: the fix is an interactive sign-in, so keep the row clean.
+        e.error = authRequired ? undefined : why
       }
     } finally {
       this.connecting.delete(name)

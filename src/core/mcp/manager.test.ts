@@ -1,11 +1,15 @@
 import { test, expect } from "bun:test"
 import { join } from "node:path"
-import { readFileSync, rmSync, existsSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { readFileSync, rmSync, existsSync, mkdtempSync } from "node:fs"
 import { McpManager } from "./manager"
 import type { McpServerConfigMap } from "../config"
+import { putEntry } from "./oauth/store"
+import type { FetchImpl } from "./oauth/request"
 
 const fixture = join(import.meta.dir, "__fixtures__", "mcp-echo-server.ts")
 const local = (): McpServerConfigMap[string] => ({ type: "local", command: ["bun", fixture] })
+const tmpStore = () => join(mkdtempSync(join(tmpdir(), "mcp-manager-")), "mcp-oauth.json")
 
 const isAlive = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
 const waitGone = async (pid: number, ms = 3000) => {
@@ -153,15 +157,92 @@ test("enable on a connected server does not reconnect it", async () => {
   rmSync(pidf, { force: true })
 })
 
-test("a remote server that answers 401 fails closed with a clear message", async () => {
+test("a remote server that answers 401 is reported as auth_required, not failed", async () => {
   const srv = Bun.serve({ port: 0, fetch: () => new Response("nope", { status: 401, headers: { "www-authenticate": 'Bearer resource_metadata="https://x"' } }) })
   try {
-    const m = new McpManager({ tf: { type: "remote", url: `http://127.0.0.1:${srv.port}/mcp` } }, process.cwd())
+    const m = new McpManager({ tf: { type: "remote", url: `http://127.0.0.1:${srv.port}/mcp` } }, process.cwd(), tmpStore())
     await m.connectAll()
-    const s = m.states()[0]
-    expect(s.status).toBe("failed")
-    expect(s.error).toMatch(/OAuth/)
+    expect(m.states()[0].status).toBe("auth_required")
+    expect(m.states()[0].error).toBeUndefined()
     expect(m.tools()).toEqual([])
     m.closeSync()
   } finally { srv.stop(true) }
+})
+
+test("authenticate runs the flow, stores the token and reconnects", async () => {
+  const path = tmpStore()
+  const ISSUER = "https://as.example"
+  const PRM = "https://as.example/prm"
+  const seen: (string | null)[] = []
+  // One MCP endpoint that only answers once it sees the bearer the fake AS will hand out.
+  const srv = Bun.serve({ port: 0, fetch: async req => {
+    seen.push(req.headers.get("authorization"))
+    if (req.headers.get("authorization") !== "Bearer at-1")
+      return new Response("", { status: 401, headers: { "www-authenticate": `Bearer resource_metadata="${PRM}"` } })
+    const body: any = await req.json()
+    const result = body.method === "initialize" ? { protocolVersion: "2025-06-18", capabilities: {}, serverInfo: { name: "fake", version: "1" } }
+      : body.method === "tools/list" ? { tools: [] } : {}
+    return Response.json({ jsonrpc: "2.0", id: body.id, result })
+  } })
+  const MCP_URL = `http://127.0.0.1:${srv.port}/mcp`
+  // The flow only: the probe is answered here, the real transport keeps using
+  // global fetch against the live local server.
+  const fetchImpl: FetchImpl = async url => {
+    if (url === MCP_URL) return new Response("", { status: 401, headers: { "www-authenticate": `Bearer resource_metadata="${PRM}"` } })
+    if (url === PRM) return Response.json({ resource: MCP_URL, authorization_servers: [ISSUER] })
+    if (url === `${ISSUER}/.well-known/oauth-authorization-server`) return Response.json({
+      issuer: ISSUER, authorization_endpoint: `${ISSUER}/oauth/authorize`, token_endpoint: `${ISSUER}/oauth/token`,
+      registration_endpoint: `${ISSUER}/oauth/register`, code_challenge_methods_supported: ["S256"],
+    })
+    if (url === `${ISSUER}/oauth/register`) return Response.json({ client_id: "client-1" })
+    if (url === `${ISSUER}/oauth/token`) return Response.json({ access_token: "at-1", refresh_token: "rt-1", expires_in: 3600 })
+    return new Response("not found", { status: 404 })
+  }
+  try {
+    const m = new McpManager({ tf: { type: "remote", url: MCP_URL } }, process.cwd(), path)
+    await m.connectAll()
+    expect(m.states()[0].status).toBe("auth_required")
+    await m.authenticate("tf", {
+      fetchImpl,
+      openBrowser: async url => {
+        const u = new URL(url)
+        const cb = new URL(u.searchParams.get("redirect_uri")!)
+        cb.searchParams.set("code", "code-1")
+        cb.searchParams.set("state", u.searchParams.get("state")!)
+        const res = await fetch(cb)
+        expect(res.status).toBe(200)
+      },
+    })
+    expect(m.states()[0].status).toBe("connected")
+    expect(seen).toContain("Bearer at-1")
+    m.closeSync()
+  } finally { srv.stop(true); rmSync(path, { force: true }) }
+})
+
+test("logout revokes, forgets the token and leaves the server needing authentication again", async () => {
+  const path = tmpStore()
+  let revoked = ""
+  const srv = Bun.serve({ port: 0, fetch: async req => {
+    if (req.headers.get("authorization") === "Bearer at-1") {
+      const body: any = await req.json()
+      const result = body.method === "initialize" ? { protocolVersion: "2025-06-18", capabilities: {}, serverInfo: { name: "f", version: "1" } }
+        : body.method === "tools/list" ? { tools: [] } : {}
+      return Response.json({ jsonrpc: "2.0", id: body.id, result })
+    }
+    return new Response("", { status: 401 })
+  } })
+  try {
+    const m = new McpManager({ tf: { type: "remote", url: `http://127.0.0.1:${srv.port}/mcp` } }, process.cwd(), path)
+    putEntry(path, "tf", {
+      serverUrl: `http://127.0.0.1:${srv.port}/mcp`, resource: "r", issuer: "https://as.example", clientId: "client-1",
+      tokenEndpoint: "https://as.example/oauth/token", revocationEndpoint: "https://as.example/oauth/revoke",
+      tokens: { accessToken: "at-1", refreshToken: "rt-1", expiresAt: Math.floor(Date.now() / 1000) + 3600 },
+    })
+    await m.connectAll()
+    expect(m.states()[0].status).toBe("connected")
+    await m.logout("tf", { fetchImpl: async (_u, init) => { revoked = String(init?.body); return new Response(null, { status: 200 }) } })
+    expect(revoked).toContain("token=rt-1")
+    expect(m.states()[0].status).toBe("auth_required")
+    m.closeSync()
+  } finally { srv.stop(true); rmSync(path, { force: true }) }
 })

@@ -9,7 +9,7 @@ import { loadSkills } from "./core/skills"
 import { loadAgents } from "./core/agents"
 import { McpManager } from "./core/mcp/manager"
 import { Provider } from "./core/provider"
-import { defaultDbPath } from "./core/platform"
+import { defaultDbPath, defaultMcpOAuthPath } from "./core/platform"
 import { runRepl } from "./cli/repl"
 
 const args = process.argv.slice(2)
@@ -25,7 +25,7 @@ const skills = loadSkills(projectRoot)
 
 const baseTools = makeTools(projectRoot)
 const allTools: ToolDef[] = [...baseTools]
-const mcp = new McpManager(loadMcpConfig(projectRoot), projectRoot)
+const mcp = new McpManager(loadMcpConfig(projectRoot), projectRoot, defaultMcpOAuthPath(process.env, homedir(), process.platform))
 mcp.onChange = tools => { allTools.length = 0; allTools.push(...baseTools, ...tools) }
 // Register cleanup BEFORE connecting: a server that spawns and then hangs is
 // mid-connect, so its child must already be reachable by closeSync.
@@ -41,7 +41,10 @@ process.on("SIGHUP", onTerm)
 const onInt = () => { mcp.closeSync(); process.exit(130) }
 process.on("SIGINT", onInt)
 await mcp.connectAll()
-for (const s of mcp.states()) if (s.status === "failed") console.log(`mcp: ${s.name}: ${s.error}`)
+for (const s of mcp.states()) {
+  if (s.status === "failed") console.log(`mcp: ${s.name}: ${s.error}`)
+  else if (s.status === "auth_required") console.log(`mcp: ${s.name}: needs authentication — run /mcp and choose authenticate`)
+}
 
 const agents = loadAgents(projectRoot, homedir(), allTools.map(t => t.name))
 if (config.defaultAgent && !agents.some(a => a.id === config.defaultAgent))
