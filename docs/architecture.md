@@ -61,7 +61,9 @@ user input
 
 ## MCP
 
-MCP servers are configured in the `mcp` map (see README § Configuration) and owned at runtime by `McpManager` (`src/core/mcp/manager.ts`): it connects every enabled server in parallel at startup, isolates failures, and is what `/mcp` drives to reconnect/disable/enable without a restart. `src/main.ts` keeps the live tool array and swaps MCP tools in and out via `mcp.onChange`; `process.on("exit", () => mcp.closeSync())` kills child processes synchronously so no stdio server is left orphaned.
+MCP servers are configured in the `mcp` map (see README § Configuration) and owned at runtime by `McpManager` (`src/core/mcp/manager.ts`): it connects every enabled server in parallel at startup, isolates failures, and is what `/mcp` drives to reconnect/disable/enable without a restart. `src/main.ts` keeps the live tool array and swaps MCP tools in and out via `mcp.onChange`.
+
+Cleanup is registered *before* connecting, and the manager tracks clients that are not yet attached to an entry: a server that spawns and then stalls its handshake is mid-connect, so `closeSync` must already be able to reach its child. `process.on("exit", () => mcp.closeSync())` kills every child synchronously (no orphan), and SIGINT/SIGTERM handlers exist only for the startup window — once the REPL/TUI takes over the terminal it installs its own Ctrl+C semantics. A server that dies on its own reports through `McpClient.onClosed`, which flips its entry to `failed` and re-emits the toolset, so `/mcp` offers `reconnect` instead of pretending it is still up.
 
 ```
 McpManager ──connectServer──▶ Transport (stdio | http)
@@ -71,7 +73,7 @@ McpManager ──connectServer──▶ Transport (stdio | http)
                             mcpToolDefs ──▶ ToolDef[]  (into the registry)
 ```
 
-**Transport seam.** `Transport` (`transport.ts`) is three methods — `start(handlers)`, `send(msg)`, `close()` — plus `closeSync()` for the process-exit path (never awaits). `StdioTransport` spawns the child with `Bun.spawn`, frames stdout through `LineBuffer` (`framing.ts`) and drains stderr so a chatty server cannot block on a full pipe; `HttpTransport` posts one JSON-RPC message per request, keeps the `Mcp-Session-Id` it receives and echoes it, accepts `application/json` or `text/event-stream` (parsed reusing the provider's `parseSSE`), treats `202` as "notification accepted, no reply", and raises `McpAuthError` on `401`. The client is transport-agnostic: it owns the id counter, the pending map, per-request timeouts (default 30s) and fail-fast once closed.
+**Transport seam.** `Transport` (`transport.ts`) is three methods — `start(handlers)`, `send(msg)`, `close()` — plus `closeSync()` for the process-exit path (never awaits). `StdioTransport` spawns the child with `Bun.spawn`, frames stdout through `LineBuffer` (`framing.ts`, capped so an unterminated oversized payload surfaces an error instead of growing the heap) and drains stderr so a chatty server cannot block on a full pipe; `HttpTransport` posts one JSON-RPC message per request, keeps the `Mcp-Session-Id` it receives and echoes it, accepts `application/json` or `text/event-stream` (parsed reusing the provider's `parseSSE`), treats `202` as "notification accepted, no reply", and raises `McpAuthError` on `401`. The client is transport-agnostic: it owns the id counter, the pending map, per-request timeouts (default 30s) and fail-fast once closed.
 
 **Legacy revision.** v1 speaks the `initialize` handshake + `Mcp-Session-Id` revision (`2025-06-18`, with `2025-03-26`/`2024-11-05` accepted), not the later stateless one — every real server we target predates it. After `initialize` the client sends the `notifications/initialized` notification, then `tools/list` (following `nextCursor`) and `tools/call`.
 
