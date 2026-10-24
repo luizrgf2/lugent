@@ -153,4 +153,16 @@ describe("loadMcpConfig", () => {
     rmSync(dir, { recursive: true, force: true })
     rmSync(global, { force: true })
   })
+
+  test("a global marker disables a server only the project declares", () => {
+    const dir = `/tmp/opencode/mcp-marker-${Date.now()}-y`
+    const global = `/tmp/opencode/mcp-marker-global-${Date.now()}-y.json`
+    mkdirSync(dir, { recursive: true })
+    write(global, { a: { enabled: false } })
+    write(`${dir}/lugent.json`, { a: { type: "remote", url: "https://a/mcp" } })
+    // the user's own file can switch off a server a repo declares
+    expect(loadMcpConfig(dir, global)).toEqual({ a: { type: "remote", url: "https://a/mcp", enabled: false } })
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(global, { force: true })
+  })
 })

@@ -81,25 +81,37 @@ export function parseMcpServer(name: string, raw: unknown): McpServerConfig | un
 /**
  * The `mcp` map merges across both config files (global first, project wins) —
  * unlike `providers`, which is first-file-wins. A project entry replaces the
- * whole global entry; disabling a global server means repeating it with
+ * whole global entry; disabling a server means repeating it with
  * `enabled: false` — either the whole entry, or just `{ "enabled": false }` as a
- * marker for a server declared in the other file. The entry stays either way,
- * listed as `disabled` by `/mcp` so it can be re-enabled for the session.
+ * marker. Markers are collected from both files and applied last, so they win
+ * wherever the server was declared (the global file can therefore switch off a
+ * server that only a repo declares). The entry stays either way, listed as
+ * `disabled` by `/mcp` so it can be re-enabled for the session.
  */
 export function loadMcpConfig(root: string, globalPath = `${homedir()}/.config/lugent/config.json`): McpServerConfigMap {
   const merged: McpServerConfigMap = {}
+  const markers: string[] = []
   for (const file of [globalPath, `${root}/lugent.json`]) {
     if (!existsSync(file)) continue
     let raw: any
     try { raw = JSON.parse(readFileSync(file, "utf8")) } catch { console.warn(`mcp: invalid JSON in ${file}, skipped`); continue }
     for (const [name, entry] of Object.entries(raw.mcp ?? {})) {
-      const r = entry as Record<string, unknown> | null
-      const marker = typeof r === "object" && r !== null && r.enabled === false
-        && typeof r.type !== "string" && typeof r.url !== "string" && !Array.isArray(r.command)
-      if (marker && merged[name]) { merged[name] = { ...merged[name], enabled: false }; continue }
+      if (isDisableMarker(entry)) { markers.push(name); continue }
       const cfg = parseMcpServer(name, entry)
       if (cfg) merged[name] = cfg
     }
   }
+  for (const name of markers) {
+    const prev = merged[name]
+    if (prev) merged[name] = { ...prev, enabled: false }
+    else console.warn(`mcp ${name}: "enabled: false" marker for a server declared nowhere, dropped`)
+  }
   return merged
+}
+
+/** `{ "enabled": false }` with nothing else: a marker for a server declared elsewhere. */
+function isDisableMarker(entry: unknown): boolean {
+  const r = entry as Record<string, unknown> | null
+  return typeof r === "object" && r !== null && r.enabled === false
+    && typeof r.type !== "string" && typeof r.url !== "string" && !Array.isArray(r.command)
 }

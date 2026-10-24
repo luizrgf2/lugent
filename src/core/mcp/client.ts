@@ -118,4 +118,7 @@ export class McpClient {
 
   /** test seam: drive an arbitrary method to exercise error mapping */
   requestForTest(method: string, params?: unknown): Promise<any> { return this.request(method, params) }
+
+  /** True once the client is closed or the transport has died. */
+  get isClosed(): boolean { return this.closed }
 }

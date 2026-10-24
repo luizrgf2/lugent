@@ -32,6 +32,8 @@ export class McpManager {
   private entries = new Map<string, Entry>()
   /** Clients not yet attached to an entry (a spawn that can still be hanging) — closeSync must reach these too. */
   private inflight = new Set<McpClient>()
+  /** Names with a connect attempt in flight, so two reconnects cannot race. */
+  private connecting = new Set<string>()
   onChange?: (tools: ToolDef[]) => void
 
   constructor(config: McpServerConfigMap, private projectRoot: string) {
@@ -97,24 +99,34 @@ export class McpManager {
   }
 
   private async tryConnect(name: string): Promise<void> {
-    const e = this.entries.get(name)!
-    e.status = "connecting"
-    let pending: McpClient | undefined
-    // connectServer never throws — it returns a result — so the handle is
-    // always released here, even when the server spawns and then hangs.
-    const r = await connectServer(name, e.cfg, this.projectRoot, c => { pending = c; this.inflight.add(c) })
-    if (pending) this.inflight.delete(pending)
-    if (r.ok) {
-      this.watch(r.client, e)
-      e.client = r.client
-      e.infos = r.tools
-      e.status = "connected"
-      e.error = undefined
-    } else {
-      e.client = undefined
-      e.infos = undefined
-      e.status = "failed"
-      e.error = r.error
+    // One attempt per server at a time: a second concurrent reconnect would
+    // spawn a child that only the last client keeps a handle to.
+    if (this.connecting.has(name)) return
+    this.connecting.add(name)
+    try {
+      const e = this.entries.get(name)!
+      e.status = "connecting"
+      let pending: McpClient | undefined
+      // connectServer never throws — it returns a result — so the handle is
+      // always released here, even when the server spawns and then hangs.
+      const r = await connectServer(name, e.cfg, this.projectRoot, c => { pending = c; this.inflight.add(c) })
+      if (pending) this.inflight.delete(pending)
+      if (r.ok && !r.client.isClosed) {
+        this.watch(r.client, e)
+        e.client = r.client
+        e.infos = r.tools
+        e.status = "connected"
+        e.error = undefined
+      } else {
+        const why = r.ok ? "server closed during startup" : r.error
+        if (r.ok) r.client.closeSync()
+        e.client = undefined
+        e.infos = undefined
+        e.status = "failed"
+        e.error = why
+      }
+    } finally {
+      this.connecting.delete(name)
     }
   }
 
