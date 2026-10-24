@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test"
-import { subEnv, loadConfig } from "./config"
+import { subEnv, loadConfig, parseMcpServer, loadMcpConfig } from "./config"
 import { rmSync, writeFileSync, mkdirSync } from "node:fs"
 
 describe("subEnv", () => {
@@ -66,5 +66,67 @@ describe("loadConfig", () => {
     writeFileSync(`${dir}/lugent.json`, JSON.stringify({ providers: {}, defaultProvider: "", defaultModel: "" }))
     expect(loadConfig(dir).defaultAgent).toBeUndefined()
     rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe("parseMcpServer", () => {
+  test("local server parses command array", () => {
+    expect(parseMcpServer("cd", { type: "local", command: ["npx", "-y", "chrome-devtools-mcp@latest"] }))
+      .toEqual({ type: "local", command: ["npx", "-y", "chrome-devtools-mcp@latest"] })
+  })
+  test("remote server accepts the http alias", () => {
+    expect(parseMcpServer("tf", { type: "http", url: "https://x/mcp" }))
+      .toEqual({ type: "http", url: "https://x/mcp" })
+  })
+  test("type is inferred when absent", () => {
+    expect(parseMcpServer("a", { url: "https://x/mcp" })?.type).toBe("remote")
+    expect(parseMcpServer("b", { command: ["node", "s.js"] })?.type).toBe("local")
+  })
+  test("local without command is dropped", () => {
+    expect(parseMcpServer("bad", { type: "local", command: [] })).toBeUndefined()
+  })
+  test("remote without http url is dropped", () => {
+    expect(parseMcpServer("bad", { type: "remote", url: "ftp://x" })).toBeUndefined()
+  })
+  test("enabled false is kept and marked disabled", () => {
+    expect(parseMcpServer("off", { type: "remote", url: "https://x/mcp", enabled: false }))
+      .toEqual({ type: "remote", url: "https://x/mcp", enabled: false })
+  })
+  test("timeout and env substitution", () => {
+    process.env.MCP_TEST_TOKEN = "tok"
+    const cfg = parseMcpServer("s", { type: "remote", url: "https://x/mcp", timeout: 5000, headers: { Authorization: "Bearer {env:MCP_TEST_TOKEN}" } })
+    expect(cfg).toEqual({ type: "remote", url: "https://x/mcp", timeout: 5000, headers: { Authorization: "Bearer tok" } })
+  })
+})
+
+describe("loadMcpConfig", () => {
+  const write = (p: string, mcp: unknown) => writeFileSync(p, JSON.stringify({ providers: {}, defaultProvider: "", defaultModel: "", mcp }))
+
+  test("merges global and project, project replaces the whole entry", () => {
+    const dir = `/tmp/opencode/mcp-${Date.now()}`
+    const global = `/tmp/opencode/mcp-global-${Date.now()}.json`
+    mkdirSync(dir, { recursive: true })
+    write(global, { a: { type: "remote", url: "https://global/mcp" }, b: { type: "remote", url: "https://b/mcp" } })
+    write(`${dir}/lugent.json`, { a: { type: "remote", url: "https://project/mcp" } })
+    const cfg = loadMcpConfig(dir, global)
+    expect(cfg.a.url).toBe("https://project/mcp")
+    expect(cfg.b.url).toBe("https://b/mcp")
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(global, { force: true })
+  })
+
+  test("project can disable a global server by repeating it disabled", () => {
+    const dir = `/tmp/opencode/mcp-off-${Date.now()}`
+    const global = `/tmp/opencode/mcp-off-global-${Date.now()}.json`
+    mkdirSync(dir, { recursive: true })
+    write(global, { a: { type: "remote", url: "https://a/mcp" } })
+    write(`${dir}/lugent.json`, { a: { type: "remote", url: "https://a/mcp", enabled: false } })
+    expect(loadMcpConfig(dir, global)).toEqual({ a: { type: "remote", url: "https://a/mcp", enabled: false } })
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(global, { force: true })
+  })
+
+  test("no mcp key anywhere yields an empty map", () => {
+    expect(loadMcpConfig(`/tmp/opencode/nomcp-${Date.now()}`, `/tmp/opencode/nomcp-g-${Date.now()}.json`)).toEqual({})
   })
 })
