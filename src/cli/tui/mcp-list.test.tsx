@@ -59,3 +59,29 @@ test("escape closes", async () => {
   await wait(60)
   expect(closed).toBe(1)
 })
+
+test("an auth_required server offers authenticate and shows the consent URL while waiting", async () => {
+  let release: () => void = () => {}
+  const gate = new Promise<void>(r => { release = r })
+  const calls: string[] = []
+  const authStates: McpServerState[] = [{ name: "tf", type: "remote", status: "auth_required", toolCount: 0 }]
+  const { type, lastFrame } = renderTui(
+    <McpList
+      states={authStates}
+      onAction={async (n, a, onUrl) => { calls.push(`${n}:${a}`); onUrl("https://as.example/authorize?x=1"); await gate }}
+      onClose={() => {}}
+    />,
+  )
+  await wait()
+  expect(lastFrame()).toContain("tf (remote) — auth_required: needs authentication")
+  type("\r")           // open the actions
+  await wait()
+  expect(lastFrame()).toContain("authenticate")
+  type("\r")           // pick authenticate
+  await wait(60)
+  expect(calls).toEqual(["tf:authenticate"])
+  expect(lastFrame()).toContain("waiting for authorization")
+  expect(lastFrame()).toContain("https://as.example/authorize?x=1")
+  release()
+  await wait(60)
+})

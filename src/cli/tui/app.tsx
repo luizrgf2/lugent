@@ -60,6 +60,8 @@ export function App(props: { env: TuiEnv }) {
   const [overlay, setOverlay] = useState<null | "model" | "skills" | "resume" | "permissions" | "agent" | "mcp">(null)
   const overlayRef = useRef<null | "model" | "skills" | "resume" | "permissions" | "agent" | "mcp">(null)
   const [mcpStates, setMcpStates] = useState<McpServerState[]>([])
+  /** Set while /mcp authenticate waits for the browser, so ctrl+c can cancel it. */
+  const authAbortRef = useRef<AbortController | null>(null)
   const [yolo, setYolo] = useState(false)
   // Ref mirrors state: submit reads it — ink batching can make state stale.
   const yoloRef = useRef(false)
@@ -71,6 +73,9 @@ export function App(props: { env: TuiEnv }) {
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
+      // A sign-in waiting for the browser is cancelled first: it must not count
+      // toward the double-ctrl+c exit, and it must not abort the turn.
+      if (authAbortRef.current) { authAbortRef.current.abort(); authAbortRef.current = null; return }
       if (overlayRef.current) { closeOverlay(); return }   // overlay open: ctrl+c just closes it
       const n = sigintRef.current + 1
       sigintRef.current = n
@@ -224,8 +229,16 @@ export function App(props: { env: TuiEnv }) {
           : overlay === "mcp"
             ? <McpList
                 states={mcpStates}
-                onAction={async (name, action) => {
-                  await env.mcp[action](name)
+                onAction={async (name, action, onUrl) => {
+                  if (action === "authenticate") {
+                    const ctl = new AbortController()
+                    authAbortRef.current = ctl
+                    try { await env.mcp.authenticate(name, { onUrl, signal: ctl.signal }) }
+                    finally { authAbortRef.current = null }
+                  } else if (action === "logout") await env.mcp.logout(name)
+                  else if (action === "reconnect") await env.mcp.reconnect(name)
+                  else if (action === "disable") await env.mcp.disable(name)
+                  else await env.mcp.enable(name)
                   setMcpStates(env.mcp.states())
                 }}
                 onClose={closeOverlay} />

@@ -6,13 +6,14 @@ import { mcpActions, formatMcpState, type McpAction } from "../commands"
 /** `/mcp`: pick a server, then pick an action. Mirrors the agent/model pickers. */
 export function McpList(p: {
   states: McpServerState[]
-  onAction(name: string, action: McpAction): Promise<void>
+  onAction(name: string, action: McpAction, onUrl: (url: string) => void): Promise<void>
   onClose(): void
 }) {
   const [sel, setSel] = useState(0)
   const [open, setOpen] = useState<string | null>(null)   // server whose action menu is open
   const [actionSel, setActionSel] = useState(0)
   const [busy, setBusy] = useState(false)
+  const [pendingUrl, setPendingUrl] = useState<string | null>(null)
   // Refs mirror state: ink batches keys into one render (same hazard as input.tsx).
   const selRef = useRef(sel)
   const actionSelRef = useRef(actionSel)
@@ -20,13 +21,13 @@ export function McpList(p: {
   const setActionBoth = (i: number) => { actionSelRef.current = i; setActionSel(i) }
 
   const row = p.states[selRef.current]
-  const actions = row ? mcpActions(row.status) : []
+  const actions = row ? mcpActions(row.status, row.type) : []
 
   const run = async (name: string, action: McpAction) => {
     setBusy(true)
-    try { await p.onAction(name, action) }
+    try { await p.onAction(name, action, setPendingUrl) }
     catch { /* the owner reports the result through `states`; never reject into the void */ }
-    finally { setBusy(false); setOpen(null); setActionBoth(0) }
+    finally { setBusy(false); setOpen(null); setActionBoth(0); setPendingUrl(null) }
   }
 
   useInput((_input, key) => {
@@ -54,14 +55,19 @@ export function McpList(p: {
               {i === sel ? "❯" : " "} {formatMcpState(s)}{s.status === "connected" ? " ●" : ""}
             </Text>
           ))}
-      {open
+      {busy && pendingUrl
         ? <Box flexDirection="column" marginTop={1}>
-            <Text dimColor>{open} · action</Text>
-            {actions.map((a, i) => (
-              <Text key={a} color={i === actionSel ? "cyan" : undefined}>{i === actionSel ? "❯" : " "} {a}</Text>
-            ))}
+            <Text dimColor>waiting for authorization… (ctrl+c cancels)</Text>
+            <Text>if the browser did not open, visit:{"\n"}{pendingUrl}</Text>
           </Box>
-        : <Text dimColor>{busy ? "working…" : "↑/↓ move · enter actions · esc cancel"}</Text>}
+        : open
+          ? <Box flexDirection="column" marginTop={1}>
+              <Text dimColor>{open} · action</Text>
+              {actions.map((a, i) => (
+                <Text key={a} color={i === actionSel ? "cyan" : undefined}>{i === actionSel ? "❯" : " "} {a}</Text>
+              ))}
+            </Box>
+          : <Text dimColor>{busy ? "working…" : "↑/↓ move · enter actions · esc cancel"}</Text>}
     </Box>
   )
 }

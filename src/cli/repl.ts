@@ -7,7 +7,7 @@ import type { AppConfig } from "../core/config"
 import type { ToolDef } from "../core/tools/registry"
 import type { McpManager } from "../core/mcp/manager"
 import type { SkillMeta, Agent } from "../core/types"
-import { parseSlash, parseAnswer, mcpActions, formatMcpState } from "./commands"
+import { parseSlash, parseAnswer, mcpActions, formatMcpState, type McpAction } from "./commands"
 import { box, glyph, truncate, dim, cyan, red, Spinner, logo } from "./ui"
 import { buildPromptInput } from "./context"
 
@@ -31,8 +31,11 @@ export async function runRepl(env: ReplEnv): Promise<void> {
   let providerCfg = env.config.providers[providerName]
   let abortCtrl = new AbortController()
   let sigintCount = 0
+  /** Set while /mcp authenticate waits for the browser: ctrl+c cancels that, not the session. */
+  let authAbort: AbortController | null = null
 
   rl.on("SIGINT", () => {
+    if (authAbort) { authAbort.abort(); return }
     sigintCount++
     if (sigintCount === 1) { abortCtrl.abort(); process.stdout.write("\n(aborted)\n") }
     else process.exit(0)
@@ -93,23 +96,41 @@ export async function runRepl(env: ReplEnv): Promise<void> {
       }
       if (slash.cmd === "mcp") {
         const [action, name] = slash.args
+        const USAGE = "usage: /mcp [auth|logout|reconnect|disable|enable] <name>"
         if (!action) {
           const list = env.mcp.states()
           console.log(list.map(formatMcpState).join("\n") || "(no MCP servers configured)")
           continue
         }
-        if (!name) { console.log("usage: /mcp [reconnect|disable|enable] <name>"); continue }
-        if (action !== "reconnect" && action !== "disable" && action !== "enable") {
-          console.log("usage: /mcp [reconnect|disable|enable] <name>")
-          continue
+        const WANTED: Record<string, McpAction> = {
+          auth: "authenticate", authenticate: "authenticate",
+          logout: "logout", reconnect: "reconnect", disable: "disable", enable: "enable",
         }
+        const wants = WANTED[action]
+        if (!name || !wants) { console.log(USAGE); continue }
         const before = env.mcp.states().find(s => s.name === name)
         if (!before) { console.log(`unknown MCP server "${name}" — /mcp lists them`); continue }
-        if (!mcpActions(before.status).includes(action)) {
+        if (!mcpActions(before.status, before.type).includes(wants)) {
           console.log(`cannot ${action} ${name} (${before.status})`)
           continue
         }
-        await env.mcp[action](name)
+        if (wants === "authenticate") {
+          authAbort = new AbortController()
+          try {
+            console.log(`waiting for ${name} authorization in your browser… (ctrl+c cancels)`)
+            await env.mcp.authenticate(name, {
+              onUrl: url => console.log(`if the browser did not open, visit:\n${url}`),
+              signal: authAbort.signal,
+            })
+          } catch (e) {
+            console.log(`authenticate failed: ${(e as Error).message}`)
+          } finally {
+            authAbort = null
+          }
+        } else if (wants === "logout") await env.mcp.logout(name)
+        else if (wants === "reconnect") await env.mcp.reconnect(name)
+        else if (wants === "disable") await env.mcp.disable(name)
+        else await env.mcp.enable(name)
         const after = env.mcp.states().find(s => s.name === name)!
         console.log(`mcp ${name}: ${after.status}${after.error ? ` — ${after.error}` : ""}`)
         continue

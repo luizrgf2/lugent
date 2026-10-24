@@ -25,10 +25,12 @@ test("parseAnswer: only explicit y/a allows (review F3)", () => {
   expect(parseAnswer("\n")).toBe("n")
 })
 
-test("mcpActions: one action set per status", () => {
-  expect(mcpActions("connected")).toEqual(["disable"])
-  expect(mcpActions("disabled")).toEqual(["enable"])
-  expect(mcpActions("failed")).toEqual(["reconnect", "disable"])
+test("mcpActions: one action set per status, and logout only for a remote server", () => {
+  expect(mcpActions("connected", "remote")).toEqual(["logout", "disable"])
+  expect(mcpActions("connected", "local")).toEqual(["disable"])
+  expect(mcpActions("disabled", "remote")).toEqual(["enable"])
+  expect(mcpActions("failed", "remote")).toEqual(["reconnect", "disable"])
+  expect(mcpActions("auth_required", "remote")).toEqual(["authenticate", "disable"])
 })
 
 test("formatMcpState: tool count when connected, error when failed", () => {
@@ -38,4 +40,11 @@ test("formatMcpState: tool count when connected, error when failed", () => {
     .toBe("b (remote) — failed: boom")
   expect(formatMcpState({ name: "c", type: "remote", status: "disabled", toolCount: 0 }))
     .toBe("c (remote) — disabled")
+})
+
+test("formatMcpState: auth_required reads as needs authentication", () => {
+  expect(formatMcpState({ name: "tf", type: "remote", status: "auth_required", toolCount: 0 }))
+    .toBe("tf (remote) — auth_required: needs authentication")
+  expect(formatMcpState({ name: "tf", type: "remote", status: "auth_required", error: "denied", toolCount: 0 }))
+    .toBe("tf (remote) — auth_required: needs authentication — denied")
 })

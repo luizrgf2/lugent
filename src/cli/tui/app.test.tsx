@@ -18,7 +18,7 @@ export function fakeEnv(over: Record<string, unknown> = {}): any {
     projectRoot: "/tmp/opencode",
     store: new Store(db),
     offProviders: [],
-    mcp: { states: () => [], reconnect: async () => {}, disable: async () => {}, enable: async () => {} },
+    mcp: { states: () => [], reconnect: async () => {}, disable: async () => {}, enable: async () => {}, authenticate: async () => {}, logout: async () => {} },
     ...over,
   }
 }
@@ -594,6 +594,8 @@ test("/mcp overlay lists servers, and disabling one refreshes the list", async (
       reconnect: async (n: string) => { calls.push(`reconnect:${n}`); statuses[n] = "connected" },
       disable: async (n: string) => { calls.push(`disable:${n}`); statuses[n] = "disabled" },
       enable: async (n: string) => { calls.push(`enable:${n}`); statuses[n] = "connected" },
+      authenticate: async (n: string) => { calls.push(`authenticate:${n}`); statuses[n] = "connected" },
+      logout: async (n: string) => { calls.push(`logout:${n}`); statuses[n] = "auth_required" },
     },
   })
   const { type, lastFrame } = renderTui(<App env={env} />)

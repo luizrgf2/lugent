@@ -14,18 +14,21 @@ export function parseAnswer(answer: string): "y" | "n" | "a" {
   return "n"
 }
 
-export type McpAction = "reconnect" | "disable" | "enable"
+export type McpAction = "authenticate" | "logout" | "reconnect" | "disable" | "enable"
 
 /** The actions a row offers, by status — the single source for REPL and TUI. */
-export function mcpActions(status: McpServerStatus): McpAction[] {
-  if (status === "connected") return ["disable"]
+export function mcpActions(status: McpServerStatus, type: "local" | "remote"): McpAction[] {
+  // logout is meaningless for a spawned child: only a remote server has a token.
+  if (status === "connected") return type === "remote" ? ["logout", "disable"] : ["disable"]
   if (status === "disabled") return ["enable"]
+  if (status === "auth_required") return ["authenticate", "disable"]
   return ["reconnect", "disable"]   // failed, or mid-connect
 }
 
 export function formatMcpState(s: McpServerState): string {
   const base = `${s.name} (${s.type}) — ${s.status}`
   if (s.status === "connected") return `${base}, ${s.toolCount} tool${s.toolCount === 1 ? "" : "s"}`
+  if (s.status === "auth_required") return s.error ? `${base}: needs authentication — ${s.error}` : `${base}: needs authentication`
   if (s.error) return `${base}: ${s.error}`
   return base
 }
