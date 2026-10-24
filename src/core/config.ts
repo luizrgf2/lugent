@@ -82,7 +82,9 @@ export function parseMcpServer(name: string, raw: unknown): McpServerConfig | un
  * The `mcp` map merges across both config files (global first, project wins) —
  * unlike `providers`, which is first-file-wins. A project entry replaces the
  * whole global entry; disabling a global server means repeating it with
- * `enabled: false` (the entry stays, listed as disabled by `/mcp`).
+ * `enabled: false` — either the whole entry, or just `{ "enabled": false }` as a
+ * marker for a server declared in the other file. The entry stays either way,
+ * listed as `disabled` by `/mcp` so it can be re-enabled for the session.
  */
 export function loadMcpConfig(root: string, globalPath = `${homedir()}/.config/lugent/config.json`): McpServerConfigMap {
   const merged: McpServerConfigMap = {}
@@ -91,6 +93,10 @@ export function loadMcpConfig(root: string, globalPath = `${homedir()}/.config/l
     let raw: any
     try { raw = JSON.parse(readFileSync(file, "utf8")) } catch { console.warn(`mcp: invalid JSON in ${file}, skipped`); continue }
     for (const [name, entry] of Object.entries(raw.mcp ?? {})) {
+      const r = entry as Record<string, unknown> | null
+      const marker = typeof r === "object" && r !== null && r.enabled === false
+        && typeof r.type !== "string" && typeof r.url !== "string" && !Array.isArray(r.command)
+      if (marker && merged[name]) { merged[name] = { ...merged[name], enabled: false }; continue }
       const cfg = parseMcpServer(name, entry)
       if (cfg) merged[name] = cfg
     }

@@ -129,4 +129,28 @@ describe("loadMcpConfig", () => {
   test("no mcp key anywhere yields an empty map", () => {
     expect(loadMcpConfig(`/tmp/opencode/nomcp-${Date.now()}`, `/tmp/opencode/nomcp-g-${Date.now()}.json`)).toEqual({})
   })
+
+  test("a bare enabled:false marker disables a server declared in the other file", () => {
+    const dir = `/tmp/opencode/mcp-marker-${Date.now()}`
+    const global = `/tmp/opencode/mcp-marker-global-${Date.now()}.json`
+    mkdirSync(dir, { recursive: true })
+    write(global, { a: { type: "remote", url: "https://a/mcp" }, b: { type: "local", command: ["bun", "x.ts"] } })
+    write(`${dir}/lugent.json`, { a: { enabled: false } })
+    const cfg = loadMcpConfig(dir, global)
+    expect(cfg.a).toEqual({ type: "remote", url: "https://a/mcp", enabled: false })   // disabled, not dropped
+    expect(cfg.b).toEqual({ type: "local", command: ["bun", "x.ts"] })                // untouched
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(global, { force: true })
+  })
+
+  test("a bare enabled:false marker for an unknown server is dropped", () => {
+    const dir = `/tmp/opencode/mcp-marker-${Date.now()}-x`
+    const global = `/tmp/opencode/mcp-marker-global-${Date.now()}-x.json`
+    mkdirSync(dir, { recursive: true })
+    write(global, {})
+    write(`${dir}/lugent.json`, { ghost: { enabled: false } })
+    expect(loadMcpConfig(dir, global)).toEqual({})
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(global, { force: true })
+  })
 })
