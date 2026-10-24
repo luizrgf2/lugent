@@ -31,7 +31,7 @@ Documentation pattern for this repo: **one small doc per topic, never one big fi
 
 | If you touch… | Read |
 | --- | --- |
-| `src/core/prompt.ts` (prefix, buildMessages) | `docs/architecture.md` § "Byte-stable prefix" — snapshot must stay byte-identical unless the change is deliberate |
+| `src/core/prompt.ts` (prefix, buildMessages, the always-present `# MCP` section) | `docs/architecture.md` § "Byte-stable prefix" — snapshot must stay byte-identical unless the change is deliberate; before growing the `# MCP` section, read `docs/decisions.md` (2026-10-24, always-loaded prompt section) for the promotion trigger |
 | `src/core/provider.ts` (SSE, retry, health) | `docs/architecture.md` § "SSE fragment accumulation" |
 | `src/core/loop.ts` / abort / history repair | `docs/architecture.md` § "Append-only store, repaired on read" + § "Turn flow" |
 | `src/core/store.ts` | `docs/architecture.md` § "Schema" |

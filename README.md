@@ -150,6 +150,8 @@ In `--plain` mode the same actions are explicit: `/mcp`, `/mcp reconnect <name>`
 
 Enabling and disabling is **session-scoped** — lugent never rewrites `lugent.json` (a turn must not silently edit a file that can hold secrets). Restart to fall back to the configured state; persistence is deferred (see `docs/future-features.md`).
 
+**The agent knows this surface.** lugent's system prompt carries a short `# MCP` section — always present, and *outside* the agent prompt, so it stays when you switch to `plan` or a custom agent. You can therefore ask how MCP works here or where the config lives, and ask it to install a server: it edits `lugent.json` with the normal `write`/`edit` tools (both `ask`, so nothing is rewritten without your approval) and tells you to restart. Put tokens in `{env:VAR}`, never inline — especially in a project file that may be committed.
+
 **OAuth for remote servers is not implemented yet.** A `remote` server that answers `401` fails closed with a clear message (the browser flow is Phase 2); configure a static `headers` token if the endpoint supports one.
 
 ## Skills

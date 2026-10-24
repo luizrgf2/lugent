@@ -60,6 +60,26 @@ test("absent agentPrompt keeps the base prompt", () => {
   expect(buildPrefix(input)).toContain("You are lugent")
 })
 
+test("MCP section is always present, first, and survives an agent swap", () => {
+  const p = buildPrefix(input)
+  expect(p.startsWith("# MCP")).toBe(true)
+  expect(p.indexOf("# MCP")).toBeLessThan(p.indexOf("You are lugent"))
+  expect(p).toContain("~/.config/lugent/config.json")   // where the global config lives
+  expect(p).toContain("lugent.json")
+  expect(p).toContain("/mcp")
+  // The literal entry shape must be shown, not just described: asked to install a
+  // server, a model that only reads prose invents `{"local": {...}}` (observed).
+  expect(p).toContain('"type": "local", "command"')
+  expect(p).toContain('"type": "remote", "url"')
+
+  // An agent prompt replaces the base prompt — the MCP section must outlive it,
+  // which is the whole point of it not being part of SYSTEM_PROMPT.
+  const withAgent = buildPrefix({ ...input, agentPrompt: "You are a reviewer. Do not edit files." })
+  expect(withAgent.startsWith("# MCP")).toBe(true)
+  expect(withAgent).not.toContain("You are lugent")
+  expect(withAgent).toContain("~/.config/lugent/config.json")
+})
+
 test("buildMessages maps history roles to wire format", () => {
   const history: Message[] = [
     { id: "1", sessionId: "s", role: "user", content: "hi", createdAt: "2026-01-01T00:00:00Z" },
