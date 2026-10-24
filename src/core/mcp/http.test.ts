@@ -65,11 +65,60 @@ test("http: a notification gets 202 and emits no message", async () => {
   await t.close()
 })
 
-test("http: 401 raises McpAuthError with the challenge", async () => {
+test("http: 401 raises McpAuthRequiredError with an actionable message", async () => {
   const url = serve(async () => new Response("nope", { status: 401, headers: { "www-authenticate": 'Bearer resource_metadata="https://x"' } }))
   const t = new HttpTransport("stub", url)
   await started(t)
-  await expect(t.send({ jsonrpc: "2.0", id: 1, method: "initialize" })).rejects.toThrow(/OAuth/)
+  await expect(t.send({ jsonrpc: "2.0", id: 1, method: "initialize" })).rejects.toThrow(/requires OAuth authorization/)
+  await t.close()
+})
+
+test("http: the provider's token goes out as a bearer and beats a static header", async () => {
+  const seen: (string | null)[] = []
+  const url = serve(req => { seen.push(req.headers.get("authorization")); return Response.json({ jsonrpc: "2.0", id: 1, result: {} }) })
+  const t = new HttpTransport("stub", url, { authorization: "Bearer static" }, 30_000, async () => "at-1")
+  await started(t)
+  await t.send(INIT as any)
+  expect(seen[0]).toBe("Bearer at-1")
+  await t.close()
+})
+
+test("http: no token from the provider means no authorization header", async () => {
+  const seen: (string | null)[] = []
+  const url = serve(req => { seen.push(req.headers.get("authorization")); return Response.json({ jsonrpc: "2.0", id: 1, result: {} }) })
+  const t = new HttpTransport("stub", url, {}, 30_000, async () => undefined)
+  await started(t)
+  await t.send(INIT as any)
+  expect(seen[0]).toBe(null)
+  await t.close()
+})
+
+test("http: a 401 forces one refresh and retries with the new token", async () => {
+  const seen: (string | null)[] = []
+  let force = 0
+  const url = serve(req => {
+    seen.push(req.headers.get("authorization"))
+    if (req.headers.get("authorization") === "Bearer fresh") return Response.json({ jsonrpc: "2.0", id: 1, result: {} })
+    return new Response("nope", { status: 401 })
+  })
+  const tokens = async (o?: { force?: boolean }) => { if (o?.force) { force++; return "fresh" } return "stale" }
+  const t = new HttpTransport("stub", url, {}, 30_000, tokens)
+  await started(t)
+  await t.send(INIT as any)
+  expect(seen).toEqual(["Bearer stale", "Bearer fresh"])
+  expect(force).toBe(1)
+  await t.close()
+})
+
+test("http: a 401 that survives the refresh raises auth-required (revoked mid-session)", async () => {
+  let requests = 0
+  const url = serve(() => { requests++; return new Response("nope", { status: 401 }) })
+  let force = 0
+  const t = new HttpTransport("stub", url, {}, 30_000, async (o?: { force?: boolean }) => { if (o?.force) force++; return "at-1" })
+  await started(t)
+  await expect(t.send(INIT as any)).rejects.toThrow(/requires OAuth authorization/)
+  expect(force).toBe(1)     // one forced refresh: that is how the transport learns the token is dead
+  expect(requests).toBe(1)  // the same token came back, so no pointless second POST
   await t.close()
 })
 

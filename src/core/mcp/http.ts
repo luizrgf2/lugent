@@ -2,14 +2,8 @@ import { parseSSE } from "../provider"
 import type { JsonRpcId, JsonRpcMessage } from "./protocol"
 import { CLIENT_PROTOCOL_VERSION, MCP_TIMEOUT, isRequest, isResponse } from "./protocol"
 import type { Transport, TransportHandlers } from "./transport"
-
-/** Raised on 401: the Phase 2 OAuth hook. No turn ever opens a browser. */
-export class McpAuthError extends Error {
-  constructor(public server: string, public wwwAuthenticate?: string) {
-    super(`server ${server} requires OAuth authorization (not implemented yet) — configure a static token in its "headers", or wait for Phase 2`)
-    this.name = "McpAuthError"
-  }
-}
+import { McpAuthRequiredError } from "./oauth/errors"
+import type { TokenProvider } from "./oauth/session"
 
 export class McpHttpError extends Error {
   constructor(public status: number, public body: string) {
@@ -26,15 +20,29 @@ export class HttpTransport implements Transport {
   private initId?: JsonRpcId
   private closed = false
 
-  constructor(private server: string, private url: string, private headers: Record<string, string> = {}, private timeout = MCP_TIMEOUT) {}
+  constructor(
+    private server: string,
+    private url: string,
+    private headers: Record<string, string> = {},
+    private timeout = MCP_TIMEOUT,
+    private tokens?: TokenProvider,
+  ) {}
 
   async start(handlers: TransportHandlers): Promise<void> { this.handlers = handlers }
 
   async send(msg: JsonRpcMessage): Promise<void> {
     if (this.closed) throw new Error(`server ${this.server} is not connected`)
     if (isRequest(msg) && msg.method === "initialize") this.initId = msg.id
-    const res = await this.post(msg)
-    if (res.status === 401) throw new McpAuthError(this.server, res.headers.get("www-authenticate") ?? undefined)
+    // Asked per send, so a refresh between two messages is picked up.
+    let token = await this.tokens?.()
+    let res = await this.post(msg, token)
+    if (res.status === 401 && this.tokens && token) {
+      // The server rejected a token our clock thought was good (revoked or rotated).
+      // Refresh once, then give up loudly instead of looping.
+      const forced = await this.tokens({ force: true })
+      if (forced && forced !== token) { token = forced; res = await this.post(msg, token) }
+    }
+    if (res.status === 401) throw new McpAuthRequiredError(this.server)
     const sid = res.headers.get("mcp-session-id")
     if (sid) this.sessionId = sid
     if (res.status === 202) return
@@ -60,12 +68,13 @@ export class HttpTransport implements Transport {
     this.handlers?.onMessage(m)
   }
 
-  private post(msg: JsonRpcMessage): Promise<Response> {
+  private post(msg: JsonRpcMessage, token?: string): Promise<Response> {
     const headers: Record<string, string> = {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
       ...this.headers,
     }
+    if (token) headers.authorization = `Bearer ${token}`   // an OAuth token beats a static header
     if (this.protocolVersion) headers["mcp-protocol-version"] = this.protocolVersion
     if (this.sessionId) headers["mcp-session-id"] = this.sessionId
     const controller = new AbortController()
