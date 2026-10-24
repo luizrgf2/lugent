@@ -5,6 +5,7 @@ import { toolsForAgent, agentModelTarget, resolveAgent } from "../core/agents"
 import type { Store } from "../core/store"
 import type { AppConfig } from "../core/config"
 import type { ToolDef } from "../core/tools/registry"
+import type { McpManager } from "../core/mcp/manager"
 import type { SkillMeta, Agent } from "../core/types"
 import { parseSlash, parseAnswer } from "./commands"
 import { box, glyph, truncate, dim, cyan, red, Spinner, logo } from "./ui"
@@ -17,6 +18,7 @@ export interface ReplEnv {
   skills: SkillMeta[]
   agents: Agent[]
   projectRoot: string
+  mcp: McpManager
 }
 
 export async function runRepl(env: ReplEnv): Promise<void> {

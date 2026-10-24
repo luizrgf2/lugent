@@ -1,11 +1,13 @@
 import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import { homedir } from "node:os"
-import { loadConfig } from "./core/config"
+import { loadConfig, loadMcpConfig } from "./core/config"
 import { Store } from "./core/store"
 import { makeTools } from "./core/tools"
+import type { ToolDef } from "./core/tools/registry"
 import { loadSkills } from "./core/skills"
 import { loadAgents } from "./core/agents"
+import { McpManager } from "./core/mcp/manager"
 import { Provider } from "./core/provider"
 import { defaultDbPath } from "./core/platform"
 import { runRepl } from "./cli/repl"
@@ -20,8 +22,16 @@ mkdirSync(dirname(dbPath), { recursive: true })
 const config = loadConfig(projectRoot)
 const store = new Store(dbPath)
 const skills = loadSkills(projectRoot)
-const tools = makeTools(projectRoot)
-const agents = loadAgents(projectRoot, homedir(), tools.map(t => t.name))
+
+const baseTools = makeTools(projectRoot)
+const allTools: ToolDef[] = [...baseTools]
+const mcp = new McpManager(loadMcpConfig(projectRoot), projectRoot)
+mcp.onChange = tools => { allTools.length = 0; allTools.push(...baseTools, ...tools) }
+await mcp.connectAll()
+for (const s of mcp.states()) if (s.status === "failed") console.log(`mcp: ${s.name}: ${s.error}`)
+process.on("exit", () => mcp.closeSync())
+
+const agents = loadAgents(projectRoot, homedir(), allTools.map(t => t.name))
 if (config.defaultAgent && !agents.some(a => a.id === config.defaultAgent))
   console.log(`defaultAgent "${config.defaultAgent}" not found — using the build agent`)
 
@@ -32,7 +42,7 @@ for (const [name, cfg] of Object.entries(config.providers)) {
   if (!ok) { offProviders.push(name); console.log(`${name}: OFF (${cfg.baseUrl})`) }
 }
 
-const env = { store, config, tools, skills, agents, projectRoot }
+const env = { store, config, tools: allTools, skills, agents, projectRoot, mcp }
 const plain = args.includes("--plain")
 if (!plain && process.stdout.isTTY && process.stdin.isTTY) {
   const { runTui } = await import("./cli/tui/app")
