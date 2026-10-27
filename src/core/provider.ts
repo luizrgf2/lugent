@@ -1,12 +1,19 @@
 import type { ChatMsg, ChatResponse, ToolCall } from "./types"
 import type { ProviderConfig } from "./config"
 
-export async function* parseSSE(res: Response, idleMs = 120_000): AsyncGenerator<any> {
+export async function* parseSSE(res: Response, idleMs = 120_000, totalMs = 600_000): AsyncGenerator<any> {
   if (!res.body) return
   const reader = res.body.getReader()
   const dec = new TextDecoder()
+  const deadline = Date.now() + totalMs
   let buf = ""
   while (true) {
+    // Total cap: a proxy or server that drips keep-alive bytes forever defeats
+    // the idle guard (every byte resets it) — the turn still has to end.
+    if (Date.now() > deadline) {
+      reader.cancel().catch(() => {})
+      throw new Error(`stream exceeded ${Math.round(totalMs / 1000)}s without finishing (total cap)`)
+    }
     // Idle guard: an upstream that accepts the connection but never sends
     // bytes would hang the turn forever otherwise.
     let timeoutId!: ReturnType<typeof setTimeout>
@@ -57,6 +64,8 @@ export class Provider {
     tools: { name: string; description: string; schema: unknown }[]
     signal?: AbortSignal
     idleTimeoutMs?: number
+    /** Total wall-clock cap for one stream, keep-alive bytes included. */
+    totalTimeoutMs?: number
     onToken?: (t: string) => void
     onReasoning?: (t: string) => void
   }): Promise<ChatResponse> {
@@ -80,12 +89,14 @@ export class Provider {
         })
         if (res.status === 429 || res.status >= 500) {
           lastErr = new Error(`HTTP ${res.status}`)
+          // never consumed and never retried: drain or the socket leaks per attempt
+          res.body?.cancel().catch(() => {})
           continue
         }
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`)
         let content = ""
         const acc: Record<number, { id: string; name: string; args: string }> = {}
-        for await (const ev of parseSSE(res, args.idleTimeoutMs ?? 120_000)) {
+        for await (const ev of parseSSE(res, args.idleTimeoutMs ?? 120_000, args.totalTimeoutMs ?? 600_000)) {
           const delta = ev.choices?.[0]?.delta
           if (!delta) continue
           if (typeof delta.content === "string") {

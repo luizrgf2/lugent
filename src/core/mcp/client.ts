@@ -8,6 +8,9 @@ import type { Transport, TransportHandlers } from "./transport"
 
 export interface McpToolInfo { name: string; description?: string; inputSchema?: unknown }
 
+/** A server that always answers with a fresh nextCursor would paginate forever. */
+const MAX_LIST_PAGES = 100
+
 interface Pending { resolve(v: any): void; reject(e: Error): void; timer: ReturnType<typeof setTimeout> }
 
 /** Transport-agnostic MCP client: id counter, pending map, timeouts, handshake. */
@@ -49,7 +52,10 @@ export class McpClient {
   async listTools(): Promise<McpToolInfo[]> {
     const out: McpToolInfo[] = []
     let cursor: string | undefined
+    let pages = 0
     do {
+      if (++pages > MAX_LIST_PAGES)
+        throw new Error(`tools/list: too many pages (over ${MAX_LIST_PAGES}) — the server never stops paginating`)
       const res: any = await this.request("tools/list", cursor ? { cursor } : {})
       for (const t of res?.tools ?? [])
         if (t && typeof t.name === "string") out.push({ name: t.name, description: t.description, inputSchema: t.inputSchema })

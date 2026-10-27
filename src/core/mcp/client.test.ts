@@ -2,6 +2,7 @@ import { test, expect } from "bun:test"
 import { join } from "node:path"
 import { StdioTransport } from "./stdio"
 import { McpClient } from "./client"
+import type { TransportHandlers } from "./transport"
 
 const fixture = join(import.meta.dir, "__fixtures__", "mcp-echo-server.ts")
 const connect = (timeout?: number) =>
@@ -71,6 +72,30 @@ test("an intentional close is not reported as a crash", async () => {
   await c.close()
   await Bun.sleep(50)   // let the child's exit settle; a crash report would land here
   expect(errs).toEqual([])
+})
+
+test("listTools caps pagination: an endless nextCursor loop rejects", async () => {
+  // fake transport: every tools/list answers with an empty page plus a fresh cursor
+  let requests = 0
+  let handlers!: TransportHandlers
+  const transport = {
+    async start(h: TransportHandlers) { handlers = h },
+    async send(m: any) {
+      if (m.method === "tools/list") requests++
+      setTimeout(() => {
+        if (m.method === "initialize")
+          handlers.onMessage({ jsonrpc: "2.0", id: m.id, result: { protocolVersion: "2025-06-18", serverInfo: {} } })
+        else
+          handlers.onMessage({ jsonrpc: "2.0", id: m.id, result: { tools: [], nextCursor: `c${requests}` } })
+      }, 0)
+    },
+    async close() {}, closeSync() {},
+  }
+  const client = new McpClient("page", transport as any)
+  await client.connect()
+  await expect(client.listTools()).rejects.toThrow(/too many pages/)
+  expect(requests).toBeLessThanOrEqual(101)
+  await client.close()
 })
 
 test("a json-rpc error rejects with the server message", async () => {

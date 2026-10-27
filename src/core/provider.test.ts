@@ -114,8 +114,7 @@ test("onToken fires while the stream is still open (real-time, not burst at end)
   expect((await chatP).content).toBe("ab")
 })
 
-test("idle stream (no chunks) rejects with a stall error instead of hanging", async () => {
-  const enc = new TextEncoder()
+test("idle stream (no chunks) rejects with a stall error instead of hanging", async () => {  const enc = new TextEncoder()
   let calls = 0
   const fetchFn = (async () => {
     calls++
@@ -130,4 +129,45 @@ test("idle stream (no chunks) rejects with a stall error instead of hanging", as
     Promise.race([chatP, new Promise((_, rej) => setTimeout(() => rej(new Error("test guard: chat never settled")), 2000))])
   ).rejects.toThrow(/stalled/i)
   expect(calls).toBe(3)   // stalls are retried like other chat failures
+})
+
+test("keep-alive bytes alone do not keep a stream alive past the total cap", async () => {
+  const enc = new TextEncoder()
+  // fresh stream per fetch call: chat retries 3x and each needs its own
+  const fetchFn = (async () => new Response(new ReadableStream({
+    start(c) {
+      c.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: "a" } }] })}\n\n`))
+      // heartbeat comments forever: each byte resets the idle guard...
+      const timer = setInterval(() => { try { c.enqueue(enc.encode(": keep-alive\n\n")) } catch { clearInterval(timer) } }, 20)
+    },
+    cancel() { /* enqueue throwing above clears the interval */ },
+  }), { status: 200 })) as any
+  const p = new Provider({ baseUrl: "http://x/v1" }, "m", fetchFn)
+  await expect(
+    Promise.race([
+      p.chat({ messages: [], tools: [], idleTimeoutMs: 1_000, totalTimeoutMs: 250 }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("test guard: chat never settled")), 3_000)),
+    ])
+  ).rejects.toThrow(/stream exceeded/)
+})
+
+test("a 429 body is cancelled before the retry fires", async () => {
+  const cancelled: boolean[] = []
+  let calls = 0
+  const bodies = () => ({
+    get body() {
+      let done = false
+      return new ReadableStream({
+        cancel() { done = true; cancelled.push(done) },
+        start(c) { c.enqueue(new TextEncoder().encode("rate")); c.close() },
+      })
+    },
+  })
+  const p = new Provider({ baseUrl: "http://x/v1" }, "m", (async () => {
+    calls++
+    return new Response(bodies().body, { status: 429 })
+  }) as any)
+  await expect(p.chat({ messages: [], tools: [], signal: new AbortController().signal })).rejects.toThrow("429")
+  expect(calls).toBe(3)
+  expect(cancelled).toEqual([true, true, true])
 })

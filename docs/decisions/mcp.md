@@ -104,4 +104,12 @@ Cost if wrong: the CSS lives in a template string (no editor or typechecking for
 
 ---
 
+## 2026-10-27 — `tools/list` pagination is capped, not trusted
+
+Decision: `McpClient.listTools` stops after 100 pages (`MAX_LIST_PAGES`) and throws `too many pages` — the server fails to connect instead of paginating forever.
+
+Why: pagination is driven by the server's `nextCursor`; a buggy or malicious server that always answers with a fresh cursor turns the listing into an infinite request loop, and `listTools` runs inside `connectAll` at startup and inside `/mcp reconnect` — so the loop hangs the whole CLI, not just one server's toolset. MCP servers are untrusted third parties by the same policy that makes every MCP tool `ask` by default; the cursor is no more trustworthy than anything else they send.
+
+Cost if wrong: a legitimate server exposing more than ~100 pages of tools (page size is server-chosen, typically 1k) fails to connect with a confusing error — bump the constant when such a server actually appears.
+
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.

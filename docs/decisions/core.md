@@ -32,4 +32,12 @@ Cost if wrong: image files must keep existing across turns (replay re-reads them
 
 ---
 
+## 2026-10-27 — every unbounded loop gets a hard ceiling (runaway guards)
+
+Decision: three caps, all constants — `runTurn` stops at 50 tool rounds per turn and stores a final `user` message telling the model to summarize; `McpClient.listTools` stops past 100 pagination pages and fails the server; `parseSSE` ends any stream older than 10min (`totalTimeoutMs`), keep-alive bytes included.
+
+Why: each guarded an unbounded loop reachable without user error — a degenerate model re-emitting tool calls bills and runs forever (history grows per round, so it gets slower too), a buggy or hostile MCP server that always returns a fresh `nextCursor` hangs the entire startup behind `connectAll`, and a proxy that drips SSE heartbeats defeats the idle guard (any byte resets it) leaving the spinner forever. Constants, not config: no real workload approaches 50 rounds / 100 pages, and a knob here is a knob whose wrong value re-introduces the hang.
+
+Cost if wrong: a genuinely huge task that needs >50 rounds is cut short mid-flight — the stored cap message means the user just sends "continue" and the turn resumes with fresh budget; a server with >100 pages of tools (>100k tools at typical page size) fails to connect — bump `MAX_LIST_PAGES` when one actually exists. The 10min total cap can be legitimately short for a very long single-stream generation — raise the default then, not with a config field now.
+
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.
