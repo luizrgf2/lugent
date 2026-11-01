@@ -1,6 +1,6 @@
 # TUI layer
 
-`src/cli/tui/` renders the full-screen interface (React + Ink v8); `src/cli/repl.ts` is the `--plain`/piped fallback. `src/main.ts` picks: TTY stdin+stdout → TUI, anything else → REPL. Shared prompt-building lives in `src/cli/context.ts` (`buildPromptInput`).
+`src/cli/tui/` renders the full-screen interface (React + Ink v8); `src/cli/repl.ts` is the `--plain`/piped fallback. `src/main.ts` picks: TTY stdin+stdout → TUI, anything else → REPL. `runTui` erases the visible viewport (cursor-home + erase-down, scrollback preserved) before `render()` — ink only clears when a prior frame exists, so without it the first frame lands below the shell prompt. Shared prompt-building lives in `src/cli/context.ts` (`buildPromptInput`).
 
 ```
 provider.chat (SSE)

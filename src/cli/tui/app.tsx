@@ -299,6 +299,11 @@ export function App(props: { env: TuiEnv }) {
 }
 
 export function runTui(env: TuiEnv): Promise<void> {
+  // Ink paints its first frame below whatever is already on screen and only
+  // clears when a previous frame exists, so the shell prompt + startup lines
+  // would sit above the TUI. Erase the visible viewport (home + erase-down —
+  // scrollback stays intact) before the first render.
+  process.stdout.write("\x1b[H\x1b[J")
   const inst = render(<App env={env} />, { exitOnCtrlC: false })
   return inst.waitUntilExit()
 }
