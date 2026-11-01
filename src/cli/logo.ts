@@ -49,6 +49,28 @@ export const LOGO_HEIGHT = LOGO_ROWS.length + WORDMARK_ROWS.length + 1
 export const CHROME_HEIGHT = 6
 
 /**
+ * Rows the TUI paints on a terminal of `rows`. One row is left free at the
+ * bottom: a frame that reaches the viewport height is treated by ink as
+ * fullscreen, which changes the erase strategy between frames and wipes the
+ * frame on exit. Staying one short keeps the incremental path (and leaves the
+ * last frame on screen when you quit), while still filling the terminal.
+ */
+export function frameRows(rows: number): number {
+  return Math.max(1, rows - 1)
+}
+
+/**
+ * Rows the transcript region gets on a terminal of `rows`: what is left after
+ * the logo block and the chrome. The region is rendered at this height
+ * (bottom-aligned, clipped) so the composer below it cannot move — sized from
+ * its content instead, a page of scroll or a wrapped long line changed the frame
+ * height and shifted the input on screen.
+ */
+export function transcriptWindow(rows: number, pad = 0): number {
+  return Math.max(0, frameRows(rows) - CHROME_HEIGHT - LOGO_HEIGHT - pad)
+}
+
+/**
  * Blank rows above <LogoMark/> while the transcript is still empty, so the
  * logo opens in the vertical middle of the screen instead of hugging the top.
  * Half the viewport slack, capped by the rows the chrome (and the logo itself)

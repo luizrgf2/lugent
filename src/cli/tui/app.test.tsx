@@ -295,10 +295,10 @@ test("pageUp scrolls transcript up; pageDown scrolls back; typing resets to tail
   type("go\r")
   await new Promise(r => setTimeout(r, 100))
   expect(lastFrame()).not.toContain("line-00")   // tail view
-  type("\x1b[5~")                                 // pageUp: exactly one window (8 lines)
+  type("\x1b[5~")                                 // pageUp: exactly one window (7 lines)
   await new Promise(r => setTimeout(r, 80))
   expect(lastFrame()).not.toContain("line-59")    // tail clipped
-  expect(lastFrame()).toContain("line-45")        // one page up visible
+  expect(lastFrame()).toContain("line-47")        // one page up visible
   for (let i = 0; i < 7; i++) {                   // 7 more pageUps reach the top
     type("\x1b[5~")
     await new Promise(r => setTimeout(r, 80))
@@ -308,8 +308,6 @@ test("pageUp scrolls transcript up; pageDown scrolls back; typing resets to tail
   expect(f).toContain("line-04")                  // the head window, not a blank page
   expect(f).not.toContain("line-59")              // tail clipped
   for (let i = 0; i < 8; i++) {                   // pageDown ×8 returns to tail
-                             // (one extra: the over-scrolled head clamps, so the
-                             // first down only re-aligns to the oldest window)
     type("\x1b[6~")
     await new Promise(r => setTimeout(r, 80))
   }
@@ -859,4 +857,80 @@ test("/mcp overlay lists servers, and disabling one refreshes the list", async (
   type("\r")                                   // pick disable
   await waitFor("echo (local) — disabled")
   expect(calls).toEqual(["disable:echo"])
+})
+
+test("composer stays pinned: scrolling never moves the input or resizes the frame", async () => {
+  const prov = {
+    chat: async (a: any) => {
+      for (let i = 0; i < 60; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
+      return { content: "", toolCalls: [] }
+    },
+  }
+  const env = fakeEnv({ tools: [], makeProvider: () => prov })
+  const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  await new Promise(r => setTimeout(r, 150))
+  const geom = () => {
+    const lines = lastFrame().split("\n")
+    return {
+      height: lines.length,
+      composer: lines.findIndex(l => l.includes("╭")),
+      context: lines.findIndex(l => l.includes("9router · glm/glm-5.2")),
+    }
+  }
+  const tail = geom()
+  expect(tail.composer).toBeGreaterThan(0)
+  // Exactly one row short of the viewport: a frame as tall as the terminal is
+  // 'fullscreen' to ink (full clears between frames, and the whole frame is
+  // wiped on exit). See frameRows.
+  expect(tail.height).toBe(29)
+  for (let i = 0; i < 4; i++) {
+    type("\x1b[5~")                          // pageUp ×4
+    await new Promise(r => setTimeout(r, 80))
+    expect(geom()).toEqual(tail)             // the chrome did not budge
+  }
+})
+
+test("overlays open inside the frame instead of pushing the chrome off-screen", async () => {
+  const prov = {
+    chat: async () => ({ content: "", toolCalls: [] }),
+    listModels: async () => Array.from({ length: 20 }, (_, i) => `m-${i}`),
+  }
+  const env = fakeEnv({ makeProvider: () => prov })
+  const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
+  await new Promise(r => setTimeout(r, 30))
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).toContain("choose provider")
+  expect(lastFrame().split("\n").length).toBeLessThanOrEqual(29)   // same frame cap
+  type("\r")                                     // provider → models (long list)
+  await new Promise(r => setTimeout(r, 100))
+  const f = lastFrame()
+  expect(f).toContain("m-0")                                       // list rendered…
+  expect(f).toContain("↑/↓ move")                                  // …with its key hints
+  expect(f).toContain("esc back")                                  // (models level: esc goes back)
+  expect(f.split("\n").length).toBeLessThanOrEqual(29)
+})
+
+test("long wrapped lines cannot push the composer out of the frame", async () => {
+  // itemLines counts logical lines; ink renders wrapped ones as several rows.
+  // Counting only \n under-budgets the window and the frame overflows the
+  // terminal, scrolling the composer off-screen.
+  const long = "palavra ".repeat(30)         // ~240 cols → 3 rows at 100 cols
+  const prov = {
+    chat: async (a: any) => {
+      for (let i = 0; i < 6; i++) a.onToken?.(`line-${i} ${long}\n`)
+      return { content: "", toolCalls: [] }
+    },
+  }
+  const env = fakeEnv({ tools: [], makeProvider: () => prov })
+  const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  await new Promise(r => setTimeout(r, 200))
+  const lines = lastFrame().split("\n")
+  expect(lines.length).toBeLessThanOrEqual(30)
+  expect(lastFrame()).toContain("line-5")    // newest content still on screen
+  expect(lines.findIndex(l => l.includes("╭"))).toBeLessThan(30)
 })

@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test"
-import { CHROME_HEIGHT, LOGO_HEIGHT, LOGO_ROWS, WORDMARK_ROWS, WORDMARK_SPLIT, logoHex, logoAnsi, logoTopPad } from "./logo"
+import { CHROME_HEIGHT, LOGO_HEIGHT, LOGO_ROWS, WORDMARK_ROWS, WORDMARK_SPLIT, frameRows, logoHex, logoAnsi, logoTopPad, transcriptWindow } from "./logo"
 
 test("logoTopPad centers the mark on the splash screen, without overflow", () => {
   // Upper pad = half the rows left over by the mark, so mark + pad is centered
@@ -51,6 +51,28 @@ test("chrome height counts the transcript's bottom margin too", () => {
   // the window budget must reserve the blank row or the frame is 1 line taller
   // than the terminal and the logo is painted into scrollback.
   expect(CHROME_HEIGHT).toBe(6)
+})
+
+test("frameRows leaves the last row of the terminal free", () => {
+  // A frame as tall as the viewport is 'fullscreen' to ink: it switches to the
+  // full-clear erase path and wipes the frame on exit. One row short keeps the
+  // incremental paint, so the last screen survives quitting.
+  expect(frameRows(30)).toBe(29)
+  expect(frameRows(24)).toBe(23)
+  expect(frameRows(2)).toBe(1)
+  expect(frameRows(1)).toBe(1)    // never 0: an empty root renders nothing
+})
+
+test("transcriptWindow is what the logo and the chrome leave over", () => {
+  // 30 rows: 29 painted - logo 16 - chrome 6 = 7. The region below the
+  // transcript never moves, so this is also the PageUp/PageDown page size.
+  expect(transcriptWindow(30)).toBe(7)
+  expect(transcriptWindow(24)).toBe(1)
+  // The splash pad is charged to the transcript, not to the chrome.
+  expect(transcriptWindow(30, logoTopPad(30))).toBe(0)
+  // Short terminals degrade to an empty window, never a negative height.
+  expect(transcriptWindow(20)).toBe(0)
+  expect(transcriptWindow(10)).toBe(0)
 })
 
 test("hex gradient samples the svg diagonal (monotonic green → cyan)", () => {

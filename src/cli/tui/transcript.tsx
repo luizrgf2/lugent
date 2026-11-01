@@ -116,9 +116,15 @@ const Markdown = memo(function Markdown({ text }: { text: string }) {
 
 export function Transcript({ items }: { items: TItem[] }) {
   return (
-    <Box flexDirection="column">
+    // flexShrink 0: the window that holds this is fixed-height and clips, so the
+    // block must keep its real height — shrunk, its top-aligned overflow shows
+    // the oldest lines and hides the newest.
+    <Box flexDirection="column" flexShrink={0}>
       {items.map((it, i) => (
-        <Box key={i} flexDirection="column" marginTop={i > 0 ? 1 : 0}>
+        // flexShrink 0: inside the fixed-height window the Yoga default lets a
+        // tall item be shrunk and sliced mid-row; the item must keep its real
+        // height and let the window clip it instead.
+        <Box key={i} flexDirection="column" flexShrink={0} marginTop={i > 0 ? 1 : 0}>
           {it.kind === "user" && <Text color="blue">&gt; {it.text}</Text>}
           {it.kind === "reasoning" && (
             <Box flexDirection="column" marginBottom={1}>

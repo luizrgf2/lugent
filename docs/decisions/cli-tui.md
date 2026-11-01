@@ -75,6 +75,14 @@ Why: the context line is always on screen (that is the point of it), so the last
 
 Cost if wrong: the transcript loses one more row of budget (9 → 8 on a 30-row terminal, one PageUp is 8 lines) — the same trade as the wordmark, and the same tests carry the numbers. If the padding reads as a gap on a very short terminal it degrades with the rest of the splash (pad 0), never as an overflow.
 
+## 2026-11-01 — The frame is a fixed-height column; the transcript is what gives
+
+Decision: `App`'s root `Box` is pinned to `frameRows(stdout.rows)` = `rows - 1`, with the transcript as the only flexible child (`flexGrow={1} flexShrink={1} minHeight={0}`, bottom-aligned, `overflowY="hidden"`) and everything below it (retry line, `ContextLine`, overlay/input) in a single `flexShrink={0}` block. `Transcript` and each item also get `flexShrink={0}`. The window budget is `transcriptWindow(rows, pad) = frameRows(rows) - CHROME_HEIGHT - LOGO_HEIGHT - pad`, shared by the region's height and the PageUp/PageDown step; both live in `src/cli/logo.ts` next to the constants they derive from.
+
+Why: the region used to be content-sized, so the frame height was a function of the transcript — one PageUp grew the frame by a row and pushed the composer down, and a wrapped long line (one logical line, several terminal rows) pushed the whole frame past the terminal (39 rows on a 30-row screen, composer off-screen). Reported as "the input moves while I scroll". Pinning the frame makes the chrome immovable by construction instead of by arithmetic that has to agree with `itemLines` about wrapping, which it cannot. `frameRows` leaves the last row free deliberately: ink treats a frame `>= viewportRows` as fullscreen, switches to the full-clear erase path and wipes the frame on unmount — measured: pinned to `rows` exactly, quitting erased the conversation; at `rows - 1` the exit writes no erase at all. `overflowY="hidden"` is what keeps a wrapped item from spilling below the window; `flexShrink={0}` on the items stops Yoga from shrinking and slicing a tall one mid-row.
+
+Cost if wrong: one row of budget is spent (8 → 7 lines on a 30-row terminal, so a page scroll is 7 lines and two tests carry the new numbers) and the terminal's last row stays blank while the TUI is up. The overlays (`/model`, `/skills`, …) are still sized below the composer and are not clipped by it — a picker taller than the window eats into the transcript region, which is the intended trade (the picker is modal, the transcript is not). If ink ever changes what counts as fullscreen, `frameRows` should be revisited together with the `rows - 1` tests in `app.test.tsx`.
+
 ---
 
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.

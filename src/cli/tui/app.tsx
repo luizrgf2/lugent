@@ -6,7 +6,7 @@ import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
 import { toolsForAgent, agentModelTarget, resolveAgent } from "../../core/agents"
 import { buildPromptInput, safeAgentsMd } from "../context"
-import { CHROME_HEIGHT, LOGO_HEIGHT, logoTopPad } from "../logo"
+import { frameRows, logoTopPad, transcriptWindow } from "../logo"
 import { ContextLine, LogoMark } from "./status"
 import { Transcript, clampItems, itemLines, itemsFromHistory, type TItem } from "./transcript"
 import { Input } from "./input"
@@ -84,8 +84,10 @@ export function App(props: { env: TuiEnv; onWheel?: (fn: (d: number) => void) =>
   }, [props.onWheel])
 
   // page size = the visible transcript window (same formula as clampItems:
-  // chrome below + the LogoMark block above), so one PageUp scrolls exactly a page
-  const budget = () => Math.max(3, ((stdout as any)?.rows ?? 24) - CHROME_HEIGHT - LOGO_HEIGHT)
+  // chrome below + the LogoMark block above), so one PageUp scrolls exactly a page.
+  // pad is 0 here: scrolling only moves anything once an item exists, and the
+  // splash pad is 0 from the first item on (same value the region gets below).
+  const budget = () => transcriptWindow((stdout as any)?.rows ?? 24, 0)
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
@@ -208,15 +210,23 @@ export function App(props: { env: TuiEnv; onWheel?: (fn: (d: number) => void) =>
   // rows to the padding while the transcript is empty (see logoTopPad).
   const rows = (stdout as any)?.rows ?? 24
   const pad = items.length === 0 ? logoTopPad(rows) : 0
-  const visible = clampItems(items, Math.max(3, rows - CHROME_HEIGHT - LOGO_HEIGHT - pad), scroll)
+  const window = transcriptWindow(rows, pad)
+  const visible = clampItems(items, window, scroll)
   const agentsMd = safeAgentsMd(env.projectRoot)
-
   return (
-    <Box flexDirection="column">
+    // Root pinned to the viewport (minus one row, see frameRows): every region
+    // below the transcript is a fixed block, so the transcript is the only one
+    // that can give — sized from its content instead, a page of scroll or a
+    // wrapped long line changed the frame height and shifted the composer.
+    <Box flexDirection="column" flexShrink={0} height={frameRows(rows)}>
       <LogoMark topPad={pad} />
-      <Box flexDirection="column">
+      <Box flexDirection="column" flexGrow={1} flexShrink={1} minHeight={0} justifyContent="flex-end" overflowY="hidden">
         <Transcript items={visible} />
       </Box>
+      {/* Chrome: everything below the transcript in one flexShrink={0} block, so
+          the transcript is what absorbs the slack (last child would otherwise
+          be the one squeezed when the content is taller than the viewport). */}
+      <Box flexDirection="column" flexShrink={0}>
       {retry && <Text color="yellow">{retry}</Text>}
       <ContextLine agent={agent} agentsMd={agentsMd} yolo={yolo} off={env.offProviders.includes(provider)} model={`${provider} · ${model}`} busy={busy && !ask} />
       {overlay === "agent"        ? <AgentPicker
@@ -315,6 +325,7 @@ export function App(props: { env: TuiEnv; onWheel?: (fn: (d: number) => void) =>
                   { cmd: "permissions", desc: "permission mode (normal/yolo)" },
                   { cmd: "agent", desc: "switch agent profile" },
                 ]} />}
+      </Box>
       {/* spinner lives inside ContextLine now — one chrome line, always visible */}
     </Box>
   )
