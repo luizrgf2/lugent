@@ -6,6 +6,7 @@ import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
 import { toolsForAgent, agentModelTarget, resolveAgent } from "../../core/agents"
 import { buildPromptInput, safeAgentsMd } from "../context"
+import { LOGO_HEIGHT } from "../logo"
 import { ContextLine, LogoMark } from "./status"
 import { Transcript, clampItems, itemLines, itemsFromHistory, type TItem } from "./transcript"
 import { Input } from "./input"
@@ -69,8 +70,8 @@ export function App(props: { env: TuiEnv }) {
   const closeOverlay = () => { overlayRef.current = null; setOverlay(null) }
 
   // page size = the visible transcript window (same formula as clampItems:
-  // chrome 5 below + 11-row LogoMark above), so one PageUp scrolls exactly a page
-  const budget = () => Math.max(3, ((stdout as any)?.rows ?? 24) - 5 - 11)
+  // chrome 5 below + the LogoMark block above), so one PageUp scrolls exactly a page
+  const budget = () => Math.max(3, ((stdout as any)?.rows ?? 24) - 5 - LOGO_HEIGHT)
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
@@ -184,9 +185,9 @@ export function App(props: { env: TuiEnv }) {
 
   // ink resolves height="100%" to auto — constrain manually from real rows.
   // Chrome below the window: composer box 3 + context line 1 + retry 1 = 5;
-  // the 11-row LogoMark block above is subtracted too.
+  // the LogoMark block above is subtracted too.
   const rows = (stdout as any)?.rows ?? 24
-  const visible = clampItems(items, Math.max(3, rows - 5 - 11), scroll)
+  const visible = clampItems(items, Math.max(3, rows - 5 - LOGO_HEIGHT), scroll)
   const agentsMd = safeAgentsMd(env.projectRoot)
 
   return (

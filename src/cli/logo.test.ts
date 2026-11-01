@@ -1,5 +1,13 @@
 import { test, expect } from "bun:test"
-import { LOGO_ROWS, logoHex, logoAnsi } from "./logo"
+import { LOGO_HEIGHT, LOGO_ROWS, logoHex, logoAnsi } from "./logo"
+
+test("rendered logo height covers raster + wordmark + margin", () => {
+  // The TUI subtracts LOGO_HEIGHT from the terminal rows to size the
+  // transcript window — 12, not 11, or every frame is 1 line taller than
+  // the screen and history scrolls off (logo painted into scrollback).
+  expect(LOGO_HEIGHT).toBe(LOGO_ROWS.length + 2)
+  expect(LOGO_HEIGHT).toBe(12)
+})
 
 test("raster geometry mirrors the svg mark", () => {
   expect(LOGO_ROWS).toHaveLength(10)

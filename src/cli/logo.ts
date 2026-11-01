@@ -17,6 +17,11 @@ export const LOGO_ROWS = [
   "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
 ]
 
+// Rendered height of <LogoMark/> in the TUI: raster rows + 1 wordmark line
+// + 1 bottom margin. The transcript window must subtract this exact number
+// or every frame is taller than the terminal and scrolls history off-screen.
+export const LOGO_HEIGHT = LOGO_ROWS.length + 2
+
 const GRAD_START: [number, number, number] = [0x00, 0xf5, 0xa0]
 const GRAD_END: [number, number, number] = [0x00, 0xd9, 0xf5]
 
