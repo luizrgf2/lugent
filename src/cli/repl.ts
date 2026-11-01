@@ -8,7 +8,7 @@ import type { ToolDef } from "../core/tools/registry"
 import type { McpManager } from "../core/mcp/manager"
 import type { SkillMeta, Agent } from "../core/types"
 import { parseSlash, parseAnswer, mcpActions, formatMcpState, type McpAction } from "./commands"
-import { box, glyph, truncate, dim, cyan, red, Spinner, logo } from "./ui"
+import { box, glyph, truncate, dim, cyan, red, yellow, Spinner, logo } from "./ui"
 import { buildPromptInput } from "./context"
 
 export interface ReplEnv {
@@ -184,12 +184,14 @@ export async function runRepl(env: ReplEnv): Promise<void> {
       store: env.store, provider, tools: env.tools, promptInput,
       signal: abortCtrl.signal,
       onToken: t => { clearSpin(); process.stdout.write(t) },
+      onRetry: i => { clearSpin(); process.stdout.write(yellow(`attempt ${i.attempt} failed — ${i.error} · retrying in ${Math.round(i.delayMs / 1000)}s\n`)) },
       onToolStart: (name, resource) => {
         clearSpin()
         process.stdout.write(`\n${glyph(name)} ${dim(name)} ${cyan(truncate(resource, 64))}\n`)
       },
       onAsk: async (tool, resource) => { clearSpin(); return ask(tool, resource) },
     }, session.id, input, env.projectRoot)
+      .catch((e: any) => ({ aborted: false, error: `internal error: ${e?.message ?? e}` }))
     clearSpin()
     if (r.error) console.log(red(`error: ${r.error}`))
     process.stdout.write("\n")

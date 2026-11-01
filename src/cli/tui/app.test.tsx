@@ -44,8 +44,7 @@ const askTool = {
   permission: "ask" as const, execute: async () => ({ output: "ok" }),
 }
 
-test("turn flow: submit → reasoning + answer appear in transcript", async () => {
-  const provider = {
+test("turn flow: submit → reasoning + answer appear in transcript", async () => {  const provider = {
     chat: async (a: any) => {
       a.onReasoning?.("pondering")
       a.onToken?.("all ")
@@ -62,6 +61,23 @@ test("turn flow: submit → reasoning + answer appear in transcript", async () =
   expect(f).toContain("pondering")
   expect(f).toContain("done")
   expect(f).not.toContain("allow")   // no permission dialog on plain answer
+})
+
+test("provider that rejects (not returns error) still shows the error and unblocks the input", async () => {
+  // runTurn catches chat throws itself — force a throw outside chat (store) to
+  // exercise the send() guard that keeps the spinner from sticking forever
+  const store = new Proxy(new Store(`/tmp/opencode/tui-env-guard.db`), {
+    get(t, k) { return k === "appendMessage" ? () => { throw new Error("db locked") } : (t as any)[k] },
+  })
+  const env = fakeEnv({ store })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  await waitFor(() => lastFrame().includes("internal error: db locked"))
+  expect(lastFrame()).toContain("internal error: db locked")
+  // input is usable again — the turn really ended
+  type("again\r")
+  await waitFor(() => lastFrame().split("internal error: db locked").length > 2)
 })
 
 test("ctrl-c during ask denies, dialog clears, turn ends", async () => {

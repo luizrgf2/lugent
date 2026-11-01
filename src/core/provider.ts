@@ -66,37 +66,84 @@ export class Provider {
     idleTimeoutMs?: number
     /** Total wall-clock cap for one stream, keep-alive bytes included. */
     totalTimeoutMs?: number
+    /** Cap on time-to-response-headers (dead host that accepts and never answers). */
+    headerTimeoutMs?: number
+    /** Retry cap for tests — production retries indefinitely (ESC/abort stops). */
+    maxRetries?: number
+    /** Backoff base for tests — production starts at 10s and doubles to a 60s cap. */
+    backoffBaseMs?: number
     onToken?: (t: string) => void
     onReasoning?: (t: string) => void
+    onRetry?: (info: { attempt: number; delayMs: number; error: string }) => void
   }): Promise<ChatResponse> {
+    const maxAttempts = (args.maxRetries ?? Infinity) + 1
     let lastErr = new Error("chat failed")
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) await new Promise(r => setTimeout(r, 100 * 2 ** attempt))
-      try {
-        const res = await this.fetchFn(`${this.cfg.baseUrl}/chat/completions`, {
-          method: "POST",
-          headers: this.headers(),
-          signal: args.signal,
-          body: JSON.stringify({
-            model: this.model,
-            messages: args.messages,
-            stream: true,
-            tools: args.tools.map(t => ({
-              type: "function",
-              function: { name: t.name, description: t.description, parameters: t.schema },
-            })),
-          }),
+    for (let attempt = 1; ; attempt++) {
+      if (attempt > 1) {
+        const delayMs = Math.min((args.backoffBaseMs ?? 10_000) * 2 ** (attempt - 2), 60_000)
+        args.onRetry?.({ attempt: attempt - 1, delayMs, error: lastErr.message })
+        // ponytail: fixed backoff, Retry-After ignored — add when a provider throttles harder than generic backoff handles
+        await new Promise<void>((resolve, reject) => {
+          const t = setTimeout(resolve, delayMs)
+          args.signal?.addEventListener("abort", () => { clearTimeout(t); reject(args.signal!.reason) }, { once: true })
         })
+      }
+      try {
+        // The idle/total guards in parseSSE only start once headers arrive — a host
+        // that accepts the connection and never answers would hang the turn forever.
+        const ctrl = new AbortController()
+        const onAbort = () => ctrl.abort(args.signal?.reason)
+        args.signal?.addEventListener("abort", onAbort, { once: true })
+        const headerTimer = setTimeout(
+          () => ctrl.abort(new Error(`no response within ${args.headerTimeoutMs ?? 15_000}ms (connect/headers timeout)`)),
+          args.headerTimeoutMs ?? 15_000,
+        )
+        let res: Response
+        try {
+          res = await this.fetchFn(`${this.cfg.baseUrl}/chat/completions`, {
+            method: "POST",
+            headers: this.headers(),
+            signal: ctrl.signal,
+            body: JSON.stringify({
+              model: this.model,
+              messages: args.messages,
+              stream: true,
+              tools: args.tools.map(t => ({
+                type: "function",
+                function: { name: t.name, description: t.description, parameters: t.schema },
+              })),
+            }),
+          })
+        } finally {
+          clearTimeout(headerTimer)   // headers arrived (or failed) — a long stream must not be killed by it
+          args.signal?.removeEventListener("abort", onAbort)
+        }
+        // retryable: rate limit or server-side problem — the retry loop keeps going
         if (res.status === 429 || res.status >= 500) {
-          lastErr = new Error(`HTTP ${res.status}`)
           // never consumed and never retried: drain or the socket leaks per attempt
           res.body?.cancel().catch(() => {})
-          continue
+          throw new Error(`HTTP ${res.status}`)
         }
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`)
+        if (!res.ok) {
+          // client error (bad key, bad request) — retrying forever would be a loop, fail now
+          const e: any = new Error(`HTTP ${res.status}: ${await res.text()}`)
+          e.fatal = true
+          throw e
+        }
+        // Some gateways return 200 with a JSON error body instead of an SSE stream —
+        // parsing that as SSE yields nothing and the turn would end silently empty.
+        if ((res.headers.get("content-type") ?? "").includes("json")) {
+          const text = await res.text()
+          let m = ""
+          try { m = JSON.parse(text)?.error?.message ?? "" } catch { /* non-JSON */ }
+          throw new Error(m || `non-stream 200 response (${res.headers.get("content-type") ?? "no content-type"})`)
+        }
         let content = ""
         const acc: Record<number, { id: string; name: string; args: string }> = {}
         for await (const ev of parseSSE(res, args.idleTimeoutMs ?? 120_000, args.totalTimeoutMs ?? 600_000)) {
+          // mid-stream error events otherwise fall through the delta checks and
+          // the turn ends "successfully" with no content and nothing displayed
+          if (ev.error) throw new Error(typeof ev.error === "string" ? ev.error : ev.error?.message ?? JSON.stringify(ev.error))
           const delta = ev.choices?.[0]?.delta
           if (!delta) continue
           if (typeof delta.content === "string") {
@@ -122,11 +169,11 @@ export class Provider {
           })
         return { content, toolCalls }
       } catch (e: any) {
-        if (args.signal?.aborted) throw e
+        if (args.signal?.aborted || e.fatal) throw e
         lastErr = e
       }
+      if (attempt >= maxAttempts) throw new Error(`${lastErr.message} (after ${attempt} attempts)`)
     }
-    throw lastErr
   }
 
   async listModels(): Promise<string[]> {

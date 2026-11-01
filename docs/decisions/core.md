@@ -41,3 +41,23 @@ Why: each guarded an unbounded loop reachable without user error — a degenerat
 Cost if wrong: a genuinely huge task that needs >50 rounds is cut short mid-flight — the stored cap message means the user just sends "continue" and the turn resumes with fresh budget; a server with >100 pages of tools (>100k tools at typical page size) fails to connect — bump `MAX_LIST_PAGES` when one actually exists. The 10min total cap can be legitimately short for a very long single-stream generation — raise the default then, not with a config field now.
 
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.
+
+## 2026-10-30 — Provider: silent error paths surfaced, visible retries (`src/core/provider.ts`)
+
+Context: a 503 from a dead API was retried silently and, worse, two paths never showed anything at all — a mid-stream SSE `error` event fell through the `delta` checks and the turn ended "successfully" empty, and some gateways answer 200 with a JSON error body that parses as zero SSE events. Retries (3 attempts) were also invisible: no callback, 200/400ms sleeps that ignored the abort signal.
+
+Decision: both silent paths now throw (`ev.error` → `Error(error.message)`; 200 + `content-type: application/json` → parsed error or `non-stream 200 response`), backoff is 500ms→1s with an `onRetry({attempt, delayMs, error})` callback the REPL prints and the TUI shows above the context line, the backoff sleep races the `AbortSignal`, and the final throw appends `(after 3 attempts)`. A turn already mid-stream that errors is still retried (accepted: the partial `onToken` text can duplicate on the retry — stalling-after-emitting is rare, and not retrying would fail turns the old stall test promises to recover).
+
+Ponytail: `Retry-After` headers ignored — fixed 500ms² backoff only; add header parsing when a provider throttles harder than generic backoff handles.
+
+## 2026-10-30 — Provider: header/connect timeout (`headerTimeoutMs`, default 15s)
+
+Context: the idle and total guards only start once response headers arrive. A host that accepts the TCP connection and never answers (the "provider OFF, spinner forever" report) hung the first `fetch` for minutes — before any retry, callback or guard had a chance to run, so nothing appeared on screen.
+
+Decision: each attempt races a 15s time-to-headers timer via its own `AbortController` (merged with the turn's signal; timer cleared the moment headers arrive, so long streams are never killed by it). Expiry aborts the fetch with `no response within 15000ms (connect/headers timeout)`, which flows into the existing retry/backoff/display path. Constant, not config — same reasoning as the runaway caps.
+
+Follow-up (same day): `send()` in the TUI (and the plain REPL) now `.catch`es `runTurn` into an `internal error: …` message — defense in depth, since `runTurn` already catches chat throws itself; anything thrown outside chat (store, prompt build) used to reject unhandled and leave the spinner stuck with nothing on screen. Verified the whole path against a real black-hole TCP server: 15s header timeout → visible retries → `no response within 15000ms (connect/headers timeout) (after 3 attempts)` at ~47s.
+
+Second follow-up (same day): retries are now **infinite** by default — the user wants the turn to ride out an outage, watching each attempt, not die after 3. Backoff 1s doubling to a 30s cap; every retry fires `onRetry` (TUI shows `attempt N failed — … · retrying in Xs` above the context line, REPL prints it). `4xx` other than `429` is fatal and skips the loop (a bad key retrying forever is a bug, not resilience); abort still cuts the wait instantly. `maxRetries` exists only so tests stay finite. Delay formula moved from `500 * 2^(attempt-1)` to `min(1000 * 2^(attempt-2), 30_000)`.
+
+Third follow-up (same day): backoff rescheduled per user preference — first retry waits 10s, doubling, 60s cap (`10s → 20s → 40s → 60s → 60s…`). `backoffBaseMs` added next to `maxRetries` so tests don't sleep real seconds. Trade-off accepted: the first 10s window shows only the previous attempt's failure line, no new feedback — matching "perto do working" rather than extra chatter.

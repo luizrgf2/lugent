@@ -1,5 +1,5 @@
 import { useRef, useState } from "react"
-import { Box, render, useApp, useInput, useStdout } from "ink"
+import { Box, Text, render, useApp, useInput, useStdout } from "ink"
 import type { ReplEnv } from "../repl"
 import type { Agent } from "../../core/types"
 import { Provider } from "../../core/provider"
@@ -44,8 +44,6 @@ export function App(props: { env: TuiEnv }) {
   // is compensated by bumping scroll with the same delta so the view stays put.
   const [scroll, setScroll] = useState(0)
   const scrollRef = useRef(0)
-  const itemLinesOf = (it: TItem): number =>
-    it.kind === "assistant" ? Math.max(1, it.text.split("\n").length) : 1
   // The loop runs tool calls in parallel; several can require permission at
   // once. A bare setAsk keeps only the last dialog and loses the first
   // resolve → Promise.all never settles → turn hangs. Queue asks instead.
@@ -63,6 +61,7 @@ export function App(props: { env: TuiEnv }) {
   /** Set while /mcp authenticate waits for the browser, so ctrl+c can cancel it. */
   const authAbortRef = useRef<AbortController | null>(null)
   const [yolo, setYolo] = useState(false)
+  const [retry, setRetry] = useState("")
   // Ref mirrors state: submit reads it — ink batching can make state stale.
   const yoloRef = useRef(false)
   const { stdout } = useStdout()
@@ -161,7 +160,8 @@ export function App(props: { env: TuiEnv }) {
       yolo: yoloRef.current,
       agent,
       onReasoning: t => { reasoning += t; grow(is => patchTail(is, { kind: "reasoning", text: reasoning })) },
-      onToken: t => { answer += t; grow(is => patchTail(is, { kind: "assistant", text: answer })) },
+      onToken: t => { answer += t; setRetry(""); grow(is => patchTail(is, { kind: "assistant", text: answer })) },
+      onRetry: i => setRetry(`attempt ${i.attempt} failed — ${i.error} · retrying in ${Math.round(i.delayMs / 1000)}s`),
       onToolStart: (name, resource) => setItems(is => [...is, { kind: "tool", tool: name, text: resource }]),
       onAsk: (tool, resource) => new Promise(resolve => {
         askChainRef.current = askChainRef.current.then(() => new Promise<void>(release => {
@@ -171,7 +171,9 @@ export function App(props: { env: TuiEnv }) {
         }))
       }),
     }, session.id, text, env.projectRoot)
+      .catch((e: any) => ({ aborted: false, error: `internal error: ${e?.message ?? e}` }))   // never leave the spinner stuck with no message
     setBusy(false)
+    setRetry("")
     abortRef.current = null
     setAbort(null)
     setAsk(null)
@@ -189,6 +191,7 @@ export function App(props: { env: TuiEnv }) {
       <Box flexDirection="column">
         <Transcript items={visible} />
       </Box>
+      {retry && <Text color="yellow">{retry}</Text>}
       <ContextLine agent={agent} agentsMd={agentsMd} />
       {overlay === "agent"
         ? <AgentPicker

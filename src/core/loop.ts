@@ -19,6 +19,7 @@ export interface LoopDeps {
   signal: AbortSignal
   onToken?: (t: string) => void
   onReasoning?: (t: string) => void
+  onRetry?: (info: { attempt: number; delayMs: number; error: string }) => void
   onToolStart?: (name: string, resource: string) => void
   onAsk: (tool: string, resource: string) => Promise<"y" | "n" | "a">
   yolo?: boolean   // auto-approve every tool call, including outside-project ones
@@ -74,6 +75,7 @@ export async function runTurn(deps: LoopDeps, sessionId: string, userText: strin
         signal: deps.signal,
         onToken: deps.onToken,
         onReasoning: deps.onReasoning,
+        onRetry: deps.onRetry,
       })
     } catch (e: any) {
       if (deps.signal.aborted) {

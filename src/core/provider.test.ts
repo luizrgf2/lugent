@@ -50,13 +50,79 @@ test("malformed JSON arguments stay a string; caller validates", async () => {
   expect(res.toolCalls[0].args).toBe("{oops")
 })
 
-test("429 retries 3x then throws", async () => {
+test("SSE error event surfaces instead of a silent empty turn", async () => {
+  const chunks = [{ error: { message: "upstream overloaded" } }]
+  const p = new Provider({ baseUrl: "http://x/v1" }, "m", (async () => sseBody(chunks)) as any)
+  await expect(p.chat({ messages: [], tools: [], maxRetries: 1, backoffBaseMs: 50 })).rejects.toThrow(/upstream overloaded/)
+})
+
+test("200 with non-stream JSON error body surfaces", async () => {
+  const p = new Provider({ baseUrl: "http://x/v1" }, "m", (async () =>
+    new Response(JSON.stringify({ error: { message: "model busy" } }), { status: 200, headers: { "content-type": "application/json" } })) as any)
+  await expect(p.chat({ messages: [], tools: [], maxRetries: 1, backoffBaseMs: 50 })).rejects.toThrow(/model busy/)
+})
+
+test("onRetry reports each retry with delay; retries then succeeds", async () => {
+  let calls = 0
+  const p = new Provider({ baseUrl: "http://x/v1" }, "m", (async () => {
+    calls++
+    return calls < 3 ? new Response("down", { status: 503 }) : sseBody([{ choices: [{ delta: { content: "ok" } }] }])
+  }) as any)
+  const retries: any[] = []
+  const res = await p.chat({ messages: [], tools: [], maxRetries: 2, backoffBaseMs: 50, onRetry: i => retries.push(i) })
+  expect(res.content).toBe("ok")
+  expect(calls).toBe(3)
+  expect(retries).toEqual([
+    { attempt: 1, delayMs: 50, error: "HTTP 503" },
+    { attempt: 2, delayMs: 100, error: "HTTP 503" },
+  ])
+})
+
+test("client errors (401) fail fast — no infinite retry on a bad key", async () => {
+  let calls = 0
+  const p = new Provider({ baseUrl: "http://x/v1" }, "m", (async () => {
+    calls++
+    return new Response("nope", { status: 401 })
+  }) as any)
+  await expect(p.chat({ messages: [], tools: [] })).rejects.toThrow(/401/)
+  expect(calls).toBe(1)
+})
+
+test("abort during backoff sleep stops retrying immediately", async () => {
+  let calls = 0
+  const ac = new AbortController()
+  const p = new Provider({ baseUrl: "http://x/v1" }, "m", (async () => {
+    calls++
+    return new Response("down", { status: 503 })
+  }) as any)
+  setTimeout(() => ac.abort(), 50)
+  await expect(p.chat({ messages: [], tools: [], signal: ac.signal })).rejects.toThrow()
+  expect(calls).toBe(1)
+})
+
+test("fetch that never returns headers times out and retries instead of hanging", async () => {
+  let calls = 0
+  // mock honors signal like real fetch: rejects with the abort reason
+  const p = new Provider({ baseUrl: "http://x/v1" }, "m", ((url: string, init: any) => {
+    calls++
+    return new Promise((_, rej) => init.signal.addEventListener("abort", () => rej(init.signal.reason), { once: true }))
+  }) as any)
+  await expect(
+    Promise.race([
+      p.chat({ messages: [], tools: [], headerTimeoutMs: 50, maxRetries: 1, backoffBaseMs: 50 }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("test guard: chat never settled")), 3000)),
+    ])
+  ).rejects.toThrow(/no response within 50ms/)
+  expect(calls).toBe(2)
+}, 5000)
+
+test("429 retries up to maxRetries then throws with the attempt count", async () => {
   let calls = 0
   const p = new Provider({ baseUrl: "http://x/v1" }, "m", (async () => {
     calls++
     return new Response("rate", { status: 429 })
   }) as any)
-  await expect(p.chat({ messages: [], tools: [] })).rejects.toThrow("429")
+  await expect(p.chat({ messages: [], tools: [], maxRetries: 2, backoffBaseMs: 50 })).rejects.toThrow(/429 \(after 3 attempts\)/)
   expect(calls).toBe(3)
 })
 
@@ -124,9 +190,9 @@ test("idle stream (no chunks) rejects with a stall error instead of hanging", as
     return new Response(stream, { status: 200 })
   }) as any
   const p = new Provider({ baseUrl: "http://x/v1" }, "m", fetchFn)
-  const chatP = p.chat({ messages: [], tools: [], idleTimeoutMs: 60 })
+  const chatP = p.chat({ messages: [], tools: [], idleTimeoutMs: 60, maxRetries: 2, backoffBaseMs: 50 })
   await expect(
-    Promise.race([chatP, new Promise((_, rej) => setTimeout(() => rej(new Error("test guard: chat never settled")), 2000))])
+    Promise.race([chatP, new Promise((_, rej) => setTimeout(() => rej(new Error("test guard: chat never settled")), 6000))])
   ).rejects.toThrow(/stalled/i)
   expect(calls).toBe(3)   // stalls are retried like other chat failures
 })
@@ -145,8 +211,8 @@ test("keep-alive bytes alone do not keep a stream alive past the total cap", asy
   const p = new Provider({ baseUrl: "http://x/v1" }, "m", fetchFn)
   await expect(
     Promise.race([
-      p.chat({ messages: [], tools: [], idleTimeoutMs: 1_000, totalTimeoutMs: 250 }),
-      new Promise((_, rej) => setTimeout(() => rej(new Error("test guard: chat never settled")), 3_000)),
+      p.chat({ messages: [], tools: [], idleTimeoutMs: 1_000, totalTimeoutMs: 250, maxRetries: 1, backoffBaseMs: 50 }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("test guard: chat never settled")), 6_000)),
     ])
   ).rejects.toThrow(/stream exceeded/)
 })
@@ -167,7 +233,7 @@ test("a 429 body is cancelled before the retry fires", async () => {
     calls++
     return new Response(bodies().body, { status: 429 })
   }) as any)
-  await expect(p.chat({ messages: [], tools: [], signal: new AbortController().signal })).rejects.toThrow("429")
+  await expect(p.chat({ messages: [], tools: [], maxRetries: 2, backoffBaseMs: 50, signal: new AbortController().signal })).rejects.toThrow("429")
   expect(calls).toBe(3)
   expect(cancelled).toEqual([true, true, true])
 })
