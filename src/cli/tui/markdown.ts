@@ -65,9 +65,21 @@ function compute(text: string): Seg[][] {
     if (isTable(lines, i)) { out.push(...tableLines(lines, i)); i += 1 + tableRowCount(lines, i); continue }
     if (line.trim() === "") { if (out.length && out[out.length - 1][0]?.blank) continue; out.push([{ text: "", blank: true }]); continue }
     const m = /^(#{1,3}) (.+)$/.exec(line)
-    if (m) { out.push([{ text: m[2], header: m[1].length as 1 | 2 | 3 }]); continue }
+    if (m) {
+      // parse the heading body inline so `code`/`bold` style inside headings too
+      const body = parseInline(m[2])
+      if (body[0]) body[0].header = m[1].length as 1 | 2 | 3
+      out.push(body)
+      continue
+    }
     const lm = /^\s*([-*]|\d+\.)\s+(.+)$/.exec(line)
-    if (lm) { out.push([{ text: lm[1] === "-" || lm[1] === "*" ? "•" : lm[1], marker: true }, { text: " " + lm[2] }]); continue }
+    if (lm) {
+      const marker: Seg = { text: lm[1] === "-" || lm[1] === "*" ? "•" : lm[1], marker: true }
+      const body = parseInline(lm[2])
+      if (body[0]) body[0] = { ...body[0], text: " " + body[0].text }   // keep the marker's trailing gap
+      out.push([marker, ...body])
+      continue
+    }
     out.push(parseInline(line))
   }
   return out

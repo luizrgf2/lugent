@@ -5,7 +5,7 @@
 ```
 provider.chat (SSE)
   onReasoning(chunk) → TItem "reasoning" (dim italic; display-only, never stored)
-  onToken(chunk)     → TItem "assistant" (markdown-lite: fences, `code`, **bold**, #h1-3)
+  onToken(chunk)     → TItem "assistant" (markdown-lite: fences, `code`, **bold**, #h1-3, tables, lists — inline styles apply inside headings and list items too)
   onToolStart        → TItem "tool" (glyph + name + resource)
   onAsk              → Permissions dialogs, queued in order (parallel asks would race); y/n/a; Ctrl+C denies + aborts
 ```

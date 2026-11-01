@@ -69,6 +69,18 @@ test("list items: hyphen and ordered get a marker segment", () => {
   expect(parseMarkdown("2. two")).toEqual([[{ text: "2.", marker: true }, { text: " two" }]])
 })
 
+test("inline code and bold render inside headings and list items", () => {
+  expect(parseMarkdown("# Title with `code`")).toEqual([
+    [{ text: "Title with ", header: 1 }, { text: "code", code: true }],
+  ])
+  expect(parseMarkdown("- item with **bold**")).toEqual([
+    [{ text: "•", marker: true }, { text: " item with " }, { text: "bold", bold: true }],
+  ])
+  expect(parseMarkdown("3. step `x` and **y**")).toEqual([
+    [{ text: "3.", marker: true }, { text: " step " }, { text: "x", code: true }, { text: " and " }, { text: "y", bold: true }],
+  ])
+})
+
 test("two or more blank lines collapse to one", () => {
   expect(parseMarkdown("a\n\n\n\nb").length).toBe(3)
   const f = parseMarkdown("a\n\n\n\nb")
