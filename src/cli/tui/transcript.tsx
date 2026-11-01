@@ -30,7 +30,10 @@ function describeArgs(args: unknown): string {
 }
 
 function itemLines(it: TItem): number {
-  return it.kind === "assistant" ? Math.max(1, it.text.split("\n").length) : 1
+  // Every kind renders its raw \n as real rows (ink Text breaks lines), so
+  // every kind counts them — counting only assistant let reasoning/system
+  // multiline items overflow the window and scroll history off the screen.
+  return Math.max(1, it.text.split("\n").length)
 }
 export { itemLines }
 
@@ -65,7 +68,7 @@ export function clampItems(items: TItem[], maxLines: number, skipBottom = 0): TI
     }
     if (used + lines + (out.length > 0 ? 1 : 0) > maxLines) {
       const room = maxLines - used - (out.length > 0 ? 1 : 0)
-      if (out.length === 0 && room > 0 && items[i].kind === "assistant") {
+      if (out.length === 0 && room > 0) {
         push(items[i], items[i].text.split("\n").slice(-room).join("\n"))
       }
       break

@@ -30,6 +30,24 @@ test("clampItems with budget smaller than everything returns at most the tail of
   expect(out[0].text).toBe("l2\nl3")
 })
 
+test("clampItems counts newlines in every item kind, not just assistant", () => {
+  // reasoning/system/user render raw \n as real rows; counting them as 1 line
+  // overflowed the window and the terminal scrolled the history off the screen.
+  const items: TItem[] = [
+    { kind: "user", text: "before" },
+    { kind: "reasoning", text: "r0\nr1\nr2\nr3\nr4\nr5" },
+  ]
+  const out = clampItems(items, 3)
+  expect(out).toHaveLength(1)
+  expect(out[0].text).toBe("r3\nr4\nr5")   // the reasoning item is tailed like an assistant one
+})
+
+test("clampItems tails a single oversized non-assistant item instead of blanking", () => {
+  const out = clampItems([{ kind: "reasoning", text: "r0\nr1\nr2\nr3\nr4" }], 2)
+  expect(out).toHaveLength(1)
+  expect(out[0].text).toBe("r3\nr4")
+})
+
 test("clampItems skipBottom hides newest lines (scroll up): single-line items", () => {
   const items: TItem[] = Array.from({ length: 30 }, (_, i) => ({ kind: "user" as const, text: `l${i}` }))
   const out = clampItems(items, 5, 10)

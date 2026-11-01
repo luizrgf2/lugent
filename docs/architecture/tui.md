@@ -20,7 +20,7 @@ Provider injection: `env.makeProvider?(cfg, model)` (tests); default `new Provid
 
 Rendering stays O(viewport) regardless of history length — no item outside the window is ever rendered:
 
-- `clampItems(items, maxLines, skipBottom)` walks items newest→oldest, line-budgeted. `skipBottom` scrolls up: it hides the newest N lines and shows the window just above (a straddling multi-line item is sliced from the top). `itemLines` = `split("\n").length` for assistant items, 1 otherwise.
+- `clampItems(items, maxLines, skipBottom)` walks items newest→oldest, line-budgeted. `skipBottom` scrolls up: it hides the newest N lines and shows the window just above (a straddling multi-line item is sliced from the top). `itemLines` = `split("\n").length` for **every** kind — reasoning/system/user render raw newlines as real rows too, and under-counting them overflowed the window and scrolled history off the screen. Oversized non-assistant items are tailed (last lines kept) like assistant ones.
 - `App` holds `scroll`/`scrollRef` (ref mirrors state — ink batching hazard). PageUp adds the page budget, PageDown subtracts (clamped at 0 = follow tail). Submit resets to 0.
 - **View pin while scrolled up**: streaming callbacks go through `grow()`, which counts tail-item line deltas (`seen`) and bumps `scroll` by the same delta — new content grows below without jumping the screen. `seen` always tracks (not only when scrolled) so a mid-stream PageUp doesn't miscount.
 - **Parse cost**: `parseMarkdown` is an LRU (300 entries) keyed by text — streaming re-parses of the growing prefix collapse to Map lookups; `Markdown` is `memo`ized so stable items don't re-render. `clampItems` line counting avoids `parseMarkdown` entirely (plain `split`).
