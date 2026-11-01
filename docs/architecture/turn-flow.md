@@ -3,8 +3,7 @@
 ```
 user input
   → append user message (store)
-  → loop (hard cap: 50 tool rounds — past it the turn stops with a
-    runaway-guard error and a final user message the next turn answers):
+  → loop (no round cap — the model decides when to stop; ESC/ctrl+c aborts):
       prefix   = buildPrefix(promptInput)          # byte-stable per agent
       history  = cleanHistory(store.getMessages)   # orphan repair
       messages = buildMessages(prefix, history)    # system + wire format

@@ -61,3 +61,9 @@ Follow-up (same day): `send()` in the TUI (and the plain REPL) now `.catch`es `r
 Second follow-up (same day): retries are now **infinite** by default — the user wants the turn to ride out an outage, watching each attempt, not die after 3. Backoff 1s doubling to a 30s cap; every retry fires `onRetry` (TUI shows `attempt N failed — … · retrying in Xs` above the context line, REPL prints it). `4xx` other than `429` is fatal and skips the loop (a bad key retrying forever is a bug, not resilience); abort still cuts the wait instantly. `maxRetries` exists only so tests stay finite. Delay formula moved from `500 * 2^(attempt-1)` to `min(1000 * 2^(attempt-2), 30_000)`.
 
 Third follow-up (same day): backoff rescheduled per user preference — first retry waits 10s, doubling, 60s cap (`10s → 20s → 40s → 60s → 60s…`). `backoffBaseMs` added next to `maxRetries` so tests don't sleep real seconds. Trade-off accepted: the first 10s window shows only the previous attempt's failure line, no new feedback — matching "perto do working" rather than extra chatter.
+
+## 2026-11-01 — Tool-round cap removed; the stream/MCP guards stay
+
+Decision: `MAX_TOOL_ROUNDS` (50) is gone — a turn runs until the model stops calling tools; ctrl+c aborts is the only bound.
+Why: the cap cut real work mid-task twice in production use (the user saw "turn was stopped after 50 tool rounds" mid-debug); a tool-heavy turn is legitimate, and the user watching the transcript IS the runaway detector. The 10min stream cap and the MCP pagination cap remain — they guard byte-drip/proxy hangs, not work volume.
+Cost if wrong: a degenerate model looping tool calls forever bills tokens until the user hits ctrl+c. Re-add a cap (config-gated, default off) if that ever happens in practice.

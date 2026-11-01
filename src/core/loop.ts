@@ -63,7 +63,6 @@ export async function runTurn(deps: LoopDeps, sessionId: string, userText: strin
   store.appendMessage(msg({ sessionId, role: "user", content: userText }))
   const userContent = expandImages(userText, cwd)
 
-  let rounds = 0
   while (true) {
     const prefix = buildPrefix(deps.promptInput)
     const history = cleanHistory(store.getMessages(sessionId))
@@ -133,15 +132,5 @@ export async function runTurn(deps: LoopDeps, sessionId: string, userText: strin
       }
       store.appendMessage(msg({ sessionId, role: "tool", content: truncate(result.output), toolCallId: call.id }))
     }))
-
-    // Hard ceiling: a degenerate model that keeps emitting tool calls would run
-    // (and bill) forever. Stop with a final user message the next turn answers.
-    if (++rounds >= MAX_TOOL_ROUNDS) {
-      store.appendMessage(msg({
-        sessionId, role: "user",
-        content: `system: the turn was stopped after ${MAX_TOOL_ROUNDS} tool rounds (runaway guard) — summarize the work so far; no more tool calls are permitted.`,
-      }))
-      return { aborted: false, error: `stopped after ${MAX_TOOL_ROUNDS} tool rounds (runaway guard)` }
-    }
   }
 }

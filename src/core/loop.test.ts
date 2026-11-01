@@ -343,34 +343,18 @@ test("agent ask override on an allow-tool does ask", async () => {
   expect(asked).toBe(1)
 })
 
-test("runTurn caps tool rounds: degenerate model stops at the cap with an error", async () => {
+test("runTurn keeps going while the model keeps calling tools (no round cap)", async () => {
   let rounds = 0
   const provider = {
     chat: async () => {
       rounds++
+      if (rounds > 60) return { content: "done", toolCalls: [] }   // model stops on its own
       return { content: "", toolCalls: [{ id: `t${rounds}`, name: "echo", args: { path: "a" } }] }
     },
   }
   const r = await runTurn(deps(provider), sessionId, "go")
-  expect(r.error).toMatch(/stopped after \d+ tool rounds/)
-  expect(rounds).toBeGreaterThanOrEqual(20)                 // a real task still has room
-  expect(rounds).toBeLessThanOrEqual(50)
-  const roles = store.getMessages(sessionId).map(m => m.role)
-  expect(roles[roles.length - 2]).toBe("tool")               // last round's results intact
-  expect(roles[roles.length - 1]).toBe("user")               // cap message the next turn answers
-})
-
-test("cap message becomes the next user message the model answers", async () => {
-  let rounds = 0
-  const provider = {
-    chat: async () => {
-      rounds++
-      return { content: "", toolCalls: [{ id: `t${rounds}`, name: "echo", args: { path: "a" } }] }
-    },
-  }
-  await runTurn(deps(provider), sessionId, "go")
-  const cap = store.getMessages(sessionId).find(m => m.role === "user" && m.content?.includes("tool rounds"))
-  expect(cap?.content).toContain("no more tool calls are permitted")
+  expect(r.error).toBeUndefined()
+  expect(rounds).toBe(61)   // past the old 50-round cap, turn still completes normally
 })
 
 test("session grant still beats an agent ask override (review focus 4)", async () => {
