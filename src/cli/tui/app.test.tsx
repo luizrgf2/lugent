@@ -404,7 +404,7 @@ test("keyboard-only scroll: shift+up/down, home/end work like pageUp/pageDown", 
   expect(lastFrame()).not.toContain("line-00")
 })
 
-test("runTui enables mouse reporting, routes wheel to the transcript, and restores the mode on exit", async () => {
+test("mouse tracking starts off (text selection works), /mouse turns the wheel on, exit restores it", async () => {
   const prov = {
     chat: async (a: any) => {
       for (let i = 0; i < 60; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
@@ -416,23 +416,35 @@ test("runTui enables mouse reporting, routes wheel to the transcript, and restor
   const inStream = fakeStdin()
   const p = runTui(env, { stdin: inStream.stream as any, stdout: out.stream as any })
   await new Promise(r => setTimeout(r, 60))
-  expect(out.frames.join("")).toContain(MOUSE_ON)   // reporting switched on
+  // Default: no tracking, so the terminal keeps click-drag for its own
+  // selection — lugent has no clipboard helper, so that is the only way to copy.
+  expect(out.frames.join("")).toContain(MOUSE_OFF)
+  expect(out.frames.join("")).not.toContain(MOUSE_ON)
 
   inStream.type("go\r")
   await new Promise(r => setTimeout(r, 150))
   expect(out.lastFrame()).toContain("line-59")
   expect(out.lastFrame()).not.toContain("line-00")
 
-  inStream.write(WHEEL_UP)                           // one wheel notch up
-  await new Promise(r => setTimeout(r, 80))
-  expect(out.lastFrame()).not.toContain("line-59")   // the wheel moved the view
-  inStream.write(WHEEL_UP.repeat(20))                // 3 lines per notch: enough to pass the top
+  inStream.write(WHEEL_UP.repeat(20))                // no tracking yet: nothing to scroll on
   await new Promise(r => setTimeout(r, 120))
-  expect(out.lastFrame()).toContain("line-00")       // and it reaches the very top
+  expect(out.lastFrame()).toContain("line-59")       // view unmoved
 
-  inStream.write(WHEEL_DOWN.repeat(40))              // wheel down: back toward the tail
+  inStream.type("/mouse\r")                          // opt into the wheel
   await new Promise(r => setTimeout(r, 120))
-  expect(out.lastFrame()).toContain("line-59")       // the wheel scrolled back down
+  expect(out.frames.join("")).toContain(MOUSE_ON)
+  // /mouse appended a user line + a system line, so the window moved on: anchor
+  // on whatever is on screen now, not on a fixed line number.
+  const tailFrame = out.lastFrame()
+
+  inStream.write(WHEEL_UP.repeat(3))                 // a few notches up (3 lines each)
+  await new Promise(r => setTimeout(r, 150))
+  const upFrame = out.lastFrame()
+  expect(upFrame).not.toBe(tailFrame)                // the wheel moved the view
+
+  inStream.write(WHEEL_DOWN.repeat(10))              // wheel down: past the tail, clamped back to it
+  await new Promise(r => setTimeout(r, 150))
+  expect(out.lastFrame()).toBe(tailFrame)            // exactly where it started
 
   inStream.type("\x03")                              // exit
   inStream.type("\x03")
@@ -935,7 +947,7 @@ test("long wrapped lines cannot push the composer out of the frame", async () =>
   expect(lines.findIndex(l => l.includes("╭"))).toBeLessThan(30)
 })
 
-test("/mouse off restores native text selection: tracking off, wheel ignored, keys unaffected", async () => {
+test("/mouse toggles wheel vs native selection in both directions, keyboard scroll always works", async () => {
   const prov = {
     chat: async (a: any) => {
       for (let i = 0; i < 60; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
@@ -949,15 +961,27 @@ test("/mouse off restores native text selection: tracking off, wheel ignored, ke
   await new Promise(r => setTimeout(r, 60))
   inStream.type("go\r")
   await new Promise(r => setTimeout(r, 150))
-  expect(out.lastFrame()).toContain("line-59")
 
   const before = out.frames.length
-  inStream.type("/mouse\r")
+  inStream.type("/mouse\r")                          // on: opt into the wheel
   await new Promise(r => setTimeout(r, 120))
   const written = out.frames.slice(before).join("")
-  expect(written).toContain(MOUSE_OFF)               // tracking released: selection works again
-  expect(out.lastFrame()).toContain("text selection on")   // and the transcript says so
-  const frozen = out.lastFrame()                      // /mouse off also appended a line — that is the frame to hold
+  expect(written).toContain(MOUSE_ON)
+  expect(out.lastFrame()).toContain("wheel scroll on")     // the transcript says which mode
+
+  inStream.write(WHEEL_UP.repeat(20))                // wheel scrolls…
+  await new Promise(r => setTimeout(r, 120))
+  const scrolled = out.lastFrame()
+  expect(scrolled).not.toContain("line-59")
+  inStream.type("\x1b[F")                            // End: back to the tail
+  await new Promise(r => setTimeout(r, 100))
+
+  const before2 = out.frames.length
+  inStream.type("/mouse\r")                          // off: hand click-drag back to the terminal
+  await new Promise(r => setTimeout(r, 120))
+  expect(out.frames.slice(before2).join("")).toContain(MOUSE_OFF)
+  expect(out.lastFrame()).toContain("text selection on")
+  const frozen = out.lastFrame()                     // /mouse also appended a line — hold this frame
 
   inStream.write(WHEEL_UP.repeat(20))                // wheel no longer scrolls…
   await new Promise(r => setTimeout(r, 120))
@@ -966,16 +990,6 @@ test("/mouse off restores native text selection: tracking off, wheel ignored, ke
   inStream.type("\x1b[5~")                           // keyboard scroll still works
   await new Promise(r => setTimeout(r, 100))
   expect(out.lastFrame()).not.toBe(frozen)
-
-  inStream.type("/mouse\r")                          // back on
-  await new Promise(r => setTimeout(r, 120))
-  expect(out.frames.join("")).toContain(MOUSE_ON)    // last state wins
-  inStream.type("\x1b[F")                            // End: back to the tail
-  await new Promise(r => setTimeout(r, 100))
-  const atTail = out.lastFrame()
-  inStream.write(WHEEL_UP.repeat(20))                // wheel scrolls again
-  await new Promise(r => setTimeout(r, 120))
-  expect(out.lastFrame()).not.toBe(atTail)
 
   inStream.type("\x03")
   inStream.type("\x03")

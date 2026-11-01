@@ -3,11 +3,14 @@
  * stdin as raw bytes, the input parser strips the ESC and the transcript never
  * moves — the wheel looks dead.
  *
- * Scope: wheel only, using SGR encoding (1006) + button events (1000). We switch
- * the modes on around the TUI session and turn them off on the way out (leaving
- * them on would break text selection in the user's shell afterwards). Reports
- * are stripped from what ink reads and surfaced as scroll deltas on a side
- * channel; clicks/motion are dropped, since the TUI has no hit-testing.
+ * Scope: wheel only, using SGR encoding (1006) + button events (1000). The modes
+ * start OFF and `/mouse` turns them on for the session: with 1000 active the
+ * terminal routes click-drag to the application, so tracking and the terminal's
+ * own text selection are mutually exclusive — and selection is what lets the
+ * user copy the transcript. The modes are switched off on the way out either
+ * way (leaving them on would break selection in the user's shell afterwards).
+ * Reports are stripped from what ink reads and surfaced as scroll deltas on a
+ * side channel; clicks/motion are dropped, since the TUI has no hit-testing.
  */
 import { EventEmitter } from "node:events"
 
@@ -86,11 +89,12 @@ export function createMouseStdin(source: NodeJS.ReadStream): MouseStdin {
   const q = queuedStdin(source)
   const emit = new Set<(d: number) => void>()
   let carry = ""
-  // Tracking is runtime-switchable (see /mouse): while off, the terminal must
-  // keep click-drag for its own text selection, so reports are neither expected
-  // nor parsed — a report that arrives anyway is dropped like any other byte,
-  // rather than being swallowed silently into a stray scroll.
-  let enabled = true
+  // Tracking is runtime-switchable (see /mouse) and starts OFF: with mode 1000
+  // the terminal routes click-drag to the application, so leaving it on by
+  // default would break the shell's own text selection — the only way to copy
+  // the transcript. While off, a report that arrives anyway is dropped rather
+  // than turned into a stray scroll.
+  let enabled = false
   const onData = (chunk: Buffer | string) => {
     const { text, deltas, held } = splitWheel(String(chunk), carry)
     carry = held

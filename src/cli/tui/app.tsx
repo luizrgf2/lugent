@@ -63,12 +63,12 @@ export function App(props: { env: TuiEnv; onWheel?: (fn: (d: number) => void) =>
   /** Set while /mcp authenticate waits for the browser, so ctrl+c can cancel it. */
   const authAbortRef = useRef<AbortController | null>(null)
   const [yolo, setYolo] = useState(false)
-  // Mouse tracking is on by default (wheel scrolling) and off on request: with
-  // 1000 active the terminal sends click-drag to the app instead of running its
-  // own text selection, so copying the transcript requires turning it off.
-  // Ref only (no state): the toggle writes to the terminal, nothing re-renders —
-  // a transcript system line is the feedback.
-  const mouseOnRef = useRef(true)
+  // Mouse tracking starts OFF so the terminal keeps click-drag for its own text
+  // selection — the only way to copy the transcript, since lugent ships no
+  // clipboard helper. Wheel and native selection are mutually exclusive at the
+  // protocol level (see mouse.ts), so /mouse opts into the wheel. Ref only (no
+  // state): the toggle writes to the terminal; a transcript line is the feedback.
+  const mouseOnRef = useRef(false)
   const [retry, setRetry] = useState("")
   // Ref mirrors state: submit reads it — ink batching can make state stale.
   const yoloRef = useRef(false)
@@ -150,12 +150,12 @@ export function App(props: { env: TuiEnv; onWheel?: (fn: (d: number) => void) =>
         return
       }
       if (text.trim() === "/mouse") {
-        // Toggle terminal mouse tracking: off hands click-drag back to the
-        // terminal, which is the only way to select and copy the transcript.
+        // Toggle terminal mouse tracking. Off (the default) hands click-drag to
+        // the terminal so text can be selected and copied; on buys wheel scroll.
         const on = !mouseOnRef.current
         mouseOnRef.current = on
         props.setMouse?.(on)
-        setItems(is => [...is, { kind: "system", text: on ? "mouse: wheel scroll on (text selection needs shift+drag)" : "mouse: text selection on (wheel scroll off · /mouse to restore)" }])
+        setItems(is => [...is, { kind: "system", text: on ? "mouse: wheel scroll on (text selection needs shift+drag)" : "mouse: text selection on (wheel scroll off · /mouse for the wheel)" }])
         return
       }
       setItems(is => [...is, { kind: "error", text: `${text} — use --plain mode for slash commands in v1` }])
@@ -362,7 +362,10 @@ export function runTui(env: TuiEnv, io: { stdin?: NodeJS.ReadStream; stdout?: No
   // modes mid-session, since the wheel and native click-drag selection cannot
   // both be active (the proxy owns the actual writes; see setMouse below).
   const mouse = createMouseStdin(stdin)
-  mouse.set(true, stdout)
+  // Start with tracking off: the terminal keeps click-drag selection, which is
+  // the only way to copy the transcript (no clipboard helper ships with lugent).
+  // /mouse turns the wheel on. Either way it is switched off on the way out.
+  mouse.set(false, stdout)
   const restore = () => { mouse.set(false, stdout); mouse.close() }
   process.on("exit", restore)
   const inst = render(<App env={env} onWheel={mouse.onWheel} setMouse={on => mouse.set(on, stdout)} />, { exitOnCtrlC: false, stdin: mouse.stdin as any, stdout })

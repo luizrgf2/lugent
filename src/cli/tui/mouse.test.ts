@@ -54,6 +54,7 @@ test("bridge: strips mouse reports from what ink reads, reports each notch", asy
   m.stdin.on("readable", () => { let c: string | null; while ((c = m.stdin.read() as any) !== null) seen.push(String(c)) })
   const off = m.onWheel(d => wheels.push(d))
   const tick = () => new Promise(r => setTimeout(r, 10))
+  m.set(true, { write: () => true } as any)   // tracking is off by default (/mouse turns it on)
 
   source.write(`ab${up}cd${down}`)
   await tick()
@@ -92,16 +93,38 @@ test("set() writes the on/off pair to the given stream and gates wheel deltas", 
   const wheels: number[] = []
   m.onWheel(d => wheels.push(d))
 
-  m.set(false, stream)                 // off: the terminal owns click-drag again
-  expect(written).toEqual([MOUSE_OFF])
-  source.write(up)
+  source.write(up)                     // off by default: the terminal owns click-drag
   await new Promise(r => setTimeout(r, 10))
   expect(wheels).toEqual([])           // a report that arrives anyway is not a scroll
 
-  m.set(true, stream)                  // back on
-  expect(written).toEqual([MOUSE_OFF, MOUSE_ON])
+  m.set(true, stream)                  // on: wheel scroll
+  expect(written).toEqual([MOUSE_ON])
   source.write(up)
   await new Promise(r => setTimeout(r, 10))
   expect(wheels).toEqual([-1])
+
+  m.set(false, stream)                 // off again: selection comes back
+  expect(written).toEqual([MOUSE_ON, MOUSE_OFF])
+  source.write(up)
+  await new Promise(r => setTimeout(r, 10))
+  expect(wheels).toEqual([-1])         // gated again
+  m.close()
+})
+
+test("bridge: wheel reports never reach ink as text, in either mode", async () => {
+  const source: any = new PassThrough()
+  source.isTTY = true
+  source.setRawMode = () => source
+  const m = createMouseStdin(source)
+  const seen: string[] = []
+  m.stdin.on("readable", () => { let c: string | null; while ((c = m.stdin.read() as any) !== null) seen.push(String(c)) })
+  const stream: any = { write: () => true }
+  m.set(true, stream)
+  source.write(`a${up}b`)
+  await new Promise(r => setTimeout(r, 10))
+  m.set(false, stream)
+  source.write(`c${up}d`)
+  await new Promise(r => setTimeout(r, 10))
+  expect(seen.join("")).toBe("abcd")   // reports stripped even while off
   m.close()
 })
