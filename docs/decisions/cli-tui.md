@@ -45,11 +45,19 @@ Cost if wrong: the URL line visibly overflows past the panel's right edge on nar
 
 ## 2026-11-01 — Mouse wheel scroll goes through a stdin proxy, not ink
 
-Decision: `mouse.ts` wraps `process.stdin` in a queue-backed stream handed to `render({ stdin })`. It strips all SGR mouse reports (`ESC[<…M/m`) before ink's parser sees them, switches modes 1000+1006 on around the TUI session and off on exit, and surfaces wheel notches (−1/+1) on a side channel that `App` maps to 3 lines of transcript scroll. `runTui` accepts an `io` override for tests.
+Decision: `mouse.ts` wraps `process.stdin` in a queue-backed stream handed to `render({ stdin })`. It strips all SGR mouse reports (`ESC[<…M/m`) before ink's parser sees them, switches modes 1000+1006 on around the TUI session and off on exit, and surfaces wheel notches (−1/+1) on a side channel that `App` maps to 3 lines of transcript scroll. `runTui` accepts an `io` override for tests and passes a `setMouse` callback so `/mouse` can toggle tracking mid-session (`MouseStdin.set(on, stream)` writes the pair and gates the deltas).
 
 Why: ink has no mouse handling at all — a wheel report reaches `useInput` as garbage text (ESC stripped), so the transcript never moves and the wheel looks broken. Two sub-decisions came out of the ink internals: (a) the proxy is a queue with `read()`, not a PassThrough, because ink drains with `while (stdin.read())` and PassThrough coalesces writes in the same tick into one chunk, which parses as text — a `\r` glued to "go" never becomes Return; (b) `setEncoding` must stay the proxy's own (mirroring it to the source leaves Buffers, which the input parser silently drops).
 
 Cost if wrong: any terminal that ignores 1000/1006 gets no wheel scrolling (keyboard scroll still works — shift+arrows, Home/End, PageUp/PageDown); a terminal that emits mouse reports in the legacy X10 encoding is not handled, so those reports would reach ink as junk. Also, mouse reporting must be restored on every exit path — `process.on("exit")` covers crashes, but a `SIGKILL` leaves the user's shell with 1000/1006 enabled (text selection swallowed) until `reset`.
+
+## 2026-11-01 — `/mouse` trades wheel scrolling for native text selection
+
+Decision: mouse tracking stays on by default, and `/mouse` toggles it for the session. Off, `MouseStdin.set(false, stdout)` writes `MOUSE_OFF` and stops mapping report deltas to scroll, so the terminal handles click-drag itself; the transcript gets a `system` line either way. The state lives in a ref (nothing re-renders) and is not persisted.
+
+Why: with mode 1000 active the terminal routes click-drag to the application, which the TUI has no use for — it drops clicks — so selecting the transcript to copy it stopped working, and the workaround (hold shift while dragging, or `--plain`) is terminal-specific and undiscoverable. Wheel and selection are mutually exclusive at the protocol level, so one of them has to be a mode rather than a default. Keyboard scroll (PageUp/PageDown, shift+↑/↓, Home/End) is untouched by the toggle, so nothing becomes unreachable while selection is on.
+
+Cost if wrong: a user who turns selection on and then wants the wheel needs to remember `/mouse` (the system line and the `/` autocomplete both name it). The toggle is session-scoped: every start comes back with the wheel on, so someone who copies constantly re-runs the command. `enabled = false` also drops any report that still arrives instead of parsing it, which is deliberate — a half-tracked mouse would scroll the transcript while the user is trying to drag-select.
 
 ## 2026-11-01 — The logo opens centered by padding the splash, not by centering the layout
 

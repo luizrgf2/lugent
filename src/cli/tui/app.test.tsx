@@ -934,3 +934,50 @@ test("long wrapped lines cannot push the composer out of the frame", async () =>
   expect(lastFrame()).toContain("line-5")    // newest content still on screen
   expect(lines.findIndex(l => l.includes("╭"))).toBeLessThan(30)
 })
+
+test("/mouse off restores native text selection: tracking off, wheel ignored, keys unaffected", async () => {
+  const prov = {
+    chat: async (a: any) => {
+      for (let i = 0; i < 60; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
+      return { content: "", toolCalls: [] }
+    },
+  }
+  const env = fakeEnv({ tools: [], makeProvider: () => prov })
+  const out = fakeStdout(30)
+  const inStream = fakeStdin()
+  const p = runTui(env, { stdin: inStream.stream as any, stdout: out.stream as any })
+  await new Promise(r => setTimeout(r, 60))
+  inStream.type("go\r")
+  await new Promise(r => setTimeout(r, 150))
+  expect(out.lastFrame()).toContain("line-59")
+
+  const before = out.frames.length
+  inStream.type("/mouse\r")
+  await new Promise(r => setTimeout(r, 120))
+  const written = out.frames.slice(before).join("")
+  expect(written).toContain(MOUSE_OFF)               // tracking released: selection works again
+  expect(out.lastFrame()).toContain("text selection on")   // and the transcript says so
+  const frozen = out.lastFrame()                      // /mouse off also appended a line — that is the frame to hold
+
+  inStream.write(WHEEL_UP.repeat(20))                // wheel no longer scrolls…
+  await new Promise(r => setTimeout(r, 120))
+  expect(out.lastFrame()).toBe(frozen)               // …the view did not move at all
+
+  inStream.type("\x1b[5~")                           // keyboard scroll still works
+  await new Promise(r => setTimeout(r, 100))
+  expect(out.lastFrame()).not.toBe(frozen)
+
+  inStream.type("/mouse\r")                          // back on
+  await new Promise(r => setTimeout(r, 120))
+  expect(out.frames.join("")).toContain(MOUSE_ON)    // last state wins
+  inStream.type("\x1b[F")                            // End: back to the tail
+  await new Promise(r => setTimeout(r, 100))
+  const atTail = out.lastFrame()
+  inStream.write(WHEEL_UP.repeat(20))                // wheel scrolls again
+  await new Promise(r => setTimeout(r, 120))
+  expect(out.lastFrame()).not.toBe(atTail)
+
+  inStream.type("\x03")
+  inStream.type("\x03")
+  await p
+})

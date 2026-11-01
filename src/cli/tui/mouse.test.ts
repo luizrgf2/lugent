@@ -81,3 +81,27 @@ test("bridge: one forwarded write is one read — a Return is never glued to tex
   expect(reads).toEqual(["go", "\r"])
   m.close()
 })
+
+test("set() writes the on/off pair to the given stream and gates wheel deltas", async () => {
+  const source: any = new PassThrough()
+  source.isTTY = true
+  source.setRawMode = () => source
+  const m = createMouseStdin(source)
+  const written: string[] = []
+  const stream: any = { write: (s: string) => { written.push(s); return true } }
+  const wheels: number[] = []
+  m.onWheel(d => wheels.push(d))
+
+  m.set(false, stream)                 // off: the terminal owns click-drag again
+  expect(written).toEqual([MOUSE_OFF])
+  source.write(up)
+  await new Promise(r => setTimeout(r, 10))
+  expect(wheels).toEqual([])           // a report that arrives anyway is not a scroll
+
+  m.set(true, stream)                  // back on
+  expect(written).toEqual([MOUSE_OFF, MOUSE_ON])
+  source.write(up)
+  await new Promise(r => setTimeout(r, 10))
+  expect(wheels).toEqual([-1])
+  m.close()
+})

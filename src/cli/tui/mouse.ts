@@ -48,6 +48,8 @@ export type MouseStdin = {
   stdin: NodeJS.ReadStream
   /** Subscribe to wheel deltas (negative = up). Returns an unsubscribe. */
   onWheel(fn: (delta: number) => void): () => void
+  /** Write the tracking on/off sequences to `stream` (the caller owns the stream). */
+  set(on: boolean, stream: NodeJS.WriteStream): void
   /** Stop proxying: detaches the source and drops queued input. */
   close(): void
 }
@@ -84,10 +86,16 @@ export function createMouseStdin(source: NodeJS.ReadStream): MouseStdin {
   const q = queuedStdin(source)
   const emit = new Set<(d: number) => void>()
   let carry = ""
+  // Tracking is runtime-switchable (see /mouse): while off, the terminal must
+  // keep click-drag for its own text selection, so reports are neither expected
+  // nor parsed — a report that arrives anyway is dropped like any other byte,
+  // rather than being swallowed silently into a stray scroll.
+  let enabled = true
   const onData = (chunk: Buffer | string) => {
     const { text, deltas, held } = splitWheel(String(chunk), carry)
     carry = held
     if (text) q.push(text)
+    if (!enabled) return
     for (const d of deltas) for (const fn of emit) fn(d)
   }
   source.on("data", onData)
@@ -98,6 +106,10 @@ export function createMouseStdin(source: NodeJS.ReadStream): MouseStdin {
     onWheel(fn) {
       emit.add(fn)
       return () => { emit.delete(fn) }
+    },
+    set(on, stream) {
+      enabled = on
+      stream.write(on ? MOUSE_ON : MOUSE_OFF)
     },
     close() {
       source.off("data", onData)

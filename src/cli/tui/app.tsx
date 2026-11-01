@@ -17,7 +17,7 @@ import { SkillList } from "./skill-list"
 import { PermissionMode } from "./permission-mode"
 import { SessionPicker } from "./session-picker"
 import { McpList } from "./mcp-list"
-import { createMouseStdin, MOUSE_ON, MOUSE_OFF } from "./mouse"
+import { createMouseStdin } from "./mouse"
 import type { McpServerState } from "../../core/mcp/manager"
 
 export type TuiEnv = ReplEnv & {
@@ -31,7 +31,7 @@ function patchTail(items: TItem[], item: TItem): TItem[] {
     : [...items, item]
 }
 
-export function App(props: { env: TuiEnv; onWheel?: (fn: (d: number) => void) => () => void }) {
+export function App(props: { env: TuiEnv; onWheel?: (fn: (d: number) => void) => () => void; setMouse?: (on: boolean) => void }) {
   const { exit } = useApp()
   const env = props.env
   const [items, setItems] = useState<TItem[]>([])
@@ -63,6 +63,12 @@ export function App(props: { env: TuiEnv; onWheel?: (fn: (d: number) => void) =>
   /** Set while /mcp authenticate waits for the browser, so ctrl+c can cancel it. */
   const authAbortRef = useRef<AbortController | null>(null)
   const [yolo, setYolo] = useState(false)
+  // Mouse tracking is on by default (wheel scrolling) and off on request: with
+  // 1000 active the terminal sends click-drag to the app instead of running its
+  // own text selection, so copying the transcript requires turning it off.
+  // Ref only (no state): the toggle writes to the terminal, nothing re-renders —
+  // a transcript system line is the feedback.
+  const mouseOnRef = useRef(true)
   const [retry, setRetry] = useState("")
   // Ref mirrors state: submit reads it — ink batching can make state stale.
   const yoloRef = useRef(false)
@@ -141,6 +147,15 @@ export function App(props: { env: TuiEnv; onWheel?: (fn: (d: number) => void) =>
       }
       if (text.trim() === "/resume") {
         if (!busy) { overlayRef.current = "resume"; setOverlay("resume") }
+        return
+      }
+      if (text.trim() === "/mouse") {
+        // Toggle terminal mouse tracking: off hands click-drag back to the
+        // terminal, which is the only way to select and copy the transcript.
+        const on = !mouseOnRef.current
+        mouseOnRef.current = on
+        props.setMouse?.(on)
+        setItems(is => [...is, { kind: "system", text: on ? "mouse: wheel scroll on (text selection needs shift+drag)" : "mouse: text selection on (wheel scroll off · /mouse to restore)" }])
         return
       }
       setItems(is => [...is, { kind: "error", text: `${text} — use --plain mode for slash commands in v1` }])
@@ -324,6 +339,7 @@ export function App(props: { env: TuiEnv; onWheel?: (fn: (d: number) => void) =>
                   { cmd: "resume", desc: "resume a past session" },
                   { cmd: "permissions", desc: "permission mode (normal/yolo)" },
                   { cmd: "agent", desc: "switch agent profile" },
+                  { cmd: "mouse", desc: "toggle mouse wheel / text selection" },
                 ]} />}
       </Box>
       {/* spinner lives inside ContextLine now — one chrome line, always visible */}
@@ -342,12 +358,14 @@ export function runTui(env: TuiEnv, io: { stdin?: NodeJS.ReadStream; stdout?: No
   // Mouse wheel: ink has no mouse support, so reports are stripped off stdin by
   // a proxy and turned into scroll deltas (see mouse.ts). Reporting is switched
   // on around the session and restored on the way out — leaving 1000/1006 on
-  // would break text selection in the user's shell.
+  // would break text selection in the user's shell. /mouse toggles the same
+  // modes mid-session, since the wheel and native click-drag selection cannot
+  // both be active (the proxy owns the actual writes; see setMouse below).
   const mouse = createMouseStdin(stdin)
-  stdout.write(MOUSE_ON)
-  const restore = () => { stdout.write(MOUSE_OFF); mouse.close() }
+  mouse.set(true, stdout)
+  const restore = () => { mouse.set(false, stdout); mouse.close() }
   process.on("exit", restore)
-  const inst = render(<App env={env} onWheel={mouse.onWheel} />, { exitOnCtrlC: false, stdin: mouse.stdin as any, stdout })
+  const inst = render(<App env={env} onWheel={mouse.onWheel} setMouse={on => mouse.set(on, stdout)} />, { exitOnCtrlC: false, stdin: mouse.stdin as any, stdout })
   return inst.waitUntilExit().finally(() => {
     process.off("exit", restore)
     restore()
