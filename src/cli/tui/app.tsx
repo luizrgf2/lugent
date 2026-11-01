@@ -6,7 +6,7 @@ import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
 import { toolsForAgent, agentModelTarget, resolveAgent } from "../../core/agents"
 import { buildPromptInput, safeAgentsMd } from "../context"
-import { Status, Spinner, ContextLine, LogoMark } from "./status"
+import { ContextLine, LogoMark } from "./status"
 import { Transcript, clampItems, itemLines, itemsFromHistory, type TItem } from "./transcript"
 import { Input } from "./input"
 import { Permissions } from "./permissions"
@@ -69,8 +69,8 @@ export function App(props: { env: TuiEnv }) {
   const closeOverlay = () => { overlayRef.current = null; setOverlay(null) }
 
   // page size = the visible transcript window (same formula as clampItems:
-  // chrome rows 8 + the 10-row LogoMark), so one PageUp scrolls exactly a page
-  const budget = () => Math.max(3, ((stdout as any)?.rows ?? 24) - 8 - 10)
+  // chrome 5 below + 11-row LogoMark above), so one PageUp scrolls exactly a page
+  const budget = () => Math.max(3, ((stdout as any)?.rows ?? 24) - 5 - 11)
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
@@ -183,22 +183,21 @@ export function App(props: { env: TuiEnv }) {
   }
 
   // ink resolves height="100%" to auto — constrain manually from real rows.
-  // The 10-row LogoMark above the window takes its space too.
+  // Chrome below the window: composer box 3 + context line 1 + retry 1 = 5;
+  // the 11-row LogoMark block above is subtracted too.
   const rows = (stdout as any)?.rows ?? 24
-  const visible = clampItems(items, Math.max(3, rows - 8 - 10), scroll)   // -1 line: context line above input
+  const visible = clampItems(items, Math.max(3, rows - 5 - 11), scroll)
   const agentsMd = safeAgentsMd(env.projectRoot)
 
   return (
     <Box flexDirection="column">
       <LogoMark />
-      <Status provider={provider} model={model} sessionId={session.id} off={env.offProviders} busy={busy} yolo={yolo} agent={agent?.id} />
       <Box flexDirection="column">
         <Transcript items={visible} />
       </Box>
       {retry && <Text color="yellow">{retry}</Text>}
-      <ContextLine agent={agent} agentsMd={agentsMd} />
-      {overlay === "agent"
-        ? <AgentPicker
+      <ContextLine agent={agent} agentsMd={agentsMd} yolo={yolo} off={env.offProviders.includes(provider)} model={`${provider} · ${model}`} busy={busy && !ask} />
+      {overlay === "agent"        ? <AgentPicker
             agents={env.agents}
             current={agent?.id}
             onClose={closeOverlay}
@@ -294,7 +293,7 @@ export function App(props: { env: TuiEnv }) {
                   { cmd: "permissions", desc: "permission mode (normal/yolo)" },
                   { cmd: "agent", desc: "switch agent profile" },
                 ]} />}
-      <Spinner busy={busy && !ask} />
+      {/* spinner lives inside ContextLine now — one chrome line, always visible */}
     </Box>
   )
 }

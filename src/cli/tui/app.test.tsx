@@ -32,14 +32,14 @@ async function waitFor(cond: () => boolean, ms = 3000) {
   expect(cond()).toBe(true)
 }
 
-test("app skeleton renders header and empty transcript", async () => {
+test("app skeleton renders wordmark, model and empty transcript", async () => {
   const { lastFrame } = renderTui(<App env={fakeEnv()} />)
   await new Promise(r => setTimeout(r, 30))
-  expect(lastFrame()).toContain("lugent")
+  expect(lastFrame()).toContain("LUGENT")
   expect(lastFrame()).toContain("9router · glm/glm-5.2")
 })
 
-test("big L-mark logo renders above the status box, outside its border", async () => {
+test("big L-mark logo renders above everything, outside any border", async () => {
   const { lastFrame } = renderTui(<App env={fakeEnv()} />)
   await new Promise(r => setTimeout(r, 30))
   const frame = lastFrame()
@@ -49,7 +49,7 @@ test("big L-mark logo renders above the status box, outside its border", async (
   expect(frame).toContain("▀▀▀▀▀▀▀▀")
   expect(frame).toContain("●")
   expect(frame).not.toContain("▟▙")   // old mini-mark inside the box is gone
-  // mark lines sit above the box top border (round border = ╭)
+  // mark lines sit above the composer box (round border = ╭)
   const markRow = frame.split("\n").findIndex(l => l.includes("██▄"))
   const boxRow = frame.split("\n").findIndex(l => l.includes("╭"))
   expect(markRow).toBeGreaterThanOrEqual(0)
@@ -66,6 +66,46 @@ test("big L-mark logo is horizontally centered on the screen", async () => {
   const start = [...base].indexOf("▀")
   // the 16-wide bar sits around the middle (±4 cols) — not flush left
   expect(Math.abs(start - Math.floor(width / 2 - 8))).toBeLessThanOrEqual(4)
+})
+
+test("LUGENT wordmark renders bold right below the mark, centered", async () => {
+  const { lastFrame } = renderTui(<App env={fakeEnv()} />)
+  await new Promise(r => setTimeout(r, 30))
+  const lines = lastFrame().split("\n")
+  const markIdx = lines.findIndex(l => l.includes("▀▀▀▀▀▀▀▀"))
+  expect(markIdx).toBeGreaterThanOrEqual(0)
+  const wm = lines[markIdx + 1] ?? ""
+  expect(wm.trim()).toBe("LUGENT")
+})
+
+test("provider/model is always visible on the bottom line next to the spinner", async () => {
+  const askTool = { name: "askme", description: "ask", schema: { type: "object", properties: {} }, permission: "ask" as const, execute: async () => ({ output: "ok" }) }
+  const provider = { chat: async (a: any) => new Promise(res => setTimeout(() => res({ content: "hi", toolCalls: [] }), 60)) }
+  const env = fakeEnv({ tools: [askTool], makeProvider: () => provider as any })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("9router · glm/glm-5.2")   // visible while idle
+  type("go\r")
+  await new Promise(r => setTimeout(r, 40))
+  const busyLine = lastFrame().split("\n").find(l => l.includes("working"))
+  expect(busyLine).toContain("9router · glm/glm-5.2")     // and on the spinner line while busy
+})
+
+test("yolo badge sits on the context line, clearly separated", async () => {
+  const root = mkdtempSync("/tmp/lugent-yolo-")
+  writeFileSync(join(root, "AGENTS.md"), "# rules")
+  const { type, lastFrame } = renderTui(<App env={fakeEnv({ projectRoot: root })} />)
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).not.toContain("YOLO")
+  type("/permissions\r")
+  await new Promise(r => setTimeout(r, 80))
+  type("\x1b[B")   // down to yolo
+  type("\r")       // pick it
+  await new Promise(r => setTimeout(r, 80))
+  const line = lastFrame().split("\n").find(l => l.includes("YOLO"))
+  expect(line).toBeDefined()
+  expect(line).toContain("AGENTS.md")   // same line as the context info
+  expect(line).toContain("│")           // visible separator
 })
 
 const askTool = {

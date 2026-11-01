@@ -15,27 +15,44 @@ export function Spinner(p: { busy: boolean; label?: string }) {
   )
 }
 
-// Fixed line above the input: AGENTS.md presence + current agent.
-// Agents without a color (legacy files) fall back to magenta (build's color).
-export function ContextLine(p: { agent?: Agent; agentsMd: string | null }) {
-  if (!p.agentsMd && !p.agent) return null
+// Fixed line above the input — the app's whole chrome bar. Left: AGENTS.md
+// presence, agent, YOLO badge, OFF warn (│ separators). Right, always
+// visible: spinner + "working…" while a turn runs, otherwise just the
+// provider · model. Agents without a color (legacy) fall back to magenta.
+export function ContextLine(p: { agent?: Agent; agentsMd: string | null; yolo?: boolean; off?: boolean; model?: string; busy?: boolean }) {
+  const { frame } = useAnimation({ interval: 80, isActive: !!p.busy })
+  if (!p.agentsMd && !p.agent && !p.yolo && !p.model) return null
   return (
-    <Box paddingX={1}>
-      {p.agentsMd && <Text color="yellow">§ AGENTS.md loaded </Text>}
-      {p.agent && <Text color={p.agent.color ?? "magenta"}>· agent {p.agent.id}</Text>}
+    <Box paddingX={1} justifyContent="space-between">
+      <Text>
+        {p.agentsMd && <Text color="yellow">§ AGENTS.md loaded </Text>}
+        {p.agent && <Text color={p.agent.color ?? "magenta"}>│ agent {p.agent.id} </Text>}
+        {p.yolo && <Text bold color="red">│ YOLO</Text>}
+        {p.off && <Text bold color="red">│ OFF</Text>}
+      </Text>
+      {p.model && (
+        <Text dimColor>
+          {p.busy && <Text color="yellow">{FRAMES[frame % FRAMES.length]} working </Text>}
+          {p.model}
+        </Text>
+      )}
     </Box>
   )
 }
 
-// The big L-mark, rendered alone above everything (outside the status box).
-// Rows and colors come from src/cli/logo.ts — one shared raster + the SVG's
-// exact gradient (#00f5a0 → #00d9f5) for both TUI and plain REPL.
+// The big L-mark with the wordmark beneath — rendered alone above everything
+// (no border). Rows and colors come from src/cli/logo.ts — one shared raster
+// + the SVG's exact gradient (#00f5a0 → #00d9f5) for both TUI and plain REPL.
 export function LogoMark() {
   return (
-    <Box flexDirection="column" alignItems="center">
+    <Box flexDirection="column" alignItems="center" marginBottom={1}>
       {LOGO_ROWS.map((l, i) => (
         <Text key={i} color={logoHex(i)}>{l}</Text>
       ))}
+      <Text bold>
+        <Text>LUG</Text>
+        <Text color={logoHex(LOGO_ROWS.length - 1)}>ENT</Text>
+      </Text>
     </Box>
   )
 }
@@ -59,3 +76,4 @@ export function Status(p: { provider: string; model: string; sessionId: string; 
     </Box>
   )
 }
+
