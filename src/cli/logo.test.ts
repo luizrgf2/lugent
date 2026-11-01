@@ -1,5 +1,18 @@
 import { test, expect } from "bun:test"
-import { LOGO_HEIGHT, LOGO_ROWS, logoHex, logoAnsi } from "./logo"
+import { LOGO_HEIGHT, LOGO_ROWS, logoHex, logoAnsi, logoTopPad } from "./logo"
+
+test("logoTopPad centers the mark on the splash screen, without overflow", () => {
+  // Upper pad = half the rows left over by the mark, so mark + pad is centered
+  // in the viewport (30 rows, mark at 9..20 → center 14.5).
+  expect(logoTopPad(30)).toBe(9)
+  expect(logoTopPad(40)).toBe(14)
+  expect(logoTopPad(24)).toBe(6)
+  // Capped by the room left above the chrome: pad + logo + chrome ≤ rows.
+  expect(logoTopPad(20)).toBe(3)
+  expect(logoTopPad(17)).toBe(0)
+  expect(logoTopPad(12)).toBe(0)
+  expect(logoTopPad(10)).toBe(0)   // shorter than the chrome: never negative
+})
 
 test("rendered logo height covers raster + wordmark + margin", () => {
   // The TUI subtracts LOGO_HEIGHT from the terminal rows to size the

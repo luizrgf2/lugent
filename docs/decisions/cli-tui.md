@@ -51,6 +51,14 @@ Why: ink has no mouse handling at all — a wheel report reaches `useInput` as g
 
 Cost if wrong: any terminal that ignores 1000/1006 gets no wheel scrolling (keyboard scroll still works — shift+arrows, Home/End, PageUp/PageDown); a terminal that emits mouse reports in the legacy X10 encoding is not handled, so those reports would reach ink as junk. Also, mouse reporting must be restored on every exit path — `process.on("exit")` covers crashes, but a `SIGKILL` leaves the user's shell with 1000/1006 enabled (text selection swallowed) until `reset`.
 
+## 2026-11-01 — The logo opens centered by padding the splash, not by centering the layout
+
+Decision: while the transcript is empty, `App` passes `logoTopPad(rows)` blank rows to `<LogoMark topPad>` as `marginTop`, and subtracts the same pad from the transcript window budget. The pad is half the slack left by the logo (`(rows - LOGO_HEIGHT) / 2`), capped at `rows - LOGO_HEIGHT - CHROME_HEIGHT`, and drops to 0 on the first transcript item — the mark then docks to the top for the rest of the session. `logoTopPad` and `CHROME_HEIGHT` live in `src/cli/logo.ts` next to `LOGO_HEIGHT` so the window budget and the pad cannot disagree.
+
+Why: the mark hung off the top because the layout is a plain `flexDirection="column"` — ink has no vertical centering and the rows below it are content-sized, so the logo block sits at row 0. A pad is the only knob that keeps the frame's real height honest: `height="100%"` resolves to auto in ink, so the transcript window is manually clamped from `stdout.rows` anyway, and any pad that is not subtracted there pushes the composer off the screen and paints the logo into scrollback. Padding only while empty keeps the "splash" reading — a permanently centered logo would waste 10+ rows for the whole session. The cap matters on short terminals: with `logoTopPad` unbounded, a 20-row terminal would pad to 4 and overflow.
+
+Cost if wrong: the logo visibly jumps from the middle to the top on the first message (intended, but it is a layout shift a user may read as a bug); the pad is derived from `stdout.rows` read during render, so a resize mid-splash recenters on the next frame but a terminal that reports `rows` late (or 0) gets no padding rather than a broken frame. The centering is vertical only — horizontal centering is still ink's `alignItems="center"`, unchanged.
+
 ---
 
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.

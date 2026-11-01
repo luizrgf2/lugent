@@ -22,6 +22,24 @@ export const LOGO_ROWS = [
 // or every frame is taller than the terminal and scrolls history off-screen.
 export const LOGO_HEIGHT = LOGO_ROWS.length + 2
 
+// Rows the TUI keeps below the transcript: composer box 3 + context line 1
+// + retry line 1. Shared so the window budget and the splash centering can
+// never disagree about how much room the chrome takes.
+export const CHROME_HEIGHT = 5
+
+/**
+ * Blank rows above <LogoMark/> while the transcript is still empty, so the
+ * logo opens in the vertical middle of the screen instead of hugging the top.
+ * Half the viewport slack, capped by the rows the chrome (and the logo itself)
+ * still need — a short terminal degrades to "no padding" rather than an
+ * overflowing frame that scrolls history off.
+ */
+export function logoTopPad(rows: number): number {
+  const centered = Math.floor((rows - LOGO_HEIGHT) / 2)
+  const fits = rows - LOGO_HEIGHT - CHROME_HEIGHT
+  return Math.max(0, Math.min(centered, fits))
+}
+
 const GRAD_START: [number, number, number] = [0x00, 0xf5, 0xa0]
 const GRAD_END: [number, number, number] = [0x00, 0xd9, 0xf5]
 

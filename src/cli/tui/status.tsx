@@ -43,9 +43,12 @@ export function ContextLine(p: { agent?: Agent; agentsMd: string | null; yolo?: 
 // The big L-mark with the wordmark beneath — rendered alone above everything
 // (no border). Rows and colors come from src/cli/logo.ts — one shared raster
 // + the SVG's exact gradient (#00f5a0 → #00d9f5) for both TUI and plain REPL.
-export function LogoMark() {
+// `topPad` (blank rows above, from logoTopPad) is what opens the splash screen
+// with the mark in the vertical middle; it is 0 as soon as the transcript has
+// content, so the mark keeps its place at the top during a session.
+export function LogoMark({ topPad = 0 }: { topPad?: number } = {}) {
   return (
-    <Box flexDirection="column" alignItems="center" marginBottom={1}>
+    <Box flexDirection="column" alignItems="center" marginBottom={1} marginTop={topPad}>
       {LOGO_ROWS.map((l, i) => (
         <Text key={i} color={logoHex(i)}>{l}</Text>
       ))}

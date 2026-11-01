@@ -67,26 +67,28 @@ At startup each provider gets a health check (`GET /models`, 8s timeout) — unr
 
 ## Usage
 
-In a terminal, `lugent` starts a **full-screen TUI** (React + Ink): the big L-mark logo (chevron + base + agent dot, half-block raster of the SVG logo, SVG-exact gradient) centered on top with a bold `LUGENT` wordmark beneath, scrollable transcript (items separated by blank lines, answers indented) with live model reasoning (labeled `… pensando` block, indented), markdown-rendered answers (headings, tables, lists), tool lines, inline y/n/a permission dialogs, and one chrome line above the composer: `§ AGENTS.md loaded │ agent <id> │ YOLO` on the left, spinner + `working…` (while a turn runs) and the always-visible `provider · model` on the right.
+In a terminal, `lugent` starts a **full-screen TUI** (React + Ink): the big L-mark logo (chevron + base + agent dot, half-block raster of the SVG logo, SVG-exact gradient) with a bold `LUGENT` wordmark beneath opens **horizontally and vertically centered** on the empty screen — the splash pad is the rows left over by the logo, and it collapses the moment the first item lands, so the mark docks to the top for the rest of the session; scrollable transcript (items separated by blank lines, answers indented) with live model reasoning (labeled `… pensando` block, indented), markdown-rendered answers (headings, tables, lists), tool lines, inline y/n/a permission dialogs, and one chrome line above the composer: `§ AGENTS.md loaded │ agent <id> │ YOLO` on the left, spinner + `working…` (while a turn runs) and the always-visible `provider · model` on the right.
 
 ```
-              ██▄
-               ▀██▄
-                 ▀██▄
-                   ▀██▄
-                    ▄███▀ ●
-                 ▄███▀
-               ▄███▀
-              ███▀
-              ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-              ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-                   LUGENT
+                                          ██▄
+                                           ▀██▄
+                                             ▀██▄
+                                               ▀██▄
+                                                ▄███▀ ●
+                                             ▄███▀
+                                           ▄███▀
+                                          ███▀
+                                          ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+                                          ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                               LUGENT
 
 > go                                ▏   composer: Enter submits, ↑/↓ history
   pondering which tool to use…         reasoning (dim, live)
 ▸ read src/main.ts                     tool calls
   all **done**                         answer (markdown-lite)
 ```
+
+(The logo above is shown as it opens on a 30-row terminal — 9 blank rows sit above it, none below in this excerpt.)
 
 - **Ctrl+C once** aborts the running turn (and denies a pending permission); **twice** exits.
 - **Runaway guards** (nothing runs forever): a model stream ends after 10min even if the proxy keeps sending keep-alive bytes, and an MCP server that never stops paginating its tools fails to connect instead of hanging startup. Tool rounds are uncapped — the model decides when a turn is done, ctrl+c aborts. Provider failures (`429`/`5xx`, stalled streams, hosts that never answer — 15s connect cap) retry **indefinitely** with backoff (starts at 10s, doubles, 60s cap) — every failed attempt shows in the UI (`attempt 3 failed — HTTP 503 · retrying in 40s`), and ESC stops the loop. Client errors (401, 400 — bad key, bad request) fail immediately instead of looping. When the loop is stopped it surfaces (`HTTP 503 (after N attempts)`), including mid-stream error events and 200-with-JSON-error responses.

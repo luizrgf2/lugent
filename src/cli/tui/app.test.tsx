@@ -123,6 +123,36 @@ test("big L-mark logo is horizontally centered on the screen", async () => {
   expect(Math.abs(start - Math.floor(width / 2 - 8))).toBeLessThanOrEqual(4)
 })
 
+test("big L-mark logo opens vertically centered on the splash screen", async () => {
+  const { lastFrame } = renderTui(<App env={fakeEnv()} />, { rows: 30 })
+  await new Promise(r => setTimeout(r, 30))
+  const lines = lastFrame().split("\n")
+  const markIdx = lines.findIndex(l => l.includes("██▄"))
+  const wmIdx = lines.findIndex(l => l.trim() === "LUGENT")
+  // blank rows above and below: the logo block's middle sits around the middle
+  // of the 30-row viewport (pad = (30 - LOGO_HEIGHT) / 2 = 9)
+  expect(markIdx).toBe(9)
+  expect(lines.slice(0, markIdx).every(l => l.trim() === "")).toBe(true)
+  const centre = (markIdx + wmIdx) / 2
+  expect(Math.abs(centre - (30 - 1) / 2)).toBeLessThanOrEqual(2)
+})
+
+test("splash padding collapses once the transcript has content", async () => {
+  const provider = { chat: async (a: any) => { a.onToken?.("hello"); return { content: "hello", toolCalls: [] } } }
+  const env = fakeEnv({ tools: [], makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame().split("\n").findIndex(l => l.includes("██▄"))).toBe(9)
+  type("go\r")
+  await waitFor(() => lastFrame().includes("hello"))
+  const lines = lastFrame().split("\n")
+  // pad gives the rows back to the transcript: the mark is back at the top and
+  // the frame never grows past the terminal
+  expect(lines.findIndex(l => l.includes("██▄"))).toBe(0)
+  expect(lines.length).toBeLessThanOrEqual(30)
+  expect(lines.findIndex(l => l.includes("╭"))).toBeLessThan(30)
+})
+
 test("LUGENT wordmark renders bold right below the mark, centered", async () => {
   const { lastFrame } = renderTui(<App env={fakeEnv()} />)
   await new Promise(r => setTimeout(r, 30))

@@ -6,7 +6,7 @@ import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
 import { toolsForAgent, agentModelTarget, resolveAgent } from "../../core/agents"
 import { buildPromptInput, safeAgentsMd } from "../context"
-import { LOGO_HEIGHT } from "../logo"
+import { CHROME_HEIGHT, LOGO_HEIGHT, logoTopPad } from "../logo"
 import { ContextLine, LogoMark } from "./status"
 import { Transcript, clampItems, itemLines, itemsFromHistory, type TItem } from "./transcript"
 import { Input } from "./input"
@@ -84,8 +84,8 @@ export function App(props: { env: TuiEnv; onWheel?: (fn: (d: number) => void) =>
   }, [props.onWheel])
 
   // page size = the visible transcript window (same formula as clampItems:
-  // chrome 5 below + the LogoMark block above), so one PageUp scrolls exactly a page
-  const budget = () => Math.max(3, ((stdout as any)?.rows ?? 24) - 5 - LOGO_HEIGHT)
+  // chrome below + the LogoMark block above), so one PageUp scrolls exactly a page
+  const budget = () => Math.max(3, ((stdout as any)?.rows ?? 24) - CHROME_HEIGHT - LOGO_HEIGHT)
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
@@ -204,15 +204,16 @@ export function App(props: { env: TuiEnv; onWheel?: (fn: (d: number) => void) =>
   }
 
   // ink resolves height="100%" to auto — constrain manually from real rows.
-  // Chrome below the window: composer box 3 + context line 1 + retry 1 = 5;
-  // the LogoMark block above is subtracted too.
+  // The splash pad is 0 as soon as there is any item, so the window only loses
+  // rows to the padding while the transcript is empty (see logoTopPad).
   const rows = (stdout as any)?.rows ?? 24
-  const visible = clampItems(items, Math.max(3, rows - 5 - LOGO_HEIGHT), scroll)
+  const pad = items.length === 0 ? logoTopPad(rows) : 0
+  const visible = clampItems(items, Math.max(3, rows - CHROME_HEIGHT - LOGO_HEIGHT - pad), scroll)
   const agentsMd = safeAgentsMd(env.projectRoot)
 
   return (
     <Box flexDirection="column">
-      <LogoMark />
+      <LogoMark topPad={pad} />
       <Box flexDirection="column">
         <Transcript items={visible} />
       </Box>
