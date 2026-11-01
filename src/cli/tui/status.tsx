@@ -32,7 +32,7 @@ export function ContextLine(p: { agent?: Agent; agentsMd: string | null }) {
 // exact gradient (#00f5a0 → #00d9f5) for both TUI and plain REPL.
 export function LogoMark() {
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" alignItems="center">
       {LOGO_ROWS.map((l, i) => (
         <Text key={i} color={logoHex(i)}>{l}</Text>
       ))}

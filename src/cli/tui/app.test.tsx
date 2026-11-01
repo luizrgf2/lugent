@@ -56,6 +56,18 @@ test("big L-mark logo renders above the status box, outside its border", async (
   expect(markRow).toBeLessThan(boxRow)
 })
 
+test("big L-mark logo is horizontally centered on the screen", async () => {
+  const { lastFrame } = renderTui(<App env={fakeEnv()} />)
+  await new Promise(r => setTimeout(r, 30))
+  const lines = lastFrame().split("\n")
+  const markIdx = lines.findIndex(l => l.includes("▀▀▀▀▀▀▀▀"))
+  const base = lines[markIdx]
+  const width = Math.max(...lines.map(l => [...l].length))
+  const start = [...base].indexOf("▀")
+  // the 16-wide bar sits around the middle (±4 cols) — not flush left
+  expect(Math.abs(start - Math.floor(width / 2 - 8))).toBeLessThanOrEqual(4)
+})
+
 const askTool = {
   name: "askme", description: "ask", schema: { type: "object", properties: {} },
   permission: "ask" as const, execute: async () => ({ output: "ok" }),
