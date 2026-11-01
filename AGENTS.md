@@ -66,6 +66,7 @@ Documentation pattern for this repo: **one small doc per topic, never one big fi
 | branch or commit | `.agents/skills/git-conventions/SKILL.md` |
 | `src/cli/ui.ts` (ANSI, box, spinner) | zero-dep: no color/TUI lib; gate all styling on `isTTY` so piped output stays plain; keep pure formatters tested in `ui.test.ts` |
 | `src/cli/tui/*` (Ink TUI) | reasoning is display-only (never persisted); core must not import react/ink; test via `harness.tsx` (ink-testing-library is incompatible with ink v8); see `docs/architecture/tui.md` |
+| `src/cli/tui/mouse.ts` (wheel scroll, stdin proxy) | `docs/decisions/cli-tui.md` 2026-11-01 — ink has no mouse support; the proxy must keep one chunk per read or `\r` glues to text |
 | a decision with a trade-off | append to the area file under `docs/decisions/` (index: `docs/decisions.md`; format in the skill above) |
 | a request near v1's edge (subagents, MCP, compaction) | `docs/future-features.md` — check the trigger before designing |
 | anything else | `docs/README.md` — the flat map of the whole docs tree |

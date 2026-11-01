@@ -43,6 +43,14 @@ Why: the URL is ~300 chars, so ink hard-wraps it at the container width and draw
 
 Cost if wrong: the URL line visibly overflows past the panel's right edge on narrow terminals (accepted: readability of the box beats a URL you cannot copy), and the `width={100000}` + `wrap="truncate"` combination is load-bearing ink trivia — if ink changes how it measures oversized text, the URL truncates instead of overflowing, which the regression test in `mcp-list.test.tsx` catches by asserting the whole URL sits on one line with no `│`.
 
+## 2026-11-01 — Mouse wheel scroll goes through a stdin proxy, not ink
+
+Decision: `mouse.ts` wraps `process.stdin` in a queue-backed stream handed to `render({ stdin })`. It strips all SGR mouse reports (`ESC[<…M/m`) before ink's parser sees them, switches modes 1000+1006 on around the TUI session and off on exit, and surfaces wheel notches (−1/+1) on a side channel that `App` maps to 3 lines of transcript scroll. `runTui` accepts an `io` override for tests.
+
+Why: ink has no mouse handling at all — a wheel report reaches `useInput` as garbage text (ESC stripped), so the transcript never moves and the wheel looks broken. Two sub-decisions came out of the ink internals: (a) the proxy is a queue with `read()`, not a PassThrough, because ink drains with `while (stdin.read())` and PassThrough coalesces writes in the same tick into one chunk, which parses as text — a `\r` glued to "go" never becomes Return; (b) `setEncoding` must stay the proxy's own (mirroring it to the source leaves Buffers, which the input parser silently drops).
+
+Cost if wrong: any terminal that ignores 1000/1006 gets no wheel scrolling (keyboard scroll still works — shift+arrows, Home/End, PageUp/PageDown); a terminal that emits mouse reports in the legacy X10 encoding is not handled, so those reports would reach ink as junk. Also, mouse reporting must be restored on every exit path — `process.on("exit")` covers crashes, but a `SIGKILL` leaves the user's shell with 1000/1006 enabled (text selection swallowed) until `reset`.
+
 ---
 
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.

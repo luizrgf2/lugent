@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Box, Text, render, useApp, useInput, useStdout } from "ink"
 import type { ReplEnv } from "../repl"
 import type { Agent } from "../../core/types"
@@ -17,6 +17,7 @@ import { SkillList } from "./skill-list"
 import { PermissionMode } from "./permission-mode"
 import { SessionPicker } from "./session-picker"
 import { McpList } from "./mcp-list"
+import { createMouseStdin, MOUSE_ON, MOUSE_OFF } from "./mouse"
 import type { McpServerState } from "../../core/mcp/manager"
 
 export type TuiEnv = ReplEnv & {
@@ -30,7 +31,7 @@ function patchTail(items: TItem[], item: TItem): TItem[] {
     : [...items, item]
 }
 
-export function App(props: { env: TuiEnv }) {
+export function App(props: { env: TuiEnv; onWheel?: (fn: (d: number) => void) => () => void }) {
   const { exit } = useApp()
   const env = props.env
   const [items, setItems] = useState<TItem[]>([])
@@ -69,6 +70,19 @@ export function App(props: { env: TuiEnv }) {
 
   const closeOverlay = () => { overlayRef.current = null; setOverlay(null) }
 
+  // Mouse wheel (see mouse.ts): three lines per notch — the usual pager step; a
+  // full page per notch would feel like it jumps. Ignored while an overlay or a
+  // permission dialog owns the input.
+  const WHEEL_LINES = 3
+  useEffect(() => {
+    if (!props.onWheel) return
+    return props.onWheel(d => {
+      if (overlayRef.current || askRef.current) return
+      scrollRef.current = Math.max(0, scrollRef.current - d * WHEEL_LINES)
+      setScroll(scrollRef.current)
+    })
+  }, [props.onWheel])
+
   // page size = the visible transcript window (same formula as clampItems:
   // chrome 5 below + the LogoMark block above), so one PageUp scrolls exactly a page
   const budget = () => Math.max(3, ((stdout as any)?.rows ?? 24) - 5 - LOGO_HEIGHT)
@@ -94,6 +108,12 @@ export function App(props: { env: TuiEnv }) {
     if (overlayRef.current || ask) return   // overlays/dialogs own the keys
     if (key.pageUp) { scrollRef.current += budget(); setScroll(scrollRef.current); return }
     if (key.pageDown) { scrollRef.current = Math.max(0, scrollRef.current - budget()); setScroll(scrollRef.current) }
+    // Keyboard-only scroll (no PageUp key on many keyboards):
+    // shift+up/down = page up/down, home = top, end = tail. plain up/down/left/right stay untouched.
+    else if (key.shift && key.upArrow) { scrollRef.current += budget(); setScroll(scrollRef.current); return }
+    else if (key.shift && key.downArrow) { scrollRef.current = Math.max(0, scrollRef.current - budget()); setScroll(scrollRef.current); return }
+    else if (key.home) { scrollRef.current = 1e9; setScroll(scrollRef.current); return }
+    else if (key.end) { scrollRef.current = 0; setScroll(0); return }
   })
 
   async function submit(text: string) {
@@ -299,12 +319,25 @@ export function App(props: { env: TuiEnv }) {
   )
 }
 
-export function runTui(env: TuiEnv): Promise<void> {
+export function runTui(env: TuiEnv, io: { stdin?: NodeJS.ReadStream; stdout?: NodeJS.WriteStream } = {}): Promise<void> {
   // Ink paints its first frame below whatever is already on screen and only
   // clears when a previous frame exists, so the shell prompt + startup lines
   // would sit above the TUI. Erase the visible viewport (home + erase-down —
   // scrollback stays intact) before the first render.
-  process.stdout.write("\x1b[H\x1b[J")
-  const inst = render(<App env={env} />, { exitOnCtrlC: false })
-  return inst.waitUntilExit()
+  const stdin = io.stdin ?? process.stdin
+  const stdout = io.stdout ?? process.stdout
+  stdout.write("\x1b[H\x1b[J")
+  // Mouse wheel: ink has no mouse support, so reports are stripped off stdin by
+  // a proxy and turned into scroll deltas (see mouse.ts). Reporting is switched
+  // on around the session and restored on the way out — leaving 1000/1006 on
+  // would break text selection in the user's shell.
+  const mouse = createMouseStdin(stdin)
+  stdout.write(MOUSE_ON)
+  const restore = () => { stdout.write(MOUSE_OFF); mouse.close() }
+  process.on("exit", restore)
+  const inst = render(<App env={env} onWheel={mouse.onWheel} />, { exitOnCtrlC: false, stdin: mouse.stdin as any, stdout })
+  return inst.waitUntilExit().finally(() => {
+    process.off("exit", restore)
+    restore()
+  })
 }

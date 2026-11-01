@@ -1,9 +1,64 @@
 import { test, expect } from "bun:test"
 import { rmSync, mkdtempSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { App } from "./app"
+import { EventEmitter } from "node:events"
+import { PassThrough } from "node:stream"
+import { App, runTui } from "./app"
 import { renderTui } from "./harness"
+import { MOUSE_ON, MOUSE_OFF } from "./mouse"
 import { Store } from "../../core/store"
+
+const WHEEL_UP = "\x1b[<64;5;5M"
+const WHEEL_DOWN = "\x1b[<65;5;5M"
+
+/** stdout double: collects frames, reports TTY + rows. */
+export function fakeStdout(rows = 30) {
+  const frames: string[] = []
+  const stream: any = new EventEmitter()
+  Object.assign(stream, {
+    columns: 100, rows, isTTY: true,
+    write(s: string, cb?: (e?: Error | null) => void) { frames.push(s); cb?.(null); return true },
+  })
+  const out = {
+    stream, frames,
+    lastFrame() {
+      // The renderer also writes bare escape sequences (mouse modes, cursor
+      // moves); the frame to assert on is the last one with visible text.
+      for (let i = frames.length - 1; i >= 0; i--) {
+        const s = stripAnsi(frames[i])
+        if (s.trim()) return s
+      }
+      return ""
+    },
+  }
+  return out
+}
+
+/**
+ * stdin double: a real flowing stream (the mouse bridge listens on `data`) with
+ * raw-mode controls. `type` writes one chunk per call — a mouse report must stay
+ * whole or the parser can never match it.
+ */
+export function fakeStdin() {
+  const stream: any = new PassThrough()
+  // Raw-mode controls only: overriding pause/resume/on would kill the stream's
+  // own flow (the mouse bridge attaches a `data` listener and resumes it).
+  stream.isTTY = true
+  stream.isRaw = true
+  stream.setRawMode = () => stream
+  stream.ref = () => stream
+  stream.unref = () => stream
+  return {
+    stream,
+    /** One key per write, like a raw-mode terminal (a coalesced "go\r" parses as text). */
+    type(s: string) { for (const ch of s) stream.write(ch) },
+    /** One chunk verbatim — for escape sequences that must stay whole. */
+    write(s: string) { stream.write(s) },
+  }
+}
+
+const stripAnsi = (s: string): string =>
+  s.replace(/\x1B\[[0-9;?]*[A-Za-z]/g, "").replace(/\x1B\][^\x07]*\x07/g, "")
 
 let dbN = 0
 
@@ -285,6 +340,73 @@ test("ctrl+c on a later turn aborts instead of exiting (counter resets per turn)
   const exited = await Promise.race([waitUntilExit().then(() => true), new Promise(r => setTimeout(() => r(false), 200))])
   expect(exited).toBe(false)
   expect(lastFrame()).toContain(">") // composer still alive
+})
+
+test("keyboard-only scroll: shift+up/down, home/end work like pageUp/pageDown", async () => {
+  const prov = {
+    chat: async (a: any) => {
+      for (let i = 0; i < 60; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
+      return { content: "", toolCalls: [] }
+    },
+  }
+  const env = fakeEnv({ tools: [], makeProvider: () => prov })
+  const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  await new Promise(r => setTimeout(r, 120))
+  expect(lastFrame()).toContain("line-59")
+  expect(lastFrame()).not.toContain("line-00")
+  type("\x1b[1;2A")                        // shift+up: scroll one page up
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).not.toContain("line-59")
+  type("\x1b[1;2B")                        // shift+down: back to tail
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).toContain("line-59")
+  type("\x1b[H")                           // home: jump to the very top
+  await new Promise(r => setTimeout(r, 60))
+  const f = lastFrame()
+  expect(f).toContain("line-00")
+  expect(f).not.toContain("line-59")
+  type("\x1b[F")                           // end: snap back to the tail
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).toContain("line-59")
+  expect(lastFrame()).not.toContain("line-00")
+})
+
+test("runTui enables mouse reporting, routes wheel to the transcript, and restores the mode on exit", async () => {
+  const prov = {
+    chat: async (a: any) => {
+      for (let i = 0; i < 60; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
+      return { content: "", toolCalls: [] }
+    },
+  }
+  const env = fakeEnv({ tools: [], makeProvider: () => prov })
+  const out = fakeStdout(30)
+  const inStream = fakeStdin()
+  const p = runTui(env, { stdin: inStream.stream as any, stdout: out.stream as any })
+  await new Promise(r => setTimeout(r, 60))
+  expect(out.frames.join("")).toContain(MOUSE_ON)   // reporting switched on
+
+  inStream.type("go\r")
+  await new Promise(r => setTimeout(r, 150))
+  expect(out.lastFrame()).toContain("line-59")
+  expect(out.lastFrame()).not.toContain("line-00")
+
+  inStream.write(WHEEL_UP)                           // one wheel notch up
+  await new Promise(r => setTimeout(r, 80))
+  expect(out.lastFrame()).not.toContain("line-59")   // the wheel moved the view
+  inStream.write(WHEEL_UP.repeat(20))                // 3 lines per notch: enough to pass the top
+  await new Promise(r => setTimeout(r, 120))
+  expect(out.lastFrame()).toContain("line-00")       // and it reaches the very top
+
+  inStream.write(WHEEL_DOWN.repeat(40))              // wheel down: back toward the tail
+  await new Promise(r => setTimeout(r, 120))
+  expect(out.lastFrame()).toContain("line-59")       // the wheel scrolled back down
+
+  inStream.type("\x03")                              // exit
+  inStream.type("\x03")
+  await p
+  expect(out.frames.join("")).toContain(MOUSE_OFF)   // modes restored on the way out
 })
 
 test("rapid double ctrl+c exits the app", async () => {
