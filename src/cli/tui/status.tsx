@@ -1,5 +1,6 @@
 import { Box, Text, useAnimation } from "ink"
 import type { Agent } from "../../core/types"
+import { LOGO_ROWS, logoHex } from "../logo"
 
 const FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".split("")
 
@@ -26,31 +27,14 @@ export function ContextLine(p: { agent?: Agent; agentsMd: string | null }) {
   )
 }
 
-// Raster of docs/lugent.svg's mark (chevron + base bar + agent dot), drawn
-// with half-blocks: 16 cols × 10 rows, one gradient color per row
-// (#00F5A0 → #00D9F5, endpoints to mid). Each line is one full-width row.
-const LOGO_ROWS = [
-  "██▄             ",
-  " ▀██▄           ",
-  "   ▀██▄         ",
-  "     ▀██▄       ",
-  "      ▄███▀ ●   ",
-  "   ▄███▀        ",
-  " ▄███▀          ",
-  "███▀            ",
-  "▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄",
-  "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
-]
-
-/** The big mark, rendered alone above everything (outside the status box). */
+// The big L-mark, rendered alone above everything (outside the status box).
+// Rows and colors come from src/cli/logo.ts — one shared raster + the SVG's
+// exact gradient (#00f5a0 → #00d9f5) for both TUI and plain REPL.
 export function LogoMark() {
-  // named colors: readable on both dark and light terminal themes, unlike
-  // the SVG's exact gradient stops which can wash out on light backgrounds
-  const GRADIENT = ["#00C853", "#00C853", "#00B86B", "#00A884", "#0098A0", "#0088BB", "#0078D7", "#0078D7", "#0098A0", "#00B86B"]
   return (
     <Box flexDirection="column">
       {LOGO_ROWS.map((l, i) => (
-        <Text key={i} color={GRADIENT[i] ?? "#00C853"}>{l}</Text>
+        <Text key={i} color={logoHex(i)}>{l}</Text>
       ))}
     </Box>
   )
