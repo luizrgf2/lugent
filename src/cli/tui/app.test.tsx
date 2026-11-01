@@ -90,7 +90,7 @@ async function waitFor(cond: () => boolean, ms = 3000) {
 test("app skeleton renders wordmark, model and empty transcript", async () => {
   const { lastFrame } = renderTui(<App env={fakeEnv()} />)
   await new Promise(r => setTimeout(r, 30))
-  expect(lastFrame()).toContain("LUGENT")
+  expect(lastFrame()).toContain("█     █   █")   // block L U of the wordmark
   expect(lastFrame()).toContain("9router · glm/glm-5.2")
 })
 
@@ -128,10 +128,10 @@ test("big L-mark logo opens vertically centered on the splash screen", async () 
   await new Promise(r => setTimeout(r, 30))
   const lines = lastFrame().split("\n")
   const markIdx = lines.findIndex(l => l.includes("██▄"))
-  const wmIdx = lines.findIndex(l => l.trim() === "LUGENT")
+  const wmIdx = lines.findLastIndex(l => l.includes("█████"))  // wordmark bottom row
   // blank rows above and below: the logo block's middle sits around the middle
-  // of the 30-row viewport (pad = (30 - LOGO_HEIGHT) / 2 = 9)
-  expect(markIdx).toBe(9)
+  // of the 30-row viewport (pad = (30 - LOGO_HEIGHT) / 2 = 7)
+  expect(markIdx).toBe(7)
   expect(lines.slice(0, markIdx).every(l => l.trim() === "")).toBe(true)
   const centre = (markIdx + wmIdx) / 2
   expect(Math.abs(centre - (30 - 1) / 2)).toBeLessThanOrEqual(2)
@@ -142,7 +142,7 @@ test("splash padding collapses once the transcript has content", async () => {
   const env = fakeEnv({ tools: [], makeProvider: () => provider })
   const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
   await new Promise(r => setTimeout(r, 30))
-  expect(lastFrame().split("\n").findIndex(l => l.includes("██▄"))).toBe(9)
+  expect(lastFrame().split("\n").findIndex(l => l.includes("██▄"))).toBe(7)
   type("go\r")
   await waitFor(() => lastFrame().includes("hello"))
   const lines = lastFrame().split("\n")
@@ -160,7 +160,7 @@ test("LUGENT wordmark renders bold right below the mark, centered", async () => 
   const markIdx = lines.findIndex(l => l.includes("▀▀▀▀▀▀▀▀"))
   expect(markIdx).toBeGreaterThanOrEqual(0)
   const wm = lines[markIdx + 1] ?? ""
-  expect(wm.trim()).toBe("LUGENT")
+  expect(wm.trim()).toContain("█     █   █")   // block L U, first wordmark row
 })
 
 test("provider/model is always visible on the bottom line next to the spinner", async () => {
@@ -295,18 +295,18 @@ test("pageUp scrolls transcript up; pageDown scrolls back; typing resets to tail
   type("go\r")
   await new Promise(r => setTimeout(r, 100))
   expect(lastFrame()).not.toContain("line-00")   // tail view
-  type("\x1b[5~")                                 // pageUp: exactly one window (12 lines)
+  type("\x1b[5~")                                 // pageUp: exactly one window (9 lines)
   await new Promise(r => setTimeout(r, 80))
   expect(lastFrame()).not.toContain("line-59")    // tail clipped
-  expect(lastFrame()).toContain("line-37")        // one page up visible
-  for (let i = 0; i < 4; i++) {                   // 4 more pageUps reach the top
+  expect(lastFrame()).toContain("line-43")        // one page up visible
+  for (let i = 0; i < 5; i++) {                   // 5 more pageUps reach the top
     type("\x1b[5~")
     await new Promise(r => setTimeout(r, 80))
   }
   const f = lastFrame()
   expect(f).toContain("line-00")                  // oldest content visible
   expect(f).not.toContain("line-59")              // tail clipped
-  for (let i = 0; i < 5; i++) {                   // pageDown ×5 returns to tail
+  for (let i = 0; i < 6; i++) {                   // pageDown ×6 returns to tail
     type("\x1b[6~")
     await new Promise(r => setTimeout(r, 80))
   }

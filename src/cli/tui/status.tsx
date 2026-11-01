@@ -1,6 +1,6 @@
 import { Box, Text, useAnimation } from "ink"
 import type { Agent } from "../../core/types"
-import { LOGO_ROWS, logoHex } from "../logo"
+import { LOGO_ROWS, WORDMARK_ROWS, WORDMARK_SPLIT, logoHex } from "../logo"
 
 const FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".split("")
 
@@ -40,22 +40,26 @@ export function ContextLine(p: { agent?: Agent; agentsMd: string | null; yolo?: 
   )
 }
 
-// The big L-mark with the wordmark beneath — rendered alone above everything
-// (no border). Rows and colors come from src/cli/logo.ts — one shared raster
-// + the SVG's exact gradient (#00f5a0 → #00d9f5) for both TUI and plain REPL.
-// `topPad` (blank rows above, from logoTopPad) is what opens the splash screen
-// with the mark in the vertical middle; it is 0 as soon as the transcript has
-// content, so the mark keeps its place at the top during a session.
+// The big L-mark with the block-letter wordmark beneath — rendered alone
+// above everything (no border). Rows and colors come from src/cli/logo.ts —
+// one shared raster + the SVG's exact gradient (#00f5a0 → #00d9f5) for both
+// TUI and plain REPL. `topPad` (blank rows above, from logoTopPad) is what
+// opens the splash screen with the mark in the vertical middle; it is 0 as
+// soon as the transcript has content, so the mark keeps its place at the
+// top during a session.
 export function LogoMark({ topPad = 0 }: { topPad?: number } = {}) {
+  const cyan = logoHex(LOGO_ROWS.length - 1)
   return (
     <Box flexDirection="column" alignItems="center" marginBottom={1} marginTop={topPad}>
       {LOGO_ROWS.map((l, i) => (
         <Text key={i} color={logoHex(i)}>{l}</Text>
       ))}
-      <Text bold>
-        <Text>LUG</Text>
-        <Text color={logoHex(LOGO_ROWS.length - 1)}>ENT</Text>
-      </Text>
+      {WORDMARK_ROWS.map((l, i) => (
+        <Text key={`w${i}`} bold>
+          <Text>{l.slice(0, WORDMARK_SPLIT)}</Text>
+          <Text color={cyan}>{l.slice(WORDMARK_SPLIT)}</Text>
+        </Text>
+      ))}
     </Box>
   )
 }

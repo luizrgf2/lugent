@@ -1,5 +1,5 @@
 import { styleText } from "node:util"
-import { LOGO_ROWS, logoAnsi } from "./logo"
+import { LOGO_ROWS, WORDMARK_ROWS, WORDMARK_SPLIT, logoAnsi } from "./logo"
 
 export const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
@@ -43,11 +43,15 @@ export function cyan(s: string): string { return tty ? styleText("cyan", s) : s 
  * when piped.
  */
 export function logo(): string {
-  const wordmark = tty ? `\x1b[1m\x1b[38;2;255;255;255mLUG\x1b[0m\x1b[1m\x1b[38;2;0;245;160mENT\x1b[0m` : "LUGENT"
-  const pad = Math.max(0, Math.floor((16 - 6) / 2))   // center under the 16-wide mark
-  return LOGO_ROWS.map((l, y) =>
-    tty ? `${logoAnsi(y)}${l}\x1b[0m` : l
-  ).join("\n") + "\n" + " ".repeat(pad) + wordmark
+  const cyan = logoAnsi(LOGO_ROWS.length - 1)
+  const wordPad = Math.max(0, Math.floor((16 - [...WORDMARK_ROWS[0]].length) / 2))
+  const raster = LOGO_ROWS.map((l, y) =>
+    tty ? `${logoAnsi(y)}${l}\x1b[0m` : l)
+  const wordmark = WORDMARK_ROWS.map(l => {
+    const row = " ".repeat(wordPad) + l
+    return tty ? `\x1b[1m${row.slice(0, WORDMARK_SPLIT)}\x1b[0m\x1b[1m${cyan}${row.slice(WORDMARK_SPLIT)}\x1b[0m` : row
+  })
+  return [...raster, ...wordmark].join("\n")
 }
 
 export class Spinner {

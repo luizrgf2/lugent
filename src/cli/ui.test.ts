@@ -4,14 +4,21 @@ import { box, truncate, glyph, frames, padLine, logo } from "./ui"
 test("logo renders the L-mark with prompt chevron and cursor dot", () => {
   const out = logo()
   const lines = out.split("\n")
-  expect(lines.length).toBeGreaterThanOrEqual(3)
+  expect(lines.length).toBe(15)               // 10 raster rows + 5 wordmark rows
   expect(lines[0]).toContain("██▄")         // chevron head of the 'L'/prompt mark
   expect(lines[8]).toContain("▄▄▄▄")        // base bar (the '_' cursor)
-  expect(lines.at(-1)).toContain("LUGENT") // wordmark (plain when piped)
+  expect(lines[10]).toContain("█     █   █")  // block wordmark: L U
+  expect(lines[14]).toContain("█████")        // wordmark base row (L/U/E feet)
 })
 
 test("logo mark lines are equal visual width", () => {
   const lines = logo().split("\n").slice(0, 10)   // the mark block only
+  expect(new Set(lines.map((l) => [...l].length)).size).toBe(1)
+})
+
+test("logo wordmark rows are equal visual width", () => {
+  const lines = logo().split("\n").slice(10)
+  expect(lines.length).toBe(5)
   expect(new Set(lines.map((l) => [...l].length)).size).toBe(1)
 })
 

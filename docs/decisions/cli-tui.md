@@ -59,6 +59,14 @@ Why: the mark hung off the top because the layout is a plain `flexDirection="col
 
 Cost if wrong: the logo visibly jumps from the middle to the top on the first message (intended, but it is a layout shift a user may read as a bug); the pad is derived from `stdout.rows` read during render, so a resize mid-splash recenters on the next frame but a terminal that reports `rows` late (or 0) gets no padding rather than a broken frame. The centering is vertical only — horizontal centering is still ink's `alignItems="center"`, unchanged.
 
+## 2026-11-01 — The wordmark is block letters, so the logo grew to 16 rows
+
+Decision: "LUGENT" is rasterized as five rows of 5×5 glyphs (`WORDMARK_ROWS` in `src/cli/logo.ts`, one space between letters, 35 columns) instead of a single bold text line, with `WORDMARK_SPLIT` marking where the white `LUG` hands off to the cyan `ENT`. `LOGO_HEIGHT` becomes `LOGO_ROWS + WORDMARK_ROWS + 1` = 16.
+
+Why: a one-line wordmark reads as a caption under a mark that is ten rows tall — the name was the smallest part of its own splash. Block letters make the name the subject without touching the mark or the gradient. Deriving `LOGO_HEIGHT` from `WORDMARK_ROWS.length` (not a new literal) keeps it correct if a glyph row is ever added.
+
+Cost if wrong: the splash is 4 rows taller, so the transcript window loses 4 rows of budget (13 → 9 on a 30-row terminal) and PageUp/PageDown move 9 lines instead of 12; the two existing tests that pinned 12/9 encoded that coupling and were updated with the numbers they now guard. On a terminal under ~21 rows `logoTopPad` returns 0 and the splash loses its centering, which is the same graceful degradation as before, just reached sooner.
+
 ---
 
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.

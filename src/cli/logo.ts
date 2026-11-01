@@ -17,10 +17,30 @@ export const LOGO_ROWS = [
   "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
 ]
 
-// Rendered height of <LogoMark/> in the TUI: raster rows + 1 wordmark line
-// + 1 bottom margin. The transcript window must subtract this exact number
-// or every frame is taller than the terminal and scrolls history off-screen.
-export const LOGO_HEIGHT = LOGO_ROWS.length + 2
+// Block-letter wordmark (5×5 glyphs, one space between letters) — "LUGENT"
+// rendered large instead of one text line. Rows are uniform width so the
+// plain REPL can pad the raster to match.
+const GLYPHS: Record<string, string[]> = {
+  L: ["█    ", "█    ", "█    ", "█    ", "█████"],
+  U: ["█   █", "█   █", "█   █", "█   █", "█████"],
+  G: [" ████", "█    ", "█  ██", "█   █", " ████"],
+  E: ["█████", "█    ", "████ ", "█    ", "█████"],
+  N: ["█   █", "██  █", "█ █ █", "█  ██", "█   █"],
+  T: ["█████", "  █  ", "  █  ", "  █  ", "  █  "],
+}
+
+const WORD = ["L", "U", "G", "E", "N", "T"]
+export const WORDMARK_ROWS = Array.from({ length: 5 }, (_, y) =>
+  WORD.map(ch => GLYPHS[ch][y]).join(" "))
+
+// Char index where "LUG" ends and the cyan "ENT" tail begins (two-tone split):
+// L,U,G are 5 wide + 1 gap each → LUG spans [0,18).
+export const WORDMARK_SPLIT = 3 * 6
+
+// Rendered height of <LogoMark/> in the TUI: raster rows + wordmark block
+// rows + 1 bottom margin. The transcript window must subtract this exact
+// number or every frame is taller than the terminal and scrolls history off-screen.
+export const LOGO_HEIGHT = LOGO_ROWS.length + WORDMARK_ROWS.length + 1
 
 // Rows the TUI keeps below the transcript: composer box 3 + context line 1
 // + retry line 1. Shared so the window budget and the splash centering can
