@@ -67,6 +67,14 @@ Why: a one-line wordmark reads as a caption under a mark that is ten rows tall �
 
 Cost if wrong: the splash is 4 rows taller, so the transcript window loses 4 rows of budget (13 → 9 on a 30-row terminal) and PageUp/PageDown move 9 lines instead of 12; the two existing tests that pinned 12/9 encoded that coupling and were updated with the numbers they now guard. On a terminal under ~21 rows `logoTopPad` returns 0 and the splash loses its centering, which is the same graceful degradation as before, just reached sooner.
 
+## 2026-11-01 — A blank row separates the transcript from the chrome
+
+Decision: `ContextLine` gets `marginTop={1}` and `CHROME_HEIGHT` goes 5 → 6 (composer 3 + context 1 + retry 1 + blank 1). The blank is charged to the transcript window budget like any other chrome row.
+
+Why: the context line is always on screen (that is the point of it), so the last transcript line sat flush against `§ AGENTS.md loaded │ agent build` and an answer read as the status bar's first row. Every other boundary in the transcript already has a row (items get `marginTop={1}`); the chrome was the one place the mark and the text ran together.
+
+Cost if wrong: the transcript loses one more row of budget (9 → 8 on a 30-row terminal, one PageUp is 8 lines) — the same trade as the wordmark, and the same tests carry the numbers. If the padding reads as a gap on a very short terminal it degrades with the rest of the splash (pad 0), never as an overflow.
+
 ---
 
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.

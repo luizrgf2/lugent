@@ -1,13 +1,16 @@
 import { test, expect } from "bun:test"
-import { LOGO_HEIGHT, LOGO_ROWS, WORDMARK_ROWS, WORDMARK_SPLIT, logoHex, logoAnsi, logoTopPad } from "./logo"
+import { CHROME_HEIGHT, LOGO_HEIGHT, LOGO_ROWS, WORDMARK_ROWS, WORDMARK_SPLIT, logoHex, logoAnsi, logoTopPad } from "./logo"
 
 test("logoTopPad centers the mark on the splash screen, without overflow", () => {
   // Upper pad = half the rows left over by the mark, so mark + pad is centered
-  // in the viewport (30 rows, mark at 7..22 → center 14.5).
+  // in the viewport (30 rows: (30-16)/2 = 7, and 8 rows are left above the chrome).
   expect(logoTopPad(30)).toBe(7)
   expect(logoTopPad(40)).toBe(12)
-  expect(logoTopPad(24)).toBe(3)
+  // The cap binds before the centering does: (24-16)/2 = 4 > the 2 rows left.
+  expect(logoTopPad(24)).toBe(2)
+  expect(logoTopPad(23)).toBe(1)
   // Capped by the room left above the chrome: pad + logo + chrome ≤ rows.
+  expect(logoTopPad(22)).toBe(0)
   expect(logoTopPad(20)).toBe(0)
   expect(logoTopPad(17)).toBe(0)
   expect(logoTopPad(12)).toBe(0)
@@ -41,6 +44,13 @@ test("wordmark is block letters, uniform width, split inside the row", () => {
 
 test("raster rows are equal width", () => {
   expect(new Set(LOGO_ROWS.map(l => [...l].length)).size).toBe(1)
+})
+
+test("chrome height counts the transcript's bottom margin too", () => {
+  // composer box 3 + context line 1 + retry line 1 + transcript bottom blank 1:
+  // the window budget must reserve the blank row or the frame is 1 line taller
+  // than the terminal and the logo is painted into scrollback.
+  expect(CHROME_HEIGHT).toBe(6)
 })
 
 test("hex gradient samples the svg diagonal (monotonic green → cyan)", () => {

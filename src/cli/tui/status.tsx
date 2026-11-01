@@ -23,7 +23,7 @@ export function ContextLine(p: { agent?: Agent; agentsMd: string | null; yolo?: 
   const { frame } = useAnimation({ interval: 80, isActive: !!p.busy })
   if (!p.agentsMd && !p.agent && !p.yolo && !p.model) return null
   return (
-    <Box paddingX={1} justifyContent="space-between">
+    <Box paddingX={1} justifyContent="space-between" marginTop={1}>
       <Text>
         {p.agentsMd && <Text color="yellow">§ AGENTS.md loaded </Text>}
         {p.agent && <Text color={p.agent.color ?? "magenta"}>│ agent {p.agent.id} </Text>}

@@ -295,18 +295,21 @@ test("pageUp scrolls transcript up; pageDown scrolls back; typing resets to tail
   type("go\r")
   await new Promise(r => setTimeout(r, 100))
   expect(lastFrame()).not.toContain("line-00")   // tail view
-  type("\x1b[5~")                                 // pageUp: exactly one window (9 lines)
+  type("\x1b[5~")                                 // pageUp: exactly one window (8 lines)
   await new Promise(r => setTimeout(r, 80))
   expect(lastFrame()).not.toContain("line-59")    // tail clipped
-  expect(lastFrame()).toContain("line-43")        // one page up visible
-  for (let i = 0; i < 5; i++) {                   // 5 more pageUps reach the top
+  expect(lastFrame()).toContain("line-45")        // one page up visible
+  for (let i = 0; i < 7; i++) {                   // 7 more pageUps reach the top
     type("\x1b[5~")
     await new Promise(r => setTimeout(r, 80))
   }
   const f = lastFrame()
   expect(f).toContain("line-00")                  // oldest content visible
+  expect(f).toContain("line-04")                  // the head window, not a blank page
   expect(f).not.toContain("line-59")              // tail clipped
-  for (let i = 0; i < 6; i++) {                   // pageDown ×6 returns to tail
+  for (let i = 0; i < 8; i++) {                   // pageDown ×8 returns to tail
+                             // (one extra: the over-scrolled head clamps, so the
+                             // first down only re-aligns to the oldest window)
     type("\x1b[6~")
     await new Promise(r => setTimeout(r, 80))
   }

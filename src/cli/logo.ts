@@ -43,9 +43,10 @@ export const WORDMARK_SPLIT = 3 * 6
 export const LOGO_HEIGHT = LOGO_ROWS.length + WORDMARK_ROWS.length + 1
 
 // Rows the TUI keeps below the transcript: composer box 3 + context line 1
-// + retry line 1. Shared so the window budget and the splash centering can
-// never disagree about how much room the chrome takes.
-export const CHROME_HEIGHT = 5
+// + retry line 1 + one blank separating the transcript from the chrome.
+// Shared so the window budget and the splash centering can never disagree
+// about how much room the chrome takes.
+export const CHROME_HEIGHT = 6
 
 /**
  * Blank rows above <LogoMark/> while the transcript is still empty, so the
