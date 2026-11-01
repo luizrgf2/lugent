@@ -71,7 +71,7 @@ In a terminal, `lugent` starts a **full-screen TUI** (React + Ink): scrollable t
 
 ```
 ╭─ lugent ───────────────────────────╮
-│ lugent 9router · glm/glm-5.2   ▟▙ LUGENT   ses_1234 │   status: info left, centered L-mark, session right
+│ lugent 9router · glm/glm-5.2                ses_1234 │   status: info left, session right; the big L-mark (chevron + base + agent dot, half-block raster of the SVG logo) renders alone above the box
 ╰────────────────────────────────────╯
 > go                                ▏   composer: Enter submits, ↑/↓ history
   pondering which tool to use…         reasoning (dim, live)

@@ -39,6 +39,23 @@ test("app skeleton renders header and empty transcript", async () => {
   expect(lastFrame()).toContain("9router · glm/glm-5.2")
 })
 
+test("big L-mark logo renders above the status box, outside its border", async () => {
+  const { lastFrame } = renderTui(<App env={fakeEnv()} />)
+  await new Promise(r => setTimeout(r, 30))
+  const frame = lastFrame()
+  // the raster mark: chevron top, base bar, single dot — drawn with half-blocks,
+  // one color per row sampling the SVG gradient
+  expect(frame).toContain("██▄")
+  expect(frame).toContain("▀▀▀▀▀▀▀▀")
+  expect(frame).toContain("●")
+  expect(frame).not.toContain("▟▙")   // old mini-mark inside the box is gone
+  // mark lines sit above the box top border (round border = ╭)
+  const markRow = frame.split("\n").findIndex(l => l.includes("██▄"))
+  const boxRow = frame.split("\n").findIndex(l => l.includes("╭"))
+  expect(markRow).toBeGreaterThanOrEqual(0)
+  expect(markRow).toBeLessThan(boxRow)
+})
+
 const askTool = {
   name: "askme", description: "ask", schema: { type: "object", properties: {} },
   permission: "ask" as const, execute: async () => ({ output: "ok" }),
@@ -141,19 +158,21 @@ test("pageUp scrolls transcript up; pageDown scrolls back; typing resets to tail
   type("go\r")
   await new Promise(r => setTimeout(r, 100))
   expect(lastFrame()).not.toContain("line-00")   // tail view
-  type("\x1b[5~")                                 // pageUp (once: ~23 lines)
+  type("\x1b[5~")                                 // pageUp: exactly one window (12 lines)
   await new Promise(r => setTimeout(r, 80))
   expect(lastFrame()).not.toContain("line-59")    // tail clipped
-  expect(lastFrame()).toContain("line-30")        // older content visible
-  type("\x1b[5~")                                 // pageUp again: reaches the top
-  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).toContain("line-37")        // one page up visible
+  for (let i = 0; i < 4; i++) {                   // 4 more pageUps reach the top
+    type("\x1b[5~")
+    await new Promise(r => setTimeout(r, 80))
+  }
   const f = lastFrame()
   expect(f).toContain("line-00")                  // oldest content visible
   expect(f).not.toContain("line-59")              // tail clipped
-  type("\x1b[6~")                                 // pageDown ×2 returns to tail
-  await new Promise(r => setTimeout(r, 80))
-  type("\x1b[6~")
-  await new Promise(r => setTimeout(r, 80))
+  for (let i = 0; i < 5; i++) {                   // pageDown ×5 returns to tail
+    type("\x1b[6~")
+    await new Promise(r => setTimeout(r, 80))
+  }
   expect(lastFrame()).toContain("line-59")        // back at tail
 })
 

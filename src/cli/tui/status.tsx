@@ -26,6 +26,36 @@ export function ContextLine(p: { agent?: Agent; agentsMd: string | null }) {
   )
 }
 
+// Raster of docs/lugent.svg's mark (chevron + base bar + agent dot), drawn
+// with half-blocks: 16 cols × 10 rows, one gradient color per row
+// (#00F5A0 → #00D9F5, endpoints to mid). Each line is one full-width row.
+const LOGO_ROWS = [
+  "██▄             ",
+  " ▀██▄           ",
+  "   ▀██▄         ",
+  "     ▀██▄       ",
+  "      ▄███▀ ●   ",
+  "   ▄███▀        ",
+  " ▄███▀          ",
+  "███▀            ",
+  "▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄",
+  "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+]
+
+/** The big mark, rendered alone above everything (outside the status box). */
+export function LogoMark() {
+  // named colors: readable on both dark and light terminal themes, unlike
+  // the SVG's exact gradient stops which can wash out on light backgrounds
+  const GRADIENT = ["#00C853", "#00C853", "#00B86B", "#00A884", "#0098A0", "#0088BB", "#0078D7", "#0078D7", "#0098A0", "#00B86B"]
+  return (
+    <Box flexDirection="column">
+      {LOGO_ROWS.map((l, i) => (
+        <Text key={i} color={GRADIENT[i] ?? "#00C853"}>{l}</Text>
+      ))}
+    </Box>
+  )
+}
+
 // Mini L-mark (▟▙) from the ANSI logo / docs/lugent.svg — gradient endpoints
 // as text colors: green chevron, cyan wordmark tail.
 export function Status(p: { provider: string; model: string; sessionId: string; off: string[]; busy: boolean; yolo: boolean; agent?: string }) {
@@ -37,11 +67,6 @@ export function Status(p: { provider: string; model: string; sessionId: string; 
         {p.agent && <Text color="magenta">{p.agent} </Text>}
         {p.off.includes(p.provider) && <Text color="red">OFF</Text>}
       </Box>
-      <Text bold>
-        <Text color="green">▟▙ </Text>
-        <Text>LUG</Text>
-        <Text color="cyan">ENT</Text>
-      </Text>
       <Box>
         {p.yolo && <Text bold color="red">YOLO </Text>}
         {p.busy && <Text color="yellow">⠋ working </Text>}

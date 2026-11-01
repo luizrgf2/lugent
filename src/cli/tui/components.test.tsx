@@ -13,15 +13,14 @@ test("status shows provider, model, short session, OFF warn", () => {
   expect(f).toContain("OFF")
 })
 
-test("status centers the LUGENT mark between left info and right session", () => {
+test("status box keeps the center clear: mark moved to LogoMark above it", () => {
   const { lastFrame } = renderTui(
     <Status provider="9router" model="glm/glm-5.2" sessionId="ses_12345678-abc" off={[]} busy={false} />
   )
   const f = lastFrame()
-  expect(f).toContain("▟▙ LUGENT")            // centered mark
-  const markAt = f.indexOf("▟▙ LUGENT")
-  expect(f.indexOf("9router")).toBeLessThan(markAt)   // left info first
-  expect(f.indexOf("ses_1234")).toBeGreaterThan(markAt) // session right of mark
+  expect(f).not.toContain("▟▙")   // mini-mark removed from the box
+  expect(f).not.toContain("LUGENT") // wordmark lives in LogoMark now
+  expect(f.indexOf("9router")).toBeLessThan(f.indexOf("ses_1234"))   // left info, right session
 })
 
 test("status busy shows working indicator", () => {

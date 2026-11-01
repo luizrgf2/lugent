@@ -6,7 +6,7 @@ import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
 import { toolsForAgent, agentModelTarget, resolveAgent } from "../../core/agents"
 import { buildPromptInput, safeAgentsMd } from "../context"
-import { Status, Spinner, ContextLine } from "./status"
+import { Status, Spinner, ContextLine, LogoMark } from "./status"
 import { Transcript, clampItems, itemLines, itemsFromHistory, type TItem } from "./transcript"
 import { Input } from "./input"
 import { Permissions } from "./permissions"
@@ -68,7 +68,9 @@ export function App(props: { env: TuiEnv }) {
 
   const closeOverlay = () => { overlayRef.current = null; setOverlay(null) }
 
-  const budget = () => Math.max(3, ((stdout as any)?.rows ?? 24) - 7)
+  // page size = the visible transcript window (same formula as clampItems:
+  // chrome rows 8 + the 10-row LogoMark), so one PageUp scrolls exactly a page
+  const budget = () => Math.max(3, ((stdout as any)?.rows ?? 24) - 8 - 10)
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
@@ -181,12 +183,14 @@ export function App(props: { env: TuiEnv }) {
   }
 
   // ink resolves height="100%" to auto — constrain manually from real rows.
+  // The 10-row LogoMark above the window takes its space too.
   const rows = (stdout as any)?.rows ?? 24
-  const visible = clampItems(items, Math.max(3, rows - 8), scroll)   // -1 line: context line above input
+  const visible = clampItems(items, Math.max(3, rows - 8 - 10), scroll)   // -1 line: context line above input
   const agentsMd = safeAgentsMd(env.projectRoot)
 
   return (
     <Box flexDirection="column">
+      <LogoMark />
       <Status provider={provider} model={model} sessionId={session.id} off={env.offProviders} busy={busy} yolo={yolo} agent={agent?.id} />
       <Box flexDirection="column">
         <Transcript items={visible} />
