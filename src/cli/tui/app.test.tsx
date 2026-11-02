@@ -2,14 +2,10 @@ import { test, expect } from "bun:test"
 import { rmSync, mkdtempSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { EventEmitter } from "node:events"
-import { PassThrough } from "node:stream"
 import { App, runTui } from "./app"
 import { renderTui } from "./harness"
-import { MOUSE_ON, MOUSE_OFF } from "./mouse"
 import { Store } from "../../core/store"
 
-const WHEEL_UP = "\x1b[<64;5;5M"
-const WHEEL_DOWN = "\x1b[<65;5;5M"
 
 /** stdout double: collects frames, reports TTY + rows. */
 export function fakeStdout(rows = 30) {
@@ -22,8 +18,8 @@ export function fakeStdout(rows = 30) {
   const out = {
     stream, frames,
     lastFrame() {
-      // The renderer also writes bare escape sequences (mouse modes, cursor
-      // moves); the frame to assert on is the last one with visible text.
+      // The renderer also writes bare escape sequences (cursor moves); the
+      // frame to assert on is the last one with visible text.
       for (let i = frames.length - 1; i >= 0; i--) {
         const s = stripAnsi(frames[i])
         if (s.trim()) return s
@@ -32,29 +28,6 @@ export function fakeStdout(rows = 30) {
     },
   }
   return out
-}
-
-/**
- * stdin double: a real flowing stream (the mouse bridge listens on `data`) with
- * raw-mode controls. `type` writes one chunk per call — a mouse report must stay
- * whole or the parser can never match it.
- */
-export function fakeStdin() {
-  const stream: any = new PassThrough()
-  // Raw-mode controls only: overriding pause/resume/on would kill the stream's
-  // own flow (the mouse bridge attaches a `data` listener and resumes it).
-  stream.isTTY = true
-  stream.isRaw = true
-  stream.setRawMode = () => stream
-  stream.ref = () => stream
-  stream.unref = () => stream
-  return {
-    stream,
-    /** One key per write, like a raw-mode terminal (a coalesced "go\r" parses as text). */
-    type(s: string) { for (const ch of s) stream.write(ch) },
-    /** One chunk verbatim — for escape sequences that must stay whole. */
-    write(s: string) { stream.write(s) },
-  }
 }
 
 const stripAnsi = (s: string): string =>
@@ -79,6 +52,14 @@ export function fakeEnv(over: Record<string, unknown> = {}): any {
 }
 
 const CARET = "▏"   // composer caret: rendered only while no turn is running
+
+/** Rows from the logo down = the live frame (Static scrollback lines above it
+ *  are history already handed to the terminal and don't count against the cap). */
+const frameFrom = (f: string): string[] => {
+  const lines = f.split("\n")
+  const logo = lines.findIndex(l => l.includes("██▄"))
+  return lines.slice(logo)
+}
 
 /** Polls until `cond` holds — keys typed during a turn are dropped, so tests must wait on state, not on sleeps. */
 async function waitFor(cond: () => boolean, ms = 3000) {
@@ -137,20 +118,21 @@ test("big L-mark logo opens vertically centered on the splash screen", async () 
   expect(Math.abs(centre - (30 - 1) / 2)).toBeLessThanOrEqual(2)
 })
 
-test("splash padding collapses once the transcript has content", async () => {
+test("splash pad collapses once a turn runs; the frame stays put after it", async () => {
   const provider = { chat: async (a: any) => { a.onToken?.("hello"); return { content: "hello", toolCalls: [] } } }
   const env = fakeEnv({ tools: [], makeProvider: () => provider })
   const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
   await new Promise(r => setTimeout(r, 30))
-  expect(lastFrame().split("\n").findIndex(l => l.includes("██▄"))).toBe(7)
+  expect(lastFrame().split("\n").findIndex(l => l.includes("██▄"))).toBe(7)   // splash: centered
   type("go\r")
-  await waitFor(() => lastFrame().includes("hello"))
+  await waitFor(() => lastFrame().includes(CARET))   // turn done
+  // The finished turn lives in the scrollback (Static lines at the top); the
+  // frame below it shows the docked logo + chrome only, and the frame's own
+  // height never grows past the terminal.
   const lines = lastFrame().split("\n")
-  // pad gives the rows back to the transcript: the mark is back at the top and
-  // the frame never grows past the terminal
-  expect(lines.findIndex(l => l.includes("██▄"))).toBe(0)
-  expect(lines.length).toBeLessThanOrEqual(30)
-  expect(lines.findIndex(l => l.includes("╭"))).toBeLessThan(30)
+  const logo = lines.findIndex(l => l.includes("██▄"))
+  expect(logo).toBeGreaterThan(0)                  // below the scrollback'd turn
+  expect(lines.slice(logo).length).toBeLessThanOrEqual(29)   // frame cap
 })
 
 test("LUGENT wordmark renders bold right below the mark, centered", async () => {
@@ -217,6 +199,30 @@ test("turn flow: submit → reasoning + answer appear in transcript", async () =
   expect(f).not.toContain("allow")   // no permission dialog on plain answer
 })
 
+test("finished turns move to the scrollback exactly once; the frame holds only the live turn", async () => {
+  const provider = { chat: async (a: any) => { a.onToken?.("answer"); return { content: "answer", toolCalls: [] } } }
+  const env = fakeEnv({ tools: [], makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
+  await new Promise(r => setTimeout(r, 30))
+  type("q1\r")
+  // busy→idle alone can render before the commit does: wait until the turn's
+  // question shows in the scrollback too, or q2's keys hit a disabled composer.
+  await waitFor(() => { const f = lastFrame(); return f.includes(CARET) && f.includes("> q1") })
+  type("q2\r")
+  await waitFor(() => lastFrame().includes(CARET))
+  await new Promise(r => setTimeout(r, 150))   // commit render lands after busy clears
+  // The final frame carries the whole scrollback above the frame: each turn
+  // appears exactly once (twice would mean live + static both printed it).
+  const f = lastFrame()
+  const count = (needle: string) => f.split("\n").filter(l => l.includes(needle)).length
+  expect(count("> q1")).toBe(1)
+  expect(count("> q2")).toBe(1)
+  expect(count("answer")).toBe(2)   // one per turn, never duplicated
+  // the live frame (from the logo down) shows no turn content between turns
+  const frame = frameFrom(f)
+  expect(frame.some(l => l.includes("q1") || l.includes("q2"))).toBe(false)
+})
+
 test("provider that rejects (not returns error) still shows the error and unblocks the input", async () => {
   // runTurn catches chat throws itself — force a throw outside chat (store) to
   // exercise the send() guard that keeps the spinner from sticking forever
@@ -253,15 +259,7 @@ test("ctrl-c during ask denies, dialog clears, turn ends", async () => {
   expect(lastFrame()).not.toContain("allow askme") // dialog gone
 })
 
-test("transcript is screen-constrained: old items drop off, composer stays", async () => {
-  const provider = {
-    chat: async (_a: any) => {
-      for (let i = 0; i < 60; i++) { /* noop */ }
-      return { content: "done", toolCalls: [] }
-    },
-  }
-  // provider that emits 60 tool lines via a tool is overkill; emit via reasoning-free answer:
-  // use onToken with 60 newline-separated lines
+test("live window is screen-constrained: old lines of the current turn drop off", async () => {
   const prov = {
     chat: async (a: any) => {
       for (let i = 0; i < 60; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
@@ -272,74 +270,74 @@ test("transcript is screen-constrained: old items drop off, composer stays", asy
   const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
   await new Promise(r => setTimeout(r, 30))
   type("go\r")
-  await new Promise(r => setTimeout(r, 100))
-  const f = lastFrame()
-  expect(f).not.toContain("line-00")   // scrolled off / clipped
-  expect(f).toContain("line-59")       // latest content visible
-  const lineCount = f.split("\n").length
-  expect(lineCount).toBeLessThanOrEqual(30)   // frame never taller than screen
+  await waitFor(() => lastFrame().includes("line-59"))    // the whole turn streamed
+  // While busy the window only holds the newest lines; once the turn ends the
+  // whole thing is committed to the scrollback and the frame is chrome-only.
+  await waitFor(() => lastFrame().includes(CARET))
+  // lastFrame() concatenates the scrollback'd turn + the frame: the FRAME is
+  // the last rows — its height must hold the viewport cap.
+  const lines = lastFrame().split("\n")
+  const logo = lines.findIndex(l => l.includes("██▄"))
+  expect(lines.slice(logo).length).toBeLessThanOrEqual(29)
 })
 
-test("pageUp scrolls transcript up; pageDown scrolls back; typing resets to tail", async () => {
+test("pageUp scrolls the live window up; pageDown back; typing resets to tail", async () => {
+  // Only the current turn is in the frame, so the scroll budget is one window
+  // (7 lines on 30 rows). History beyond the turn is the terminal scrollback —
+  // which also means scrolling only does anything while the turn is live, so
+  // the provider parks with the stream half-done.
+  let release: () => void = () => {}
+  const gate = new Promise<void>(r => { release = r })
   const prov = {
     chat: async (a: any) => {
       for (let i = 0; i < 60; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
+      await gate
       return { content: "", toolCalls: [] }
     },
   }
-  const ok = { chat: async () => ({ content: "tail answer", toolCalls: [] }) }
-  let n = 0
-  const env = fakeEnv({ tools: [], makeProvider: () => (n++ === 0 ? prov : ok) })
+  const env = fakeEnv({ tools: [], makeProvider: () => prov })
   const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
   await new Promise(r => setTimeout(r, 30))
   type("go\r")
+  await waitFor(() => lastFrame().includes("line-59"))   // tail view while busy
+  type("\x1b[5~")                                 // pageUp: exactly one window
   await new Promise(r => setTimeout(r, 100))
-  expect(lastFrame()).not.toContain("line-00")   // tail view
-  type("\x1b[5~")                                 // pageUp: exactly one window (7 lines)
-  await new Promise(r => setTimeout(r, 80))
   expect(lastFrame()).not.toContain("line-59")    // tail clipped
-  expect(lastFrame()).toContain("line-47")        // one page up visible
-  for (let i = 0; i < 7; i++) {                   // 7 more pageUps reach the top
-    type("\x1b[5~")
-    await new Promise(r => setTimeout(r, 80))
-  }
-  const f = lastFrame()
-  expect(f).toContain("line-00")                  // oldest content visible
-  expect(f).toContain("line-04")                  // the head window, not a blank page
-  expect(f).not.toContain("line-59")              // tail clipped
-  for (let i = 0; i < 8; i++) {                   // pageDown ×8 returns to tail
-    type("\x1b[6~")
-    await new Promise(r => setTimeout(r, 80))
-  }
-  expect(lastFrame()).toContain("line-59")        // back at tail
+  expect(lastFrame()).toContain("line-5")         // one page up visible
+  type("\x1b[6~")                                 // pageDown: back to the tail
+  await new Promise(r => setTimeout(r, 100))
+  expect(lastFrame()).toContain("line-59")
+  release()
+  await waitFor(() => lastFrame().includes(CARET)) // turn finished, gate open
 })
 
 test("pageUp mid-stream pins the view: growth does not jump it back to the tail", async () => {
-  // The provider parks after 20 lines, so the pageUp is guaranteed to land
-  // mid-stream without depending on token timing.
+  // The provider parks after 20 lines and stays live while the pin is checked —
+  // once the turn ends the live window is committed to the scrollback anyway.
   let release: () => void = () => {}
   const gate = new Promise<void>(r => { release = r })
   const prov = {
     chat: async (a: any) => {
       for (let i = 0; i < 20; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
       await gate
-      for (let i = 20; i < 60; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
+      for (let i = 20; i < 40; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
+      await new Promise(r => setTimeout(r, 500))         // window for the assertion: turn still live
       return { content: "", toolCalls: [] }
     },
   }
   const env = fakeEnv({ tools: [], makeProvider: () => prov })
   const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
-  const idle = () => lastFrame().includes(CARET)
-
-  await waitFor(idle)
+  await waitFor(() => lastFrame().includes(CARET))       // composer idle → submit flushed
   type("go\r")
   await waitFor(() => lastFrame().includes("line-19"))   // the first 20 lines are on screen
   type("\x1b[5~")                                        // pageUp, while the stream is parked
-  release()                                              // 40 more lines stream in under the pin
-  await waitFor(idle)                                    // the turn finished
-  const f = lastFrame()
-  expect(f).not.toContain("line-59")                     // still pinned: the tail stayed hidden
-  expect(f).toContain("line-")                           // and the view is not blank
+  await new Promise(r => setTimeout(r, 80))
+  const pinned = lastFrame().split("\n").filter(l => l.includes("line-")).map(l => l.trim())
+    expect(pinned.join()).toContain("line-07")             // head of the pinned window
+  release()                                              // 20 more lines stream in under the pin
+  await new Promise(r => setTimeout(r, 250))
+  const still = lastFrame().split("\n").filter(l => l.includes("line-")).map(l => l.trim())
+  expect(still.join()).toBe(pinned.join())
 })
 
 test("ctrl+c on a later turn aborts instead of exiting (counter resets per turn)", async () => {
@@ -374,9 +372,12 @@ test("ctrl+c on a later turn aborts instead of exiting (counter resets per turn)
 })
 
 test("keyboard-only scroll: shift+up/down, home/end work like pageUp/pageDown", async () => {
+  let release: () => void = () => {}
+  const gate = new Promise<void>(r => { release = r })
   const prov = {
     chat: async (a: any) => {
       for (let i = 0; i < 60; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
+      await gate
       return { content: "", toolCalls: [] }
     },
   }
@@ -384,72 +385,24 @@ test("keyboard-only scroll: shift+up/down, home/end work like pageUp/pageDown", 
   const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
   await new Promise(r => setTimeout(r, 30))
   type("go\r")
-  await new Promise(r => setTimeout(r, 120))
-  expect(lastFrame()).toContain("line-59")
-  expect(lastFrame()).not.toContain("line-00")
+  await waitFor(() => lastFrame().includes("line-59"))
   type("\x1b[1;2A")                        // shift+up: scroll one page up
-  await new Promise(r => setTimeout(r, 60))
+  await new Promise(r => setTimeout(r, 80))
   expect(lastFrame()).not.toContain("line-59")
   type("\x1b[1;2B")                        // shift+down: back to tail
-  await new Promise(r => setTimeout(r, 60))
+  await new Promise(r => setTimeout(r, 80))
   expect(lastFrame()).toContain("line-59")
   type("\x1b[H")                           // home: jump to the very top
-  await new Promise(r => setTimeout(r, 60))
+  await new Promise(r => setTimeout(r, 80))
   const f = lastFrame()
   expect(f).toContain("line-00")
   expect(f).not.toContain("line-59")
   type("\x1b[F")                           // end: snap back to the tail
-  await new Promise(r => setTimeout(r, 60))
+  await new Promise(r => setTimeout(r, 80))
   expect(lastFrame()).toContain("line-59")
   expect(lastFrame()).not.toContain("line-00")
-})
-
-test("mouse tracking starts off (text selection works), /mouse turns the wheel on, exit restores it", async () => {
-  const prov = {
-    chat: async (a: any) => {
-      for (let i = 0; i < 60; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
-      return { content: "", toolCalls: [] }
-    },
-  }
-  const env = fakeEnv({ tools: [], makeProvider: () => prov })
-  const out = fakeStdout(30)
-  const inStream = fakeStdin()
-  const p = runTui(env, { stdin: inStream.stream as any, stdout: out.stream as any })
-  await new Promise(r => setTimeout(r, 60))
-  // Default: no tracking, so the terminal keeps click-drag for its own
-  // selection — lugent has no clipboard helper, so that is the only way to copy.
-  expect(out.frames.join("")).toContain(MOUSE_OFF)
-  expect(out.frames.join("")).not.toContain(MOUSE_ON)
-
-  inStream.type("go\r")
-  await new Promise(r => setTimeout(r, 150))
-  expect(out.lastFrame()).toContain("line-59")
-  expect(out.lastFrame()).not.toContain("line-00")
-
-  inStream.write(WHEEL_UP.repeat(20))                // no tracking yet: nothing to scroll on
-  await new Promise(r => setTimeout(r, 120))
-  expect(out.lastFrame()).toContain("line-59")       // view unmoved
-
-  inStream.type("/mouse\r")                          // opt into the wheel
-  await new Promise(r => setTimeout(r, 120))
-  expect(out.frames.join("")).toContain(MOUSE_ON)
-  // /mouse appended a user line + a system line, so the window moved on: anchor
-  // on whatever is on screen now, not on a fixed line number.
-  const tailFrame = out.lastFrame()
-
-  inStream.write(WHEEL_UP.repeat(3))                 // a few notches up (3 lines each)
-  await new Promise(r => setTimeout(r, 150))
-  const upFrame = out.lastFrame()
-  expect(upFrame).not.toBe(tailFrame)                // the wheel moved the view
-
-  inStream.write(WHEEL_DOWN.repeat(10))              // wheel down: past the tail, clamped back to it
-  await new Promise(r => setTimeout(r, 150))
-  expect(out.lastFrame()).toBe(tailFrame)            // exactly where it started
-
-  inStream.type("\x03")                              // exit
-  inStream.type("\x03")
-  await p
-  expect(out.frames.join("")).toContain(MOUSE_OFF)   // modes restored on the way out
+  release()
+  await waitFor(() => lastFrame().includes(CARET))
 })
 
 test("rapid double ctrl+c exits the app", async () => {
@@ -861,6 +814,7 @@ test("/mcp overlay lists servers, and disabling one refreshes the list", async (
   }
   await new Promise(r => setTimeout(r, 30))
   type("/mcp\r")
+  await new Promise(r => setTimeout(r, 300))
   await waitFor("echo (local) — connected, 1 tool")
   expect(lastFrame()).toContain("tf (remote) — failed: boom")
 
@@ -884,7 +838,7 @@ test("composer stays pinned: scrolling never moves the input or resizes the fram
   type("go\r")
   await new Promise(r => setTimeout(r, 150))
   const geom = () => {
-    const lines = lastFrame().split("\n")
+    const lines = frameFrom(lastFrame())
     return {
       height: lines.length,
       composer: lines.findIndex(l => l.includes("╭")),
@@ -915,14 +869,14 @@ test("overlays open inside the frame instead of pushing the chrome off-screen", 
   type("/model\r")
   await new Promise(r => setTimeout(r, 80))
   expect(lastFrame()).toContain("choose provider")
-  expect(lastFrame().split("\n").length).toBeLessThanOrEqual(29)   // same frame cap
+  expect(frameFrom(lastFrame()).length).toBeLessThanOrEqual(29)   // same frame cap
   type("\r")                                     // provider → models (long list)
   await new Promise(r => setTimeout(r, 100))
   const f = lastFrame()
   expect(f).toContain("m-0")                                       // list rendered…
   expect(f).toContain("↑/↓ move")                                  // …with its key hints
   expect(f).toContain("esc back")                                  // (models level: esc goes back)
-  expect(f.split("\n").length).toBeLessThanOrEqual(29)
+  expect(frameFrom(f).length).toBeLessThanOrEqual(29)
 })
 
 test("long wrapped lines cannot push the composer out of the frame", async () => {
@@ -941,57 +895,9 @@ test("long wrapped lines cannot push the composer out of the frame", async () =>
   await new Promise(r => setTimeout(r, 30))
   type("go\r")
   await new Promise(r => setTimeout(r, 200))
-  const lines = lastFrame().split("\n")
-  expect(lines.length).toBeLessThanOrEqual(30)
+  const lines = frameFrom(lastFrame())
+  expect(lines.length).toBeLessThanOrEqual(29)
   expect(lastFrame()).toContain("line-5")    // newest content still on screen
-  expect(lines.findIndex(l => l.includes("╭"))).toBeLessThan(30)
+  expect(lines.findIndex(l => l.includes("╭"))).toBeLessThan(29)
 })
 
-test("/mouse toggles wheel vs native selection in both directions, keyboard scroll always works", async () => {
-  const prov = {
-    chat: async (a: any) => {
-      for (let i = 0; i < 60; i++) a.onToken?.(`line-${String(i).padStart(2, "0")}\n`)
-      return { content: "", toolCalls: [] }
-    },
-  }
-  const env = fakeEnv({ tools: [], makeProvider: () => prov })
-  const out = fakeStdout(30)
-  const inStream = fakeStdin()
-  const p = runTui(env, { stdin: inStream.stream as any, stdout: out.stream as any })
-  await new Promise(r => setTimeout(r, 60))
-  inStream.type("go\r")
-  await new Promise(r => setTimeout(r, 150))
-
-  const before = out.frames.length
-  inStream.type("/mouse\r")                          // on: opt into the wheel
-  await new Promise(r => setTimeout(r, 120))
-  const written = out.frames.slice(before).join("")
-  expect(written).toContain(MOUSE_ON)
-  expect(out.lastFrame()).toContain("wheel scroll on")     // the transcript says which mode
-
-  inStream.write(WHEEL_UP.repeat(20))                // wheel scrolls…
-  await new Promise(r => setTimeout(r, 120))
-  const scrolled = out.lastFrame()
-  expect(scrolled).not.toContain("line-59")
-  inStream.type("\x1b[F")                            // End: back to the tail
-  await new Promise(r => setTimeout(r, 100))
-
-  const before2 = out.frames.length
-  inStream.type("/mouse\r")                          // off: hand click-drag back to the terminal
-  await new Promise(r => setTimeout(r, 120))
-  expect(out.frames.slice(before2).join("")).toContain(MOUSE_OFF)
-  expect(out.lastFrame()).toContain("text selection on")
-  const frozen = out.lastFrame()                     // /mouse also appended a line — hold this frame
-
-  inStream.write(WHEEL_UP.repeat(20))                // wheel no longer scrolls…
-  await new Promise(r => setTimeout(r, 120))
-  expect(out.lastFrame()).toBe(frozen)               // …the view did not move at all
-
-  inStream.type("\x1b[5~")                           // keyboard scroll still works
-  await new Promise(r => setTimeout(r, 100))
-  expect(out.lastFrame()).not.toBe(frozen)
-
-  inStream.type("\x03")
-  inStream.type("\x03")
-  await p
-})

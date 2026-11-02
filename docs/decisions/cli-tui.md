@@ -91,6 +91,14 @@ Why: the region used to be content-sized, so the frame height was a function of 
 
 Cost if wrong: one row of budget is spent (8 → 7 lines on a 30-row terminal, so a page scroll is 7 lines and two tests carry the new numbers) and the terminal's last row stays blank while the TUI is up. The overlays (`/model`, `/skills`, …) are still sized below the composer and are not clipped by it — a picker taller than the window eats into the transcript region, which is the intended trade (the picker is modal, the transcript is not). If ink ever changes what counts as fullscreen, `frameRows` should be revisited together with the `rows - 1` tests in `app.test.tsx`.
 
+## 2026-11-02 — History belongs to the terminal scrollback; /mouse and wheel tracking are gone
+
+Decision: when a turn finishes, `App` commits its items to ink `<Static>` — ink prints each new item once, above the frame, into the terminal's own scrollback — and the live frame renders only the current turn. `mouse.ts`, the stdin wheel proxy, terminal modes 1000/1006 and the `/mouse` command were deleted; lugent never enables mouse tracking.
+
+Why: scrolling the conversation had to work with the plain wheel, no command, no opt-in — the wheel/selection mutual exclusion made every default wrong (tracking on breaks selection, tracking off makes the wheel dead). Once history is in scrollback, the terminal scrolls it natively: wheel, click-drag, touchpad, search — all free, and text selection (the only copy path) always works. The frame keeps PageUp/PageDown/Shift+arrows/Home/End and the mid-stream view pin for the current turn only, which is the one thing scrollback cannot reach.
+
+Cost if wrong: `<Static>` items are write-once — a turn is committed once and never re-rendered, so any future "edit/collapse an old message" needs a different mechanism; the frame shows only the live turn, so a turn taller than the window still loses its head to clipping while streaming (recoverable with PageUp mid-turn, and the committed copy in scrollback is complete). The commit snapshots `liveRef` before the `setItems` updater because updaters run lazily — reading the ref inside them sees the emptied ref and drops the turn (caught by the "exactly once" test). Keys typed in the same tick a turn ends may still hit the disabled composer (pre-existing input.tsx behavior).
+
 ---
 
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.

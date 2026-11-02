@@ -114,31 +114,38 @@ const Markdown = memo(function Markdown({ text }: { text: string }) {
   )
 })
 
-export function Transcript({ items }: { items: TItem[] }) {
+/** One rendered item — shared by the live frame and the <Static> scrollback. */
+export function TranscriptItem({ it, marginTop }: { it: TItem; marginTop?: boolean }) {
+  // flexShrink 0: inside the fixed-height window the Yoga default lets a tall
+  // item be shrunk and sliced mid-row; the item must keep its real height and
+  // let the window clip it instead.
   return (
-    // flexShrink 0: the window that holds this is fixed-height and clips, so the
-    // block must keep its real height — shrunk, its top-aligned overflow shows
-    // the oldest lines and hides the newest.
+    <Box flexDirection="column" flexShrink={0} marginTop={marginTop ? 1 : 0}>
+      {it.kind === "user" && <Text color="blue">&gt; {it.text}</Text>}
+      {it.kind === "reasoning" && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text italic dimColor>… pensando</Text>
+          <Box paddingLeft={2}>
+            <Text italic dimColor>{it.text}</Text>
+          </Box>
+        </Box>
+      )}
+      {it.kind === "tool" && <Text color="yellow">{glyph(it.tool ?? "")} {it.tool} {it.text}</Text>}
+      {it.kind === "assistant" && <Markdown text={it.text} />}
+      {it.kind === "error" && <Text color="red">error: {it.text}</Text>}
+      {it.kind === "system" && <Text dimColor>→ {it.text}</Text>}
+    </Box>
+  )
+}
+
+export function Transcript({ items }: { items: TItem[] }) {
+  // flexShrink 0: the window that holds this is fixed-height and clips, so the
+  // block must keep its real height — shrunk, its top-aligned overflow shows
+  // the oldest lines and hides the newest.
+  return (
     <Box flexDirection="column" flexShrink={0}>
       {items.map((it, i) => (
-        // flexShrink 0: inside the fixed-height window the Yoga default lets a
-        // tall item be shrunk and sliced mid-row; the item must keep its real
-        // height and let the window clip it instead.
-        <Box key={i} flexDirection="column" flexShrink={0} marginTop={i > 0 ? 1 : 0}>
-          {it.kind === "user" && <Text color="blue">&gt; {it.text}</Text>}
-          {it.kind === "reasoning" && (
-            <Box flexDirection="column" marginBottom={1}>
-              <Text italic dimColor>… pensando</Text>
-              <Box paddingLeft={2}>
-                <Text italic dimColor>{it.text}</Text>
-              </Box>
-            </Box>
-          )}
-          {it.kind === "tool" && <Text color="yellow">{glyph(it.tool ?? "")} {it.tool} {it.text}</Text>}
-          {it.kind === "assistant" && <Markdown text={it.text} />}
-          {it.kind === "error" && <Text color="red">error: {it.text}</Text>}
-          {it.kind === "system" && <Text dimColor>→ {it.text}</Text>}
-        </Box>
+        <TranscriptItem key={i} it={it} marginTop={i > 0} />
       ))}
     </Box>
   )

@@ -31,6 +31,8 @@ export function renderTui(tree: unknown, opts: { rows?: number } = {}) {
     type(s: string) {
       for (const ch of s) { pending.push(ch); stdin.emit("readable") }
     },
-    lastFrame(): string { return frames.length ? stripAnsi(frames[frames.length - 1]) : "" },
+    /** Whole output ever written, ANSI-stripped — includes <Static> lines ink
+     *  prints as separate writes (they never reappear in later frames). */
+    allOutput(): string { return frames.map(stripAnsi).join("\n") },    lastFrame(): string { return frames.length ? stripAnsi(frames[frames.length - 1]) : "" },
   }
 }
