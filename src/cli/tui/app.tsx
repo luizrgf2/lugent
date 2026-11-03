@@ -320,8 +320,9 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
                   closeOverlay()
                   yoloRef.current = m === "yolo"
                   setYolo(m === "yolo")
-                  savePermissionMode(m, props.globalConfigPath ?? globalConfigPath())
-                  setItems(is => [...is, { kind: "system", text: m === "yolo" ? "permission mode: yolo (auto-approve)" : "permission mode: normal" }])
+                  const saved = savePermissionMode(m, props.globalConfigPath ?? globalConfigPath())
+                  const note = m === "yolo" ? "permission mode: yolo (auto-approve)" : "permission mode: normal"
+                  setItems(is => [...is, { kind: "system", text: saved ? note : `${note} — save failed, session only` }])
                 }}
                 onClose={closeOverlay} />
           : ask

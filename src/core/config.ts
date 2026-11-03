@@ -53,13 +53,21 @@ export const globalConfigPath = (): string => `${homedir()}/.config/lugent/confi
  * project file — a repo must not decide trust level). Existing keys survive;
  * an unparseable file is replaced. The mode still loads from the first file
  * found, so a project `permissionMode` keeps overriding the saved choice.
+ * Returns whether the choice was persisted — a failed write (e.g. a read-only
+ * `~/.config/lugent`) only warns; the caller keeps the session-only mode.
  */
-export function savePermissionMode(mode: PermissionMode, path = globalConfigPath()): void {
+export function savePermissionMode(mode: PermissionMode, path = globalConfigPath()): boolean {
   let raw: Record<string, unknown> = {}
   try { raw = JSON.parse(readFileSync(path, "utf8")) } catch {}
   raw.permissionMode = mode
-  mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, JSON.stringify(raw, null, 2) + "\n")
+  try {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, JSON.stringify(raw, null, 2) + "\n")
+  } catch (e) {
+    console.warn(`permission mode: could not save to ${path} (${e instanceof Error ? e.message : e}) — session only`)
+    return false
+  }
+  return true
 }
 
 function subEnvMap(m: unknown): Record<string, string> | undefined {

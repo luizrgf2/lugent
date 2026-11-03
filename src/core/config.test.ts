@@ -127,6 +127,26 @@ describe("savePermissionMode", () => {
     expect(JSON.parse(readFileSync(global, "utf8"))).toEqual({ permissionMode: "yolo" })
     rmSync(global, { force: true })
   })
+
+  test("a failing write is reported and logged, not thrown", () => {
+    const dir = `/tmp/opencode/save-mode-fail-${Date.now()}`
+    mkdirSync(dir, { recursive: true })
+    const warns: string[] = []
+    const orig = console.warn
+    console.warn = (m: string) => { warns.push(String(m)) }
+    try {
+      expect(savePermissionMode("yolo", dir)).toBe(false)   // path is a directory → write fails
+      expect(warns.join("\n")).toMatch(/permission mode/)
+    } finally { console.warn = orig }
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("returns true when the mode is persisted", () => {
+    const global = `/tmp/opencode/save-mode-ok-${Date.now()}.json`
+    expect(savePermissionMode("yolo", global)).toBe(true)
+    expect(JSON.parse(readFileSync(global, "utf8")).permissionMode).toBe("yolo")
+    rmSync(global, { force: true })
+  })
 })
 
 describe("parseMcpServer", () => {
