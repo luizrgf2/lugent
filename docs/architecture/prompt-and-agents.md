@@ -4,6 +4,8 @@
 
 **Byte-stable prefix.** The system prompt is rebuilt from immutable inputs every iteration and pinned by a golden snapshot test. Identical bytes across requests let providers reuse their prompt cache — one changing line silently kills caching. A selected agent's prompt *replaces* the base prompt and gets its own pinned snapshot, so the prefix is byte-stable per agent; switching agent invalidates the cache once. The `# MCP` section sits *before* the agent prompt precisely because it must not be replaced: every agent, built-in or user-defined, receives it. It is unconditional so a user with no server configured can still ask how to add one (see `docs/decisions.md`).
 
+**Subagents catalog.** The `# Subagents` section lists `id` + `description` for every `canBeSubagent` agent (mode `subagent` or `all`), right after `# Skills`. It renders only when the list is non-empty — a project with no subagents (or an agent that withheld the `subagent` tool) keeps the old prefix byte-for-byte, which the golden snapshot pins. A child session's `PromptInput` sets `subagents: []`, so the section vanishes in the child and the depth-1 rule needs no code in the prompt itself (see `docs/decisions/agents.md`).
+
 ---
 
 Index: [`docs/architecture.md`](../architecture.md)

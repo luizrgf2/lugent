@@ -138,6 +138,7 @@ LUGENT
 | `write` | ask | Create/replace file, creates parent dirs |
 | `shell` | ask | `bash -c` (`cmd /c` on Windows), timeout default 2min, `background: true` |
 | `skill` | allow | Load a skill body by id |
+| `subagent` | ask | Launch a subagent in a child session (id from the `# Subagents` list, fresh context); returns the child's final message |
 
 **Extra guard:** any resource outside the project root (absolute path, `..`, `~`) forces an `ask` even for `allow` tools, unless already granted for the session.
 
@@ -257,10 +258,35 @@ You are a code reviewer. Report findings with file and line references.
 | `model` | `provider/model`, both required — provider must exist in the config | inherit the session's |
 | `tools` | tool ids sent to the model; anything else is invisible to it — a `tools` key that parses to nothing (typo, block-style YAML) fails closed to **no** tools, with a warning | all tools |
 | `permissions` | per-tool `allow` / `ask` / `deny`; `deny` also removes the tool | tool default |
+| `mode` | `primary` \| `subagent` \| `all` — who may launch this agent | primary |
+
+### Subagents
+
+A `mode: subagent` (or `all`) agent is not a session you switch into — it is a worker the model launches. During a turn the model can call the `subagent` tool with `{ agent, prompt }`; lugent starts a **child session** (a second session in the same store, same process) that runs with the subagent's own prompt, model and tools, and the child's final message comes back as the tool result.
+
+- The model discovers subagents from a `# Subagents` section of the prompt (id + description), rendered only when at least one is launchable — same mechanism as `# Skills`.
+- The child starts with **no** shared history: the prompt must be self-contained.
+- Several `subagent` calls in one tool round run in parallel.
+- **Depth 1**: a child never gets the `subagent` tool or the catalog, so it cannot launch a grandchild.
+- Children are persisted (with a `parent` link) but **hidden** from `/resume` and the TUI picker; only the child's final message returns to the parent.
+- `mode: subagent` agents are not offered in `/agent` — they are launch targets, not session personas.
+
+```markdown
+---
+description: Probes one file and summarizes it
+mode: subagent
+tools: [read]
+---
+You are a probe. Read exactly one file and summarize it in three lines.
+```
+
+Usage: `/agent` lists loaded agents (`build` and `plan` plus your file agents), `/agent reviewer` switches.
 
 The body is the agent's system prompt: it **replaces** the base prompt, and AGENTS.md plus the skills advertisement are still added on top. A permission override replaces the tool's default — a session `always` grant still wins over it, and the outside-project guard still forces an ask.
 
 Usage: `/agent` lists loaded agents (`build` and `plan` plus your file agents), `/agent reviewer` switches. Switching works mid-session — history is kept and the next turn runs with the new prompt, model and toolset; the switch line confirms provider/model/toolset, and the `# Tools` section of the prompt is filtered to match. An agent's `model` applies at startup (`defaultAgent`) and on `/resume`, not only when switched to. `/resume` restores the agent together with provider and model; `defaultAgent` picks the startup agent and defaults to `build` — an unknown id warns and falls back to `build`. Because `build` reuses the base prompt, the default system prefix stays byte-identical to a session with no agent (and sessions created before agents existed keep the base prompt). Bad frontmatter never breaks startup: an empty body drops that agent, and an unknown tool id or a `model` without `provider/` warns and falls back.
+
+**Index:** [`docs/architecture/prompt-and-agents.md`](docs/architecture/prompt-and-agents.md) (the `# Subagents` catalog) · [`docs/architecture/turn-flow.md`](docs/architecture/turn-flow.md) (the child branch in the loop) · [`docs/decisions/agents.md`](docs/decisions/agents.md) (why one tool, why depth 1) · [`docs/future-features.md`](docs/future-features.md) § Agents (background subagents, deferred).
 
 ## Permissions & yolo
 

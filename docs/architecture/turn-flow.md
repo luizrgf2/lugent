@@ -14,6 +14,11 @@ user input
       if aborted → flag session, stop (no tool runs)
       run all toolCalls in parallel:
         resolve tool → permission check → validateArgs → execute
+        subagent: spawn(agent, prompt)
+          → toolsForAgent(...) minus subagent   # depth 1
+          → createSession(..., parent=sessionId)
+          → runTurn(childDeps, childId, prompt)  # same loop, same process
+          → return the child's last assistant message
         append tool result (truncated at 10k chars)
 ```
 
