@@ -2,8 +2,9 @@ import { test, expect, beforeEach, afterAll } from "bun:test"
 import { runTurn, type LoopDeps } from "./loop"
 import { Store } from "./store"
 import { rmSync, mkdirSync, writeFileSync } from "node:fs"
-import type { ChatResponse } from "./types"
+import type { ChatResponse, Agent } from "./types"
 import type { ToolDef } from "./tools/registry"
+import { makeSubagentTool } from "./tools/subagent"
 
 const DIR = "/tmp/opencode/loop"
 const DB = "/tmp/opencode/loop.db"
@@ -371,4 +372,105 @@ test("session grant still beats an agent ask override (review focus 4)", async (
   const agent = { id: "rev", prompt: "review", permissions: { echo: "ask" as const } }
   await runTurn(deps(provider, { agent, onAsk: async () => { asked++; return "n" as const } }), sessionId, "go")
   expect(asked).toBe(0)
+})
+
+const subagentTool = makeSubagentTool()
+
+test("subagent: spawns a child session, links it, and returns its last message", async () => {
+  const reviewer: Agent = { id: "reviewer", mode: "subagent", prompt: "You are REVIEWER.", tools: ["echo"] }
+  const seenChildTools: string[][] = []
+  let parentRounds = 0
+  const provider = {
+    chat: async (a: any) => {
+      const sys: string = a.messages[0].content
+      if (sys.includes("You are REVIEWER.")) {
+        seenChildTools.push(a.tools.map((t: any) => t.name))
+        return { content: "child answer", toolCalls: [] }
+      }
+      parentRounds++
+      if (parentRounds === 1) return { content: "", toolCalls: [{ id: "t1", name: "subagent", args: { agent: "reviewer", prompt: "review a.txt" } }] }
+      return { content: "parent done", toolCalls: [] }
+    },
+  }
+  const r = await runTurn(deps(provider, { tools: [...tools, subagentTool], agents: [reviewer] }), sessionId, "go")
+  expect(r.aborted).toBe(false)
+  const toolMsg = store.getMessages(sessionId).find(m => m.role === "tool")!
+  expect(toolMsg.content).toBe("child answer")
+  const kids = store.children(sessionId)
+  expect(kids.length).toBe(1)
+  expect(kids[0].agent).toBe("reviewer")
+  expect(kids[0].parent).toBe(sessionId)
+  expect(seenChildTools[0]).toEqual(["echo"])   // depth 1: the child list has no subagent
+})
+
+test("subagent: two launches in one turn overlap", async () => {
+  const reviewer: Agent = { id: "reviewer", mode: "subagent", prompt: "You are REVIEWER." }
+  const auditor: Agent = { id: "auditor", mode: "subagent", prompt: "You are AUDITOR." }
+  const events: string[] = []
+  let parentRounds = 0
+  const provider = {
+    chat: async (a: any) => {
+      const sys: string = a.messages[0].content
+      const which = sys.includes("REVIEWER") ? "reviewer" : sys.includes("AUDITOR") ? "auditor" : ""
+      if (which) {
+        events.push(`start:${which}`)
+        await new Promise(r => setTimeout(r, 20))
+        events.push(`end:${which}`)
+        return { content: `done:${which}`, toolCalls: [] }
+      }
+      parentRounds++
+      if (parentRounds === 1) return { content: "", toolCalls: [
+        { id: "t1", name: "subagent", args: { agent: "reviewer", prompt: "a" } },
+        { id: "t2", name: "subagent", args: { agent: "auditor", prompt: "b" } },
+      ] }
+      return { content: "parent done", toolCalls: [] }
+    },
+  }
+  await runTurn(deps(provider, { tools: [...tools, subagentTool], agents: [reviewer, auditor] }), sessionId, "go")
+  const results = store.getMessages(sessionId).filter(m => m.role === "tool").map(m => m.content).sort()
+  expect(results).toEqual(["done:auditor", "done:reviewer"])
+  expect(events.slice(0, 2).every(e => e.startsWith("start:"))).toBe(true)   // both began before either finished
+})
+
+test("subagent: unknown or primary agent is an error result, never a throw", async () => {
+  const build: Agent = { id: "build", prompt: "base" }   // no mode → primary
+  let parentRounds = 0
+  const provider = {
+    chat: async () => {
+      parentRounds++
+      if (parentRounds === 1) return { content: "", toolCalls: [
+        { id: "t1", name: "subagent", args: { agent: "ghost", prompt: "a" } },
+        { id: "t2", name: "subagent", args: { agent: "build", prompt: "b" } },
+      ] }
+      return { content: "done", toolCalls: [] }
+    },
+  }
+  const r = await runTurn(deps(provider, { tools: [...tools, subagentTool], agents: [build] }), sessionId, "go")
+  expect(r.aborted).toBe(false)
+  const results = store.getMessages(sessionId).filter(m => m.role === "tool").map(m => m.content ?? "")
+  expect(results.some(c => c.includes("unknown subagent: ghost"))).toBe(true)
+  expect(results.some(c => c.includes("is not a subagent"))).toBe(true)
+})
+
+test("subagent: an agent with a configured model runs on providerFor, not the parent", async () => {
+  const pinned: Agent = { id: "pinned", mode: "subagent", model: { provider: "alt", model: "m2" }, prompt: "You are PINNED." }
+  const built: Array<[string, string]> = []
+  const childProvider = { chat: async () => ({ content: "from alt", toolCalls: [] }) }
+  let parentRounds = 0
+  const provider = {
+    chat: async () => {
+      parentRounds++
+      if (parentRounds === 1) return { content: "", toolCalls: [{ id: "t1", name: "subagent", args: { agent: "pinned", prompt: "x" } }] }
+      return { content: "parent done", toolCalls: [] }
+    },
+  }
+  await runTurn(deps(provider, {
+    tools: [...tools, subagentTool], agents: [pinned],
+    config: { providers: { alt: { baseUrl: "http://x" } } } as any,
+    providerFor: (p, m) => { built.push([p, m]); return childProvider },
+  }), sessionId, "go")
+  expect(built).toEqual([["alt", "m2"]])
+  expect(store.getMessages(sessionId).find(m => m.role === "tool")!.content).toBe("from alt")
+  expect(store.children(sessionId)[0].provider).toBe("alt")
+  expect(store.children(sessionId)[0].model).toBe("m2")
 })
