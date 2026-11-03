@@ -121,6 +121,14 @@ Why: ink dispatches every key event to every registered `useInput` handler — t
 
 Cost if wrong: keyboard-only users lose Home/End as scroll-to-top/tail (PageUp/PageDown and Shift+arrows remain); if that misses Home/End mid-turn, revisit by gating the frame handler on the composer-disabled/busy flag so Home/End scroll only while a turn owns the input. Backspace and Delete both delete before the caret (no forward-delete) — a Del-key user expecting forward deletion deletes a character instead. Inside one `<Text>` the caret inherits the value's (default) color rather than a distinct one; it stays dim-only.
 
+## 2026-11-03 — Large pastes collapse into inline tokens in the composer
+
+Decision: `Input` subscribes to ink v8's `usePaste` (bracketed paste, mode 2004). A paste containing a newline or longer than 200 chars becomes an incremental inline token — `\u0000[paste #N: X lines/chars]\u0000` (NUL-delimited so the label can never be typed or matched by slash autocomplete) — inserted at the caret in the composer value; smaller pastes type in place. Tokens are atomic for editing: caret movement (`←/→`, Home/End landing) snaps over token boundaries instead of entering a token, and backspace deletes a token sitting immediately before the caret as one unit while plain text still deletes one char. Submit and `↑` history recall expand tokens back to the full text via a per-composer registry (`pastes` Map), so the model receives the real paste; the transcript and the stored message show the expanded paste, while the composer and history stay compact.
+
+Why: pasting 100+ lines previously rendered every line into the composer box and each embedded `\n` triggered ink's `key.return` once per line, submitting the message mid-paste — the Claude Code / opencode behavior is the fix: the composer must stay one editing surface, not a paste target. Expansion happens exactly once, at the `onSubmit` boundary; history intentionally stores the token form so recalling a submitted paste never floods the box again.
+
+Cost if wrong: the NUL mark makes the token invisible to substring assertions that strip ANSI only if tests use `lastFrame()` (harness strips nothing else) — tokens are NUL-delimited precisely so typed text can't collide with a token label like `[paste #1: 2 lines]`. The registry lives in the component instance, so an unmounted composer forgets its pastes (acceptable: tokens only exist while that composer lives). The test harness must not record ink's `\x1b[?2004h/l` mode toggles as frames — `renderTui` filters them, otherwise `lastFrame()` is the toggle, not content (that cost a debugging session: 18 app tests failing with empty frames while `allOutput()` had the content). Thresholds are `isLargePaste` (newline or >200 chars) — a single-line paste under the cap stays literal text so short command lines pasted from docs keep working.
+
 ---
 
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.

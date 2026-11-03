@@ -221,3 +221,235 @@ test("caret navigation leaves suggestions and history alone", async () => {
   await new Promise(r => setTimeout(r, 30))
   expect(got).toEqual(["older", "/model"])
 })
+// ---- bracketed paste -----------------------------------------------------
+// Terminals wrap pasted text in ESC[200~ … ESC[201~ (bracketed paste mode);
+// ink's usePaste hands the inner text to the component as one string. The
+// harness type() feeds the raw bytes, so tests reproduce exactly what a real
+// terminal delivers on a multi-line paste — including the \n characters that
+// previously made ink run key.return once per line.
+
+const PASTE = (body: string) => "\u001b[200~" + body + "\u001b[201~"
+
+test("pasting a single line types it as text", async () => {
+  const got: string[] = []
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} />)
+  type(PASTE("just one line"))
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("just one line")
+  type("\r")
+  await new Promise(r => setTimeout(r, 30))
+  expect(got).toEqual(["just one line"])
+})
+
+test("small single-line paste below the length threshold types as text", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={() => {}} />)
+  type(PASTE("short"))
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("short")
+  expect(lastFrame()).not.toContain("[paste #1")
+})
+
+test("multi-line paste collapses to a token, not newline storms", async () => {
+  const got: string[] = []
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} />)
+  type(PASTE("line one\nline two\nline three"))
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  expect(f).toContain("[paste #1: 3 lines]")
+  expect(f).not.toContain("line two")   // full text never renders in the composer
+  expect(f.split("\n").every(l => !l.startsWith("> ") || l.includes("[paste #1") || l.includes("line one")))
+  type("\r")
+  await new Promise(r => setTimeout(r, 30))
+  expect(got).toEqual(["line one\nline two\nline three"])   // model gets the full text
+  expect(lastFrame()).not.toContain("[paste #1")            // box clears after submit
+})
+
+test("long single-line paste collapses to a token too", async () => {
+  const got: string[] = []
+  const long = "x".repeat(300)
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} />)
+  type(PASTE(long))
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("[paste #1: 300 chars]")
+  type("\r")
+  await new Promise(r => setTimeout(r, 30))
+  expect(got).toEqual([long])
+})
+
+test("successive pastes number their tokens incrementally", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={() => {}} />)
+  type(PASTE("a\nb"))
+  type(PASTE("c\nd"))
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  expect(f).toContain("[paste #1: 2 lines]")
+  expect(f).toContain("[paste #2: 2 lines]")
+})
+
+test("typing around tokens keeps them in place", async () => {
+  const got: string[] = []
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} />)
+  type(PASTE("p1\np2"))
+  type("hello ")
+  type(PASTE("q1\nq2"))
+  type(" world")
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  // Tokens are opaque atoms in the composer, in paste order.
+  expect(f).toContain("[paste #1: 2 lines]hello [paste #2: 2 lines] world")
+  expect(f).not.toContain("p1")
+  expect(f).not.toContain("q2")
+  type("\r")
+  await new Promise(r => setTimeout(r, 30))
+  expect(got).toEqual(["p1\np2hello q1\nq2 world"])
+})
+
+test("backspace after a paste deletes the whole token, not one char", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={() => {}} />)
+  type(PASTE("a\nb"))
+  type("\u007f")   // backspace
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  expect(f).not.toContain("[paste #1")
+  expect(f).not.toContain("\u0000placeholder\u0000")
+})
+
+test("backspace on plain text still deletes one character", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={() => {}} />)
+  type("/sk")
+  await new Promise(r => setTimeout(r, 30))
+  type("\b\bm")    // back to "/", then retype m
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("> /m")
+})
+
+test("submitting around tokens: empty trim with only token is still submitted", async () => {
+  const got: string[] = []
+  const { type } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} />)
+  type(PASTE("a\nb"))
+  type("\r")
+  await new Promise(r => setTimeout(r, 30))
+  expect(got).toEqual(["a\nb"])
+})
+
+test("typed text around tokens is part of the submitted text", async () => {
+  const got: string[] = []
+  const { type } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} />)
+  type(PASTE("x\ny"))
+  type(" and ")   // typed after the token, before enter
+  type("\r")
+  await new Promise(r => setTimeout(r, 30))
+  expect(got).toEqual(["x\ny and"])   // submitted text is token expansion + typed text
+})
+
+test("history recalls token text, not the expansion", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={() => {}} />)
+  type(PASTE("h1\nh2"))
+  type("\r")
+  await new Promise(r => setTimeout(r, 30))
+  type("plain\r")
+  await new Promise(r => setTimeout(r, 30))
+  type("\u001b[A")   // ↑ → "plain"
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("plain")
+  type("\u001b[A")   // ↑ → paste token
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  expect(f).toContain("[paste #1: 2 lines]")
+  expect(f).not.toContain("h1\nh2")
+  expect(f).not.toContain("h1 h2")   // must not be the expanded form
+})
+
+test("small typed newlines (shift+enter style ctrl+j) still submit per return key", async () => {
+  const got: string[] = []
+  const { type } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} />)
+  type("a\rb\r")
+  await new Promise(r => setTimeout(r, 30))
+  expect(got).toEqual(["a", "b"])
+})
+
+test("paste while suggestions open does not submit the slash prefix", async () => {
+  const got: string[] = []
+  const { type } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} completions={CMDS} />)
+  type("/")       // suggestions open
+  type(PASTE("m\nx"))   // would contain "m" → tab-pick hazards
+  await new Promise(r => setTimeout(r, 30))
+  type("\r")
+  await new Promise(r => setTimeout(r, 30))
+  expect(got).toEqual(["/m\nx"])
+})
+
+// ---- token atomicity -------------------------------------------------------
+// The caret must never sit inside a token: ←/→ and Home/End snap to the
+// nearest token boundary, so typing or backspacing can never corrupt the
+// NUL-delimited label (a corrupted label no longer matches PASTE_TOKEN_RE and
+// would be submitted to the model literally, NUL bytes included).
+
+test("caret snaps over a token when walking left across it", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={() => {}} />)
+  type("ab")
+  type(PASTE("x\ny"))
+  type("cd")
+  await new Promise(r => setTimeout(r, 30))
+  // Walk left 1 → before "cd"; one more step must jump the whole token,
+  // landing before it, not inside its label.
+  type("\u001b[D\u001b[D\u001b[D")
+  await new Promise(r => setTimeout(r, 30))
+  type("\u007f")   // backspace: deletes the "b" before the token, not label bytes
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  expect(f).toContain("[paste #1: 2 lines]")   // token label intact
+  type("\r")
+  await new Promise(r => setTimeout(r, 30))
+})
+
+test("typing with the caret adjacent to a token never enters the label", async () => {
+  const got: string[] = []
+  const { type } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} />)
+  type(PASTE("x\ny"))
+  type("ab")
+  // Caret to the very start, then walk right: the first step skips the whole
+  // token (landing before "a"), the second lands between "a" and "b" — never
+  // inside the label.
+  type("\u001b[H")   // home
+  type("\u001b[C\u001b[C")   // right, right → after the token, between a|b
+  type("Z")
+  await new Promise(r => setTimeout(r, 30))
+  type("\r")
+  await new Promise(r => setTimeout(r, 30))
+  expect(got).toEqual(["x\nyaZb"])
+})
+
+test("home with a leading token leaves the caret before it, label intact", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={() => {}} />)
+  type(PASTE("x\ny"))
+  type("tail")
+  type("\u001b[H")   // home: caret starts before the token already
+  type("\u001b[C")   // right: snaps past the whole token, not into it
+  type("\u007f")     // backspace at the token's left edge deletes the token whole
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  expect(f).not.toContain("[paste #1")
+  expect(f).not.toContain("\u0000")
+  type("\r")
+  await new Promise(r => setTimeout(r, 30))
+})
+
+test("corrupted-label regression: mid-token caret position is unreachable", async () => {
+  const got: string[] = []
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} />)
+  type("ab")
+  type(PASTE("x\ny"))
+  type("\u001b[D\u001b[D\u001b[D\u001b[D\u001b[D")   // walk left through/past the token
+  type("M")   // typed at a snapped boundary
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  expect(f).toContain("[paste #1: 2 lines]")   // label never mangled
+  expect(f).not.toContain("\u0000[l")          // no partial-label corruption
+  type("\r")
+  await new Promise(r => setTimeout(r, 30))
+  // Submitted text expands cleanly: no stray NUL bytes reach the model.
+  expect(got).toHaveLength(1)
+  expect(got[0]).not.toContain("\u0000")
+  expect(got[0]).toContain("x\ny")
+})

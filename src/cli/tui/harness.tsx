@@ -13,7 +13,12 @@ export function renderTui(tree: unknown, opts: { rows?: number } = {}) {
   const stdout: any = new EventEmitter()
   Object.assign(stdout, {
     columns: 100, rows: opts.rows ?? 30, isTTY: true,
-    write(s: string, cb?: (err?: Error | null) => void) { frames.push(s); cb?.(null); return true },
+    write(s: string, cb?: (err?: Error | null) => void) {
+      // Terminal mode toggles (bracketed paste on/off) are not UI frames —
+      // recording them makes lastFrame() the mode switch instead of content.
+      if (!/^\x1b\[\?2004[hl]$/.test(s)) frames.push(s)
+      cb?.(null); return true
+    },
   })
   const stdin: any = new EventEmitter()
   const pending: string[] = []
