@@ -6,7 +6,7 @@ import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
 import { toolsForAgent, agentModelTarget, resolveAgent } from "../../core/agents"
 import { buildPromptInput, safeAgentsMd } from "../context"
-import { frameRows, logoTopPad, transcriptWindow } from "../logo"
+import { frameRows, logoTopPad, splashWindow, transcriptWindow } from "../logo"
 import { ContextLine, LogoMark } from "./status"
 import { Transcript, TranscriptItem, clampItems, itemsFromHistory, type TItem } from "./transcript"
 import { Input } from "./input"
@@ -36,7 +36,10 @@ export function App(props: { env: TuiEnv }) {
   // items = finalized turns (rendered once via <Static> into the terminal's own
   // scrollback — the wheel and text selection scroll it natively, no mouse
   // tracking needed). live = the turn in progress, kept in the fixed frame.
-  const [items, setItems] = useState<TItem[]>([])
+  // The first static item is the logo: printed once at the top of the
+  // conversation, never re-rendered by the frame (a frame-pinned logo showed
+  // up between history and every new turn, forever).
+  const [items, setItems] = useState<TItem[]>([{ kind: "logo", text: "" }])
   const [live, setLive] = useState<TItem[]>([])
   const [busy, setBusy] = useState(false)
   const [ask, setAsk] = useState<{ tool: string; resource: string; resolve(a: "y" | "n" | "a"): void } | null>(null)
@@ -200,7 +203,7 @@ export function App(props: { env: TuiEnv }) {
     }
     if (overlayRef.current || ask) return   // overlays/dialogs own the keys
     // page size = the live window (same value the region gets below)
-    const budget = transcriptWindow(rows, 0)
+    const budget = transcriptWindow(rows)
     if (key.pageUp) { scrollRef.current += budget; setScroll(scrollRef.current); return }
     if (key.pageDown) { scrollRef.current = Math.max(0, scrollRef.current - budget); setScroll(scrollRef.current) }
     // Keyboard-only scroll (no PageUp key on many keyboards):
@@ -212,8 +215,9 @@ export function App(props: { env: TuiEnv }) {
   })
 
   // Splash pad: blank rows above the logo only while nothing has been said yet.
-  const pad = items.length === 0 && live.length === 0 ? logoTopPad(rows) : 0
-  const window = transcriptWindow(rows, pad)
+  const said = items.length > 1 || live.length > 0   // items[0] is the logo
+  const pad = !said ? logoTopPad(rows) : 0
+  const window = said ? transcriptWindow(rows) : splashWindow(rows)
   const visible = clampItems(live, window, scroll)
   const agentsMd = safeAgentsMd(env.projectRoot)
   return (
@@ -223,16 +227,26 @@ export function App(props: { env: TuiEnv }) {
           scroll it natively — no mouse tracking, no virtualization. It must sit
           OUTSIDE the fixed-height frame: ink measures it as zero height in the
           layout, but nesting it inside height={frameRows} made the frame's own
-          rows collapse whenever new static lines were printed. */}
-      <Static items={items}>
-        {(it, i) => <TranscriptItem key={i} it={it} marginTop={i > 0} />}
-      </Static>
+          rows collapse whenever new static lines were printed.
+          Mounted only once the conversation starts (`said`): items[0] is the
+          logo, which must print to the scrollback ABOVE the first turn — on the
+          empty splash the logo renders in the frame instead, so it is never
+          printed twice. */}
+      {said && (
+        <Static items={items}>
+          {(it, i) => <TranscriptItem key={i} it={it} marginTop={i > 0} />}
+        </Static>
+      )}
       {/* Root pinned to the viewport (minus one row, see frameRows): every region
           below the transcript is a fixed block, so the transcript is the only one
           that can give — sized from its content instead, a page of scroll or a
           wrapped long line changed the frame height and shifted the composer. */}
       <Box flexDirection="column" flexShrink={0} height={frameRows(rows)}>
-      <LogoMark topPad={pad} />
+      {/* Splash only: while nothing has been said, the logo opens centered in
+          the frame. Once the conversation starts it lives exclusively in the
+          scrollback (first <Static> item) — rendering it here put it between
+          the history and every new turn, forever. */}
+      {!said && <LogoMark topPad={pad} />}
       <Box flexDirection="column" flexGrow={1} flexShrink={1} minHeight={0} justifyContent="flex-end" overflowY="hidden">
         <Transcript items={visible} />
       </Box>
@@ -307,8 +321,12 @@ export function App(props: { env: TuiEnv }) {
                 setModel(target.model)
               } else if (row.model) setModel(row.model)
               // Replayed history is finalized content: it belongs in the scrollback.
-              setItems(itemsFromHistory(env.store.getMessages(id)).map(it =>
-                it.kind === "assistant" ? { ...it, kind: "system" } : it))
+              // APPEND, never replace: <Static> prints only new items, and the
+              // scrollback of the previous session cannot be taken back — a
+              // replace would leave the old lines in scrollback AND print the
+              // replayed ones again on top.
+              setItems(is => [...is, ...itemsFromHistory(env.store.getMessages(id)).map(it =>
+                it.kind === "assistant" ? { ...it, kind: "system" } : it)])
             }} />
           : overlay === "permissions"
             ? <PermissionMode

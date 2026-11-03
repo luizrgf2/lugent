@@ -40,13 +40,14 @@ export function ContextLine(p: { agent?: Agent; agentsMd: string | null; yolo?: 
   )
 }
 
-// The big L-mark with the block-letter wordmark beneath — rendered alone
-// above everything (no border). Rows and colors come from src/cli/logo.ts —
-// one shared raster + the SVG's exact gradient (#00f5a0 → #00d9f5) for both
-// TUI and plain REPL. `topPad` (blank rows above, from logoTopPad) is what
-// opens the splash screen with the mark in the vertical middle; it is 0 as
-// soon as the transcript has content, so the mark keeps its place at the
-// top during a session.
+// The big L-mark with the block-letter wordmark beneath — rendered ONLY on
+// the empty splash screen, vertically centered via `topPad` (from logoTopPad).
+// Once the conversation starts the logo leaves the frame forever: it prints
+// once as the first <Static> item, at the top of the conversation's
+// scrollback, where the terminal keeps it. Re-rendering it in the frame put
+// it between the history and every new turn. Rows and colors come from
+// src/cli/logo.ts — one shared raster + the SVG's exact gradient
+// (#00f5a0 → #00d9f5) for both TUI and plain REPL.
 export function LogoMark({ topPad = 0 }: { topPad?: number } = {}) {
   const cyan = logoHex(LOGO_ROWS.length - 1)
   return (
