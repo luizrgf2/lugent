@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite"
 import type { Message } from "./types"
 
-export interface SessionRow { id: string; provider: string; model: string; aborted: boolean; agent?: string | null }
+export interface SessionRow { id: string; provider: string; model: string; aborted: boolean; agent?: string | null; parent?: string | null }
 export interface SessionSummary { id: string; provider: string; model: string; createdAt: string; preview: string }
 
 export class Store {
@@ -15,6 +15,7 @@ export class Store {
     // migrate pre-/resume databases; "duplicate column" error means already migrated
     try { this.db.run(`ALTER TABLE session ADD COLUMN directory TEXT`) } catch {}
     try { this.db.run(`ALTER TABLE session ADD COLUMN agent TEXT`) } catch {}
+    try { this.db.run(`ALTER TABLE session ADD COLUMN parent TEXT`) } catch {}
     this.db.run(`CREATE TABLE IF NOT EXISTS message (
       id TEXT PRIMARY KEY, session_id TEXT REFERENCES session(id),
       role TEXT, content TEXT, tool_calls JSON, tool_call_id TEXT,
@@ -24,16 +25,22 @@ export class Store {
       PRIMARY KEY (session_id, tool, resource))`)
   }
 
-  createSession(provider: string, model: string, directory?: string, agent?: string | null): SessionRow {
+  createSession(provider: string, model: string, directory?: string, agent?: string | null, parent?: string | null): SessionRow {
     const id = `ses_${crypto.randomUUID()}`
-    this.db.run(`INSERT INTO session (id, created_at, provider, model, directory, agent) VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, new Date().toISOString(), provider, model, directory ?? null, agent ?? null])
-    return { id, provider, model, aborted: false, agent: agent ?? null }
+    this.db.run(`INSERT INTO session (id, created_at, provider, model, directory, agent, parent) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [id, new Date().toISOString(), provider, model, directory ?? null, agent ?? null, parent ?? null])
+    return { id, provider, model, aborted: false, agent: agent ?? null, parent: parent ?? null }
   }
 
   loadSession(id: string): SessionRow | undefined {
-    const row = this.db.query(`SELECT id, provider, model, aborted, agent FROM session WHERE id = ?`).get(id) as any
-    return row ? { id: row.id, provider: row.provider, model: row.model, aborted: !!row.aborted, agent: row.agent ?? null } : undefined
+    const row = this.db.query(`SELECT id, provider, model, aborted, agent, parent FROM session WHERE id = ?`).get(id) as any
+    return row ? { id: row.id, provider: row.provider, model: row.model, aborted: !!row.aborted, agent: row.agent ?? null, parent: row.parent ?? null } : undefined
+  }
+
+  /** Child sessions spawned from a parent (hidden from listSessions, kept for inspection). */
+  children(parentId: string): SessionRow[] {
+    const rows = this.db.query(`SELECT id, provider, model, aborted, agent, parent FROM session WHERE parent = ? ORDER BY created_at`).all(parentId) as any[]
+    return rows.map(r => ({ id: r.id, provider: r.provider, model: r.model, aborted: !!r.aborted, agent: r.agent ?? null, parent: r.parent ?? null }))
   }
 
   setAgent(sessionId: string, agent: string | null): void {
@@ -47,6 +54,7 @@ export class Store {
              (SELECT content FROM message m WHERE m.session_id = s.id AND m.role = 'user' ORDER BY m.created_at, m.rowid LIMIT 1) AS preview
       FROM session s
       WHERE s.directory = ?
+        AND s.parent IS NULL
         AND EXISTS (SELECT 1 FROM message m WHERE m.session_id = s.id)
       ORDER BY s.created_at DESC`).all(directory) as any[]
     return rows.map(r => ({ id: r.id, provider: r.provider, model: r.model, createdAt: r.created_at, preview: r.preview ?? "" }))
