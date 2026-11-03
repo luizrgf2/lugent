@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite"
 import { rmSync } from "node:fs"
 import { test, expect, beforeEach, afterAll } from "bun:test"
-import { Store } from "./store"
+import { Store, sessionPreview } from "./store"
 
 const DB = "/tmp/opencode/lugent-test.db"
 let store: Store
@@ -78,6 +78,54 @@ test("migrates existing database: directory column added, old data intact", () =
   expect(store2.listSessions("/x")).toEqual([])   // new session empty → not listed
   expect(store2.loadSession("ses_old")?.provider).toBe("local")
   store2.close()
+})
+
+test("sessionPreview: multi-line prompt collapses to single meaningful line", () => {
+  const long = `Help me debug this crash\n\n\`\`\`\nconst x = 1\nconst y = 2\n\`\`\`\n\n- also check the config\n# heading\n\nThe server drops connections after exactly 30 seconds under load with many concurrent websocket clients holding open sessions and streaming payloads across regions.`
+  const p = sessionPreview(long)
+  expect(p.includes("\n")).toBe(false)
+  expect(p.startsWith("Help me debug this crash")).toBe(true)
+  expect(p.length).toBeLessThanOrEqual(96)
+})
+
+test("sessionPreview: code-only first message uses fenced content, no fence markers", () => {
+  const code = "```\nconst retries = config.maxRetries ?? 3\nif (!retries) throw new Error('no retries configured')\n```"
+  const p = sessionPreview(code)
+  expect(p.includes("```")).toBe(false)
+  expect(p.includes("\n")).toBe(false)
+  expect(p.startsWith("const retries")).toBe(true)
+})
+
+test("sessionPreview: short clean prompt is kept as-is (trimmed)", () => {
+  expect(sessionPreview("  fix login flow  ")).toBe("fix login flow")
+})
+
+test("listSessions: orders by last message, not creation", () => {
+  const old = store.createSession("local", "qwen", "/proj/a")   // created first
+  const fresh = store.createSession("local", "qwen", "/proj/a") // created later
+  store.appendMessage({ id: "m-old-1", sessionId: old.id, role: "user", content: "initial task", createdAt: new Date(1).toISOString() })
+  store.appendMessage({ id: "m-old-2", sessionId: old.id, role: "assistant", content: "done", createdAt: new Date(2).toISOString() })
+  store.appendMessage({ id: "m-fresh-1", sessionId: fresh.id, role: "user", content: "new task", createdAt: new Date(3).toISOString() })
+  // old session received a NEW message after fresh's only message
+  store.appendMessage({ id: "m-old-3", sessionId: old.id, role: "user", content: "follow-up on old session", createdAt: new Date(4).toISOString() })
+  const list = store.listSessions("/proj/a")
+  expect(list.map(s => s.id)).toEqual([old.id, fresh.id])   // old session active last → first
+})
+
+test("listSessions: updatedAt is the max message created_at", () => {
+  const s = store.createSession("local", "qwen", "/proj/a")
+  store.appendMessage({ id: "m1", sessionId: s.id, role: "user", content: "one", createdAt: new Date(10).toISOString() })
+  store.appendMessage({ id: "m2", sessionId: s.id, role: "assistant", content: "two", createdAt: new Date(20).toISOString() })
+  const list = store.listSessions("/proj/a")
+  expect(list[0].updatedAt).toBe(new Date(20).toISOString())
+})
+
+test("sessionPreview: stored preview in listSessions is single-line sanitized", () => {
+  const s = store.createSession("local", "qwen", "/proj/a")
+  store.appendMessage({ id: "m1", sessionId: s.id, role: "user", content: "review this\n\n- item one\n- item two\n```\ncode here\n```", createdAt: new Date().toISOString() })
+  const list = store.listSessions("/proj/a")
+  expect(list[0].preview.includes("\n")).toBe(false)
+  expect(list[0].preview.startsWith("review this")).toBe(true)
 })
 
 test("permission grant + hasPermission", () => {

@@ -16,6 +16,20 @@ export function truncate(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 1) + "…"
 }
 
+/** Compact relative age for session listings: "agora", Xm, Xh, Xd, else the date. */
+export function timeAgo(iso: string): string {
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return iso
+  const mins = Math.floor((Date.now() - then) / 60000)
+  if (mins < 1) return "agora"
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days}d`
+  return iso.slice(0, 10)
+}
+
 export function padLine(text: string, inner: number): string {
   return `│ ${text}${" ".repeat(Math.max(0, inner - text.length))} │`
 }
