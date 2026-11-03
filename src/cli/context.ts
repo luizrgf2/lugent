@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import type { PromptInput } from "../core/prompt"
 import type { Agent } from "../core/types"
-import { toolsForAgent } from "../core/agents"
+import { toolsForAgent, subagentsFor } from "../core/agents"
 import type { ReplEnv } from "./repl"
 
 export function safeBranch(root: string): string | null {
@@ -26,5 +26,9 @@ export function buildPromptInput(env: ReplEnv, _model: string, agent?: Agent): P
     skills: agent && !tools.some(t => t.name === "skill") ? [] : env.skills,
     tools: tools.map(t => ({ name: t.name, description: t.description, schema: t.schema })),
     agentPrompt: agent?.prompt,
+    // Only tell the model subagents exist when it actually has the tool to launch them.
+    subagents: tools.some(t => t.name === "subagent")
+      ? subagentsFor(env.agents ?? []).map(a => ({ id: a.id, description: a.description }))
+      : [],
   }
 }
