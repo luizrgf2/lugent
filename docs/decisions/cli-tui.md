@@ -113,6 +113,14 @@ Decision: every manual model switch (`/model` picker in the TUI, `/model <provid
 Why: the session row already carried `provider`/`model` from creation time, but the pick lived only in memory — leave mid-session on deepseek, come back, and /resume silently put you back on the creation default. Pinning the choice to the row makes "the session remembers" true by construction and costs one UPDATE per explicit switch (never per turn).
 Cost if wrong: a switch that turns out unwanted is remembered too — the fix is one more `/model`, not config surgery. Legacy rows keep their creation-time values, which was the old behavior anyway. If per-agent model overrides and manual picks start fighting in practice (agent wins on resume even after a manual pick), the trigger is a "manual pick sticks over agent" row in the precedence chain, not a schema change.
 
+## 2026-11-03 — The composer owns plain Home/End; keyboard-only frame scroll is Shift+arrows and PageUp/PageDown
+
+Decision: the composer (`Input`) gained a real insertion caret with ←/→/Home/End moving it, so `app.tsx` dropped its plain `key.home`/`key.end` scroll branches (jump-to-top / snap-to-tail). Keyboard-only scrolling keeps PageUp/PageDown and Shift+↑/↓ — two redundant paths. The caret itself is a flat index into `value` (`cur` + `curRef` mirrors, clamped at every mutation), rendered by splitting the value around it inside a single nested `<Text>`; typing inserts at the caret and Backspace/Delete delete the character before it.
+
+Why: ink dispatches every key event to every registered `useInput` handler — there is no consumption mechanism — so with Home/End bound in both places one keypress scrolled the transcript *and* moved the composer caret. The old rendering also put the `▏` ornament unconditionally after the last character, which lied about the insertion point whenever the caret was not at the end (mid-text after ←, or anywhere in a multi-line pasted value). Splitting the value into before-caret/caret/after-caret fragments must happen inside one `<Text>`: ink measures sibling `<Text>` nodes by `widestLine()`, so a multi-line half of the value would collapse its own newline into phantom width and break the composer box.
+
+Cost if wrong: keyboard-only users lose Home/End as scroll-to-top/tail (PageUp/PageDown and Shift+arrows remain); if that misses Home/End mid-turn, revisit by gating the frame handler on the composer-disabled/busy flag so Home/End scroll only while a turn owns the input. Backspace and Delete both delete before the caret (no forward-delete) — a Del-key user expecting forward deletion deletes a character instead. Inside one `<Text>` the caret inherits the value's (default) color rather than a distinct one; it stays dim-only.
+
 ---
 
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.
