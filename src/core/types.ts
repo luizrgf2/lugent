@@ -1,5 +1,7 @@
 export type Role = "user" | "assistant" | "tool"
 
+export type AgentMode = "primary" | "subagent" | "all"
+
 export interface ToolCall { id: string; name: string; args: unknown }
 
 export interface Message {
@@ -29,6 +31,7 @@ export interface AgentModelRef { provider: string; model: string }
 export interface Agent {
   id: string
   description?: string
+  mode?: AgentMode
   model?: AgentModelRef
   tools?: string[]
   permissions?: Record<string, "allow" | "ask" | "deny">

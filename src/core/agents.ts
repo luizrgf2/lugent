@@ -50,6 +50,24 @@ export function resolveAgent(agents: Agent[], id?: string): Agent | undefined {
   return (id ? agents.find(a => a.id === id) : undefined) ?? agents.find(a => a.id === "build")
 }
 
+/** Launchable through the `subagent` tool (`mode: subagent` or `all`). */
+export function canBeSubagent(agent: Agent): boolean {
+  return agent.mode === "subagent" || agent.mode === "all"
+}
+
+/** Selectable as the session's agent (absent mode counts as `primary`). */
+export function canBePrimary(agent: Agent): boolean {
+  return agent.mode !== "subagent"
+}
+
+export function subagentsFor(agents: Agent[]): Agent[] {
+  return agents.filter(canBeSubagent)
+}
+
+export function primaryAgents(agents: Agent[]): Agent[] {
+  return agents.filter(canBePrimary)
+}
+
 /** "[read, \"glob\"]" → ["read", "glob"] */
 export function parseList(raw: string): string[] {
   return raw.replace(/[[\]"']/g, "").split(",").map(s => s.trim()).filter(Boolean)
@@ -104,6 +122,11 @@ function loadAgentFile(dir: string, rel: string, knownTools: string[]): Agent | 
   const known = (t: string) => knownTools.length === 0 || knownTools.includes(t)
   const agent: Agent = { id, prompt }
   if (data.description) agent.description = data.description
+  if (data.mode !== undefined) {
+    const m = data.mode.trim()
+    if (m === "primary" || m === "subagent" || m === "all") agent.mode = m
+    else console.warn(`agent ${id}: bad mode "${data.mode}" — using primary`)
+  }
   if (data.color !== undefined) {
     const c = parseColor(data.color)
     if (c) agent.color = c
