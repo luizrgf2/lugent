@@ -183,6 +183,29 @@ const askTool = {
   permission: "ask" as const, execute: async () => ({ output: "ok" }),
 }
 
+test("idle frame is chrome-only: no blank gap between the last message and the composer", async () => {
+  // Between turns the conversation lives in the scrollback and the live
+  // transcript is empty — the idle frame must be only the chrome, or ~rows of
+  // blank rows open up between the last message and the composer (the logo
+  // used to fill them; when it moved to the scrollback they became a void).
+  // The busy frame stays the full viewport-height column (frameRows) — that
+  // path is covered by the window/pinning tests; this test pins the idle one.
+  const provider = { chat: async (a: any) => { a.onToken?.("short answer"); return { content: "short answer", toolCalls: [] } } }
+  const env = fakeEnv({ tools: [], makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
+  await new Promise(r => setTimeout(r, 30))
+  type("q1\r")
+  await waitFor(() => lastFrame().includes(CARET))
+  await new Promise(r => setTimeout(r, 150))   // commit render lands after busy clears
+  const f = lastFrame().split("\n")
+  const answer = f.findLastIndex(l => l.includes("short answer"))
+  const composer = f.findLastIndex(l => l.includes("╭"))
+  // the composer sits right under the conversation: composer, context line and
+  // the blank separator are the whole frame — no screen-tall empty region.
+  expect(composer).toBeGreaterThan(answer)
+  expect(composer - answer).toBeLessThanOrEqual(4)   // answer → blank sep → (frame top) → composer
+})
+
 test("turn flow: submit → reasoning + answer appear in transcript", async () => {  const provider = {
     chat: async (a: any) => {
       a.onReasoning?.("pondering")

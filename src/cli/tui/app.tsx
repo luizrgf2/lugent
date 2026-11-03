@@ -6,7 +6,7 @@ import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
 import { toolsForAgent, agentModelTarget, resolveAgent } from "../../core/agents"
 import { buildPromptInput, safeAgentsMd } from "../context"
-import { frameRows, logoTopPad, splashWindow, transcriptWindow } from "../logo"
+import { frameRows, logoTopPad, splashWindow, transcriptWindow, CHROME_HEIGHT } from "../logo"
 import { ContextLine, LogoMark } from "./status"
 import { Transcript, TranscriptItem, clampItems, itemsFromHistory, type TItem } from "./transcript"
 import { Input } from "./input"
@@ -219,6 +219,14 @@ export function App(props: { env: TuiEnv }) {
   const pad = !said ? logoTopPad(rows) : 0
   const window = said ? transcriptWindow(rows) : splashWindow(rows)
   const visible = clampItems(live, window, scroll)
+  // Frame height: capped at the viewport while a turn runs, an overlay/dialog
+  // is open or the splash is up, but only as tall as the chrome when idle with
+  // an empty live transcript — the conversation lives in the terminal's own
+  // scrollback above, so a viewport-tall idle frame would put ~rows of blank
+  // rows between the last message and the composer (the logo used to fill
+  // them). Bottom-anchored frames make the growing/shrinking invisible in ink.
+  const busyView = busy || !!overlay || !!ask || live.length > 0 || !said
+  const frameH = busyView ? frameRows(rows) : Math.min(CHROME_HEIGHT, frameRows(rows))
   const agentsMd = safeAgentsMd(env.projectRoot)
   return (
     <>
@@ -237,11 +245,11 @@ export function App(props: { env: TuiEnv }) {
           {(it, i) => <TranscriptItem key={i} it={it} marginTop={i > 0} />}
         </Static>
       )}
-      {/* Root pinned to the viewport (minus one row, see frameRows): every region
-          below the transcript is a fixed block, so the transcript is the only one
-          that can give — sized from its content instead, a page of scroll or a
-          wrapped long line changed the frame height and shifted the composer. */}
-      <Box flexDirection="column" flexShrink={0} height={frameRows(rows)}>
+      {/* Root pinned to the viewport (minus one row, see frameRows) while busy;
+          when idle with an empty live transcript it shrinks to the chrome alone
+          (frameH above) so the composer sits right under the scrollback'd
+          conversation instead of rows of blank. */}
+      <Box flexDirection="column" flexShrink={0} height={frameH}>
       {/* Splash only: while nothing has been said, the logo opens centered in
           the frame. Once the conversation starts it lives exclusively in the
           scrollback (first <Static> item) — rendering it here put it between
