@@ -3,7 +3,7 @@ import { runTurn } from "./core/loop"
 import { Store } from "./core/store"
 import { makeTools } from "./core/tools"
 import { loadSkills } from "./core/skills"
-import { loadAgents, toolsForAgent } from "./core/agents"
+import { loadAgents, toolsForAgent, subagentsFor } from "./core/agents"
 import { rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs"
 
 const ROOT = "/tmp/opencode/e2e"
@@ -21,6 +21,8 @@ beforeAll(() => {
     `---\ndescription: Reviews read-only\nmodel: fake/fake-model\ntools: [read, glob]\n---\nYou are a reviewer. Do not edit files.`)
   writeFileSync(`${ROOT}/.agents/agents/probe.md`,
     `---\ndescription: Probes a file\nmode: subagent\ntools: [read]\n---\nYou are PROBE. Read one file and summarize it.`)
+  writeFileSync(`${ROOT}/.agents/agents/allrounder.md`,
+    `---\ndescription: Handles anything\nmode: all\ntools: [read]\n---\nYou are ALLROUNDER.`)
 })
 afterAll(() => {
   rmSync(ROOT, { recursive: true, force: true })
@@ -165,7 +167,7 @@ test("e2e: a turn launches a disk subagent and folds its answer back", async () 
   const session = store.createSession("fake", "fake-model", ROOT)
   const tools = makeTools(ROOT)
   const agents = loadAgents(ROOT)
-  const subagents = agents.filter(a => a.mode === "subagent")
+  const subagents = subagentsFor(agents)
   const childPrefixes: string[] = []
   const childTools: string[][] = []
   let parentRounds = 0
@@ -196,6 +198,7 @@ test("e2e: a turn launches a disk subagent and folds its answer back", async () 
   }, session.id, "use a subagent")
 
   expect(r.aborted).toBe(false)
+  expect(subagents.map(a => a.id).sort()).toEqual(["allrounder", "probe"])  // mode: all joins mode: subagent
   expect(store.getMessages(session.id).find(m => m.role === "tool")!.content).toBe("probe says 42")
   expect(childPrefixes[0]).toContain("You are PROBE")
   expect(childPrefixes[0]).not.toContain("# Subagents")   // the catalog is gone in the child
