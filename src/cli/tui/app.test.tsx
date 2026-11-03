@@ -148,6 +148,22 @@ test("LUGENT wordmark renders bold right below the mark, centered", async () => 
   expect(wm.trim()).toContain("█     █   █")   // block L U, first wordmark row
 })
 
+test("logo printed to the scrollback is horizontally centered", async () => {
+  const provider = { chat: async (a: any) => { a.onToken?.("hello"); return { content: "hello", toolCalls: [] } } }
+  const env = fakeEnv({ makeProvider: () => provider as any })
+  const { type, allOutput } = renderTui(<App env={env} />, { rows: 30 })
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  await waitFor(() => type.length > 0 && allOutput().includes("hello"))
+  // The <Static> print of the logo is the first one handed to the terminal
+  // (the splash frame shows it centered already). It used to stick flush-left:
+  // <Static> renders outside the frame and got measured at content width.
+  const bar = allOutput().split("\n").filter(l => l.includes("▀▀▀▀▀▀▀▀"))
+  const starts = new Set(bar.map(l => [...l].indexOf("▀")).filter(i => i >= 0))
+  const centered = Math.floor(100 / 2 - 8)   // 16-wide bar on a 100-col terminal
+  for (const s of starts) expect(Math.abs(s - centered)).toBeLessThanOrEqual(4)
+})
+
 test("provider/model is always visible on the bottom line next to the spinner", async () => {
   const askTool = { name: "askme", description: "ask", schema: { type: "object", properties: {} }, permission: "ask" as const, execute: async () => ({ output: "ok" }) }
   const provider = { chat: async (a: any) => new Promise(res => setTimeout(() => res({ content: "hi", toolCalls: [] }), 60)) }

@@ -1,5 +1,5 @@
 import { memo } from "react"
-import { Box, Text } from "ink"
+import { Box, Text, useStdout } from "ink"
 import { parseMarkdown, type Seg } from "./markdown"
 import { glyph } from "../ui"
 import { LOGO_ROWS, WORDMARK_ROWS, WORDMARK_SPLIT, logoHex } from "../logo"
@@ -99,10 +99,17 @@ export function clampItems(items: TItem[], maxLines: number, skipBottom = 0): TI
 // very top of the conversation (<Static>), where the terminal's own scrollback
 // keeps it — the live frame must never re-render it (that showed the logo
 // between history and every new turn). Same rows/colors as LogoMark.
+// Centered via an explicit width: <Static> renders OUTSIDE the frame, so its
+// subtree is measured at its own content width (35 = the wordmark) and
+// alignItems="center" alone would only center inside that — flush-left on
+// screen (the splash logo stays centered because it lives INSIDE the frame,
+// which spans the terminal). Forcing the box to the real terminal width
+// restores the same per-row centering as the splash LogoMark.
 function LogoItem() {
   const cyan = logoHex(LOGO_ROWS.length - 1)
+  const cols = (useStdout().stdout as any)?.columns ?? 80
   return (
-    <Box flexDirection="column" alignItems="center">
+    <Box flexDirection="column" alignItems="center" width={cols}>
       {LOGO_ROWS.map((l, i) => (
         <Text key={i} color={logoHex(i)}>{l}</Text>
       ))}
