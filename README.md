@@ -230,14 +230,15 @@ An agent is a named profile — system prompt, model, tool allowlist, permission
 
 ### Built-in agents
 
-Two agents are always present, in every install (inspired by OpenCode's pair, adapted: no rule engine, no plan files):
+Three agents are always present, in every install (`build`/`plan` from OpenCode's pair, adapted: no rule engine, no plan files; `general` its default subagent):
 
-| Id | Prompt | Tools | Permissions |
-| --- | --- | --- | --- |
-| `build` | the base system prompt | all | tool defaults |
-| `plan` | "plan mode": explore and design, no file changes | all but `edit`/`write` | `{edit: deny, write: deny}` |
+| Id | Mode | Prompt | Tools | Permissions |
+| --- | --- | --- | --- | --- |
+| `build` | primary | the base system prompt | all | tool defaults |
+| `plan` | primary | "plan mode": explore and design, no file changes | all but `edit`/`write` | `{edit: deny, write: deny}` |
+| `general` | subagent | general-purpose task runner, fresh context | all (spawn drops `subagent` itself) | tool defaults |
 
-Built-ins carry display colors (`build` magenta, `plan` yellow); the TUI context line — fixed above the input — shows a yellow `§ AGENTS.md loaded` when a project `AGENTS.md` was loaded, plus `· agent <id>` in the agent's color.
+Built-ins carry display colors (`build` magenta, `plan` yellow, `general` cyan); the TUI context line — fixed above the input — shows a yellow `§ AGENTS.md loaded` when a project `AGENTS.md` was loaded, plus `· agent <id>` in the agent's color.
 
 `build` is the startup default, so there is always a way back to a normal session (`/agent build`). `plan` can read, search and run shell commands — shell stays permission-controlled, as in OpenCode — it just cannot modify files. Both load **first**, so a file with the same id (user or project) overrides the built-in without removing it: drop `.agents/agents/plan.md` to give your own plan agent.
 
@@ -271,6 +272,7 @@ A `mode: subagent` (or `all`) agent is not a session you switch into — it is a
 - **Depth 1**: a child never gets the `subagent` tool or the catalog, so it cannot launch a grandchild.
 - Children are persisted (with a `parent` link) but **hidden** from `/resume` and the TUI picker; only the child's final message returns to the parent.
 - `mode: subagent` agents are not offered in `/agent` — they are launch targets, not session personas.
+- The `general` built-in ships as a subagent, so delegation works with zero files; shadow or repurpose it with `.agents/agents/general.md` like any built-in.
 
 ```markdown
 ---

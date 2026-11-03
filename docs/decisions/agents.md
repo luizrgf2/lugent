@@ -50,6 +50,11 @@ Decision: `listSessions` excludes rows with a non-null `parent`; the child is pe
 Why: the child's answer already lives in the parent's transcript; listing children would clutter the picker for no user action. Hiding is one SQL predicate.
 Cost if wrong: inspecting a past child needs its id or a future child browser; no data is lost.
 
+## 2026-11-03 — `general`: a built-in subagent, so delegation works out of the box
+Decision: `BUILTIN_AGENTS` gains `general` — `mode: subagent`, full toolset, tool-default permissions, cyan — mirroring OpenCode's default delegate; it shadows like any built-in (`.agents/agents/general.md`).
+Why: without it the `subagent` tool errors "unknown subagent" in a clean install, and the whole feature is invisible until the user writes a file; OpenCode ships `general` for the same reason.
+Cost if wrong: every default prefix now carries a one-line `# Subagents` section (the golden snapshot still pins stability, and a project shadowing `general` with a primary-mode file removes it); the built-in's prompt is code, so rewording is a commit.
+
 ---
 
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.

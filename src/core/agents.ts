@@ -15,10 +15,18 @@ You cannot edit or write files — those tools are withheld from you. When work 
 needed, state exactly what to change and let the user switch to the build agent
 to apply it.`
 
+const GENERAL_PROMPT = `You are a lugent subagent executing one delegated task in a child session.
+
+You see none of the parent conversation: the prompt that spawned you is your entire
+brief. Treat it as self-contained — if context you need is missing, say exactly what
+is missing instead of guessing. Explore the codebase with your tools, do the work,
+and return the result the parent asked for: concise and factual, no preamble.`
+
 /**
  * Agents every install has (OpenCode's `build` / `plan` pair, adapted: no rule
- * engine and no plan files). They load first, so a file with the same id — user
- * or project scope — overrides one without removing it.
+ * engine and no plan files, plus its default `general` subagent). They load
+ * first, so a file with the same id — user or project scope — overrides one
+ * without removing it.
  */
 const COLORS = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "gray", "grey"]
 
@@ -42,6 +50,16 @@ export const BUILTIN_AGENTS: Agent[] = [
     permissions: { edit: "deny", write: "deny" },
     color: "yellow",
     prompt: PLAN_PROMPT,
+  },
+  {
+    // OpenCode's default subagent: every install can delegate out of the box.
+    // Full toolset (spawn already filters `subagent` for depth 1) and tool-default
+    // permissions; shadow it with .agents/agents/general.md like any built-in.
+    id: "general",
+    description: "General-purpose task runner — full toolset, fresh context",
+    mode: "subagent",
+    color: "cyan",
+    prompt: GENERAL_PROMPT,
   },
 ]
 

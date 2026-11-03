@@ -60,7 +60,7 @@ Documentation pattern for this repo: **one small doc per topic, never one big fi
 | adding/changing a tool | `README.md` § "Tools" (keep table + defaults in sync) |
 | config loading (`config.ts`) | `README.md` § "Configuration" (precedence, `{env:VAR}`) |
 | `src/core/skills.ts` (skill loading) | `README.md` § "Skills" — user `~/.agents/skills` + project `.agents/skills`; same id → project wins; how it reaches the prefix: `docs/architecture/prompt-and-agents.md` |
-| `src/core/agents.ts` (agent format, `mode`, tools/permissions, built-ins `build`/`plan`, `/agent`) | `README.md` § "Agents" + `docs/architecture/prompt-and-agents.md` + `docs/decisions/agents.md` |
+| `src/core/agents.ts` (agent format, `mode`, tools/permissions, built-ins `build`/`plan`/`general`, `/agent`) | `README.md` § "Agents" + `docs/architecture/prompt-and-agents.md` + `docs/decisions/agents.md` |
 | subagents (`src/core/loop.ts` spawn, `src/core/tools/subagent.ts`, child sessions) | `README.md` § "Agents" → Subagents + `docs/architecture/turn-flow.md` (child branch) + `docs/decisions/agents.md` (2026-11-03 entries) |
 | `src/core/mcp/*` (transports, client, tool bridge, manager) | `docs/architecture/mcp.md` — transport seam + legacy `initialize` revision; `README.md` § "MCP" |
 | `src/core/mcp/oauth/*` (discovery, PKCE, callback, token, store, flow) | `docs/architecture/mcp-oauth.md` + `README.md` § "MCP" — https-only discovery, the `FetchImpl` seam, token storage rules |

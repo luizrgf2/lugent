@@ -198,7 +198,7 @@ test("e2e: a turn launches a disk subagent and folds its answer back", async () 
   }, session.id, "use a subagent")
 
   expect(r.aborted).toBe(false)
-  expect(subagents.map(a => a.id).sort()).toEqual(["allrounder", "probe"])  // mode: all joins mode: subagent
+  expect(subagents.map(a => a.id).sort()).toEqual(["allrounder", "general", "probe"])  // built-in + mode: all + mode: subagent
   expect(store.getMessages(session.id).find(m => m.role === "tool")!.content).toBe("probe says 42")
   expect(childPrefixes[0]).toContain("You are PROBE")
   expect(childPrefixes[0]).not.toContain("# Subagents")   // the catalog is gone in the child

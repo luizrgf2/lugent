@@ -127,7 +127,15 @@ test("effectivePermission: override wins over registry default", () => {
 
 test("build and plan always load, even with no files on disk", () => {
   expect(fileAgents()).toEqual([])
-  expect(loadAgents(PROJ, HOME, KNOWN).map(a => a.id).sort()).toEqual(["build", "plan"])
+  expect(loadAgents(PROJ, HOME, KNOWN).map(a => a.id).sort()).toEqual(["build", "general", "plan"])
+})
+
+test("general is a subagent out of the box: full toolset, no overrides, no skills section needed", () => {
+  const general = byId("general")
+  expect(general.mode).toBe("subagent")
+  expect(general.tools).toBeUndefined()
+  expect(general.permissions).toBeUndefined()
+  expect(toolsForAgent(ALL_TOOLS, general).map(t => t.name)).toEqual(["read", "edit", "write", "shell"])
 })
 
 test("build reuses the base system prompt and keeps every tool", () => {
@@ -198,6 +206,8 @@ test("canBeSubagent / canBePrimary and the filters", () => {
   expect(primaryAgents([p, s, a]).map(x => x.id)).toEqual(["p", "a"])
 })
 
-test("built-ins are primary: no launchable subagent by default", () => {
-  expect(loadAgents(PROJ, HOME, KNOWN).filter(canBeSubagent)).toEqual([])
+test("out of the box, `general` is the only launchable subagent", () => {
+  const subs = loadAgents(PROJ, HOME, KNOWN).filter(canBeSubagent)
+  expect(subs.map(a => a.id)).toEqual(["general"])
+  expect(loadAgents(PROJ, HOME, KNOWN).filter(canBePrimary).map(a => a.id).sort()).toEqual(["build", "plan"])
 })
