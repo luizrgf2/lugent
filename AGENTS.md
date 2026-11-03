@@ -11,6 +11,7 @@ lugent: minimal OpenCode-style coding agent. TS + Bun. **Pure core (`src/core/`)
 ## Conventions & gotchas
 
 - **Before creating a branch or a commit**: read `.agents/skills/git-conventions/SKILL.md` (branch names, commit types, decision-log rules). Decision log: `docs/decisions.md` is the index — new entries go to the area file under `docs/decisions/`.
+- **PR is automatic**: when a feature branch is ready (tests green, docs updated), push it and open the PR against `main` without asking — the owner has requested this standing rule repeatedly. Prefer squash merge so `main` keeps one commit per PR.
 
 - **TDD**: test file next to module (`foo.ts` / `foo.test.ts`). Watch it fail before implementing. This repo was built entirely test-first.
 - **Golden snapshot** `src/core/__snapshots__/prompt.test.ts.snap` pins the system prompt byte-for-byte (provider prefix-cache stability). If `src/core/prompt.ts` changes deliberately, update with `bun test -u` — accidental drift is a bug.
@@ -87,5 +88,15 @@ Before each commit (or declaring a task done), diff what changed against the doc
 - Any user-visible behavior change → `README.md`
 
 No match (internal-only refactor, test tweaks) → state "docs: no update needed" and move on. Doc updates ship in the same commit as the code they describe.
+
+## Canvas task dispatch protocol
+
+When Luiz sends a task in the Agent Canvas chat, do NOT answer it directly in this conversation. The agreed protocol (option 1, decided 2026-11-03):
+
+1. **Dispatch**: spawn a pipeline conversation on the agent server — `POST http://127.0.0.1:18000/api/conversations` with `X-Session-API-Key` (session key from env / `~/.openhands/agent-canvas/api-key.txt`), body: `agent_profile_id: 7cc78e02-4861-4cda-8999-bc84c004a9bc`, `workspace: {working_dir: "/projects/lugent", kind: "LocalWorkspace"}`, `initial_message` with the full self-contained briefing and `run: true`.
+2. **Notify start on WhatsApp — MANDATORY, sender does it in the same turn as the spawn** (the pipeline does not send "Task recebida" when spawned directly; only the webhook path does): `POST http://172.17.0.1:3000/send/message`, JSON `{"phone": $WHATSAPP_PHONE, "message": "🤖 📋 Task recebida — <one-line summary>\n<conversation-id>"}`, headers `Authorization: $WHATSAPP_BRIDGE_BASIC_AUTH`, `X-Device-Id: luiz`. A dispatch without this message is a protocol violation. Secrets are env vars; never log their values.
+3. The briefing must instruct the pipeline to **escalate ambiguous decisions over WhatsApp** (the orchestrator's `wa_notify` does this) and wait for the reply.
+4. Monitor via `GET http://127.0.0.1:18000/api/conversations/{id}`; notify completion the same way.
+5. The official webhook (`agent-canvas` / `task.received`) exists but its signing secret is not available to the agent (401) — direct spawn + explicit notify is the sanctioned path. Protocol is also persisted in the automation KV under `canvas.task-dispatch.protocol`. Keep this section committed — uncommitted AGENTS.md edits get wiped by pipeline git operations.
 
 Note: lugent itself loads this file into its system prompt (`safeAgentsMd` in `src/cli/context.ts`) — it doubles as dogfooded instructions.
