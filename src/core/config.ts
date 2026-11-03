@@ -1,12 +1,15 @@
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { dirname } from "node:path"
 import { homedir } from "node:os"
 
 export interface ProviderConfig { baseUrl: string; apiKey?: string }
+export type PermissionMode = "normal" | "yolo"
 export interface AppConfig {
   providers: Record<string, ProviderConfig>
   defaultProvider: string
   defaultModel: string
   defaultAgent?: string
+  permissionMode: PermissionMode
 }
 
 export interface McpCommon { enabled?: boolean; timeout?: number }
@@ -22,19 +25,41 @@ export function subEnv(v: string): string {
 export function loadConfig(root: string, globalPath = `${homedir()}/.config/lugent/config.json`): AppConfig {
   const paths = [`${root}/lugent.json`, globalPath]
   const file = paths.find(p => existsSync(p))
-  if (!file) return { providers: {}, defaultProvider: "", defaultModel: "" }
+  if (!file) return { providers: {}, defaultProvider: "", defaultModel: "", permissionMode: "normal" }
   const raw = JSON.parse(readFileSync(file, "utf8"))
   const providers: Record<string, ProviderConfig> = {}
   for (const [name, p] of Object.entries(raw.providers ?? {})) {
     const pc = p as ProviderConfig
     providers[name] = { baseUrl: pc.baseUrl, apiKey: pc.apiKey ? subEnv(pc.apiKey) : undefined }
   }
+  let permissionMode: PermissionMode = "normal"
+  if (raw.permissionMode !== undefined) {
+    if (raw.permissionMode === "normal" || raw.permissionMode === "yolo") permissionMode = raw.permissionMode
+    else console.warn(`permissionMode: expected "normal" or "yolo", got ${JSON.stringify(raw.permissionMode)} — using "normal"`)
+  }
   return {
     providers,
     defaultProvider: raw.defaultProvider ?? "",
     defaultModel: raw.defaultModel ?? "",
     defaultAgent: raw.defaultAgent,
+    permissionMode,
   }
+}
+
+export const globalConfigPath = (): string => `${homedir()}/.config/lugent/config.json`
+
+/**
+ * Persist the user's permission-mode choice to the global config (never the
+ * project file — a repo must not decide trust level). Existing keys survive;
+ * an unparseable file is replaced. The mode still loads from the first file
+ * found, so a project `permissionMode` keeps overriding the saved choice.
+ */
+export function savePermissionMode(mode: PermissionMode, path = globalConfigPath()): void {
+  let raw: Record<string, unknown> = {}
+  try { raw = JSON.parse(readFileSync(path, "utf8")) } catch {}
+  raw.permissionMode = mode
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, JSON.stringify(raw, null, 2) + "\n")
 }
 
 function subEnvMap(m: unknown): Record<string, string> | undefined {

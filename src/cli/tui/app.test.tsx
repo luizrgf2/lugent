@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test"
-import { rmSync, mkdtempSync, writeFileSync } from "node:fs"
+import { rmSync, mkdtempSync, writeFileSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { EventEmitter } from "node:events"
 import { App, runTui } from "./app"
@@ -173,6 +173,33 @@ test("yolo badge sits on the context line, clearly separated", async () => {
   expect(line).toBeDefined()
   expect(line).toContain("AGENTS.md")   // same line as the context info
   expect(line).toContain("│")           // visible separator
+})
+
+test("permission mode: startup from config, /permissions persists to the global config", async () => {
+  const global = `/tmp/opencode/tui-mode-${Date.now()}.json`
+  rmSync(global, { force: true })
+  const provider = { chat: async () => ({ content: "ok", toolCalls: [] }) }
+  const env = fakeEnv({
+    makeProvider: () => provider,
+    config: { ...fakeEnv().config, permissionMode: "yolo" },
+  })
+  const { type, lastFrame } = renderTui(<App env={env} globalConfigPath={global} />)
+  const waitFor = async (want: string, ms = 3000) => {
+    const t0 = Date.now()
+    while (!lastFrame().includes(want)) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout waiting for "${want}"`)
+      await new Promise(r => setTimeout(r, 20))
+    }
+    await new Promise(r => setTimeout(r, 30))
+  }
+  await waitFor("YOLO")                                 // config yolo applies at startup
+  type("/permissions\r")
+  await waitFor("normal")
+  type("\u001b[A\r")                                    // yolo selected → ↑ to normal
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).not.toContain("YOLO")
+  expect(JSON.parse(readFileSync(global, "utf8")).permissionMode).toBe("normal")   // persisted
+  rmSync(global, { force: true })
 })
 
 const askTool = {

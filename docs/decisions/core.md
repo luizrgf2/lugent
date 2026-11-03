@@ -67,3 +67,9 @@ Third follow-up (same day): backoff rescheduled per user preference — first re
 Decision: `MAX_TOOL_ROUNDS` (50) is gone — a turn runs until the model stops calling tools; ctrl+c aborts is the only bound.
 Why: the cap cut real work mid-task twice in production use (the user saw "turn was stopped after 50 tool rounds" mid-debug); a tool-heavy turn is legitimate, and the user watching the transcript IS the runaway detector. The 10min stream cap and the MCP pagination cap remain — they guard byte-drip/proxy hangs, not work volume.
 Cost if wrong: a degenerate model looping tool calls forever bills tokens until the user hits ctrl+c. Re-add a cap (config-gated, default off) if that ever happens in practice.
+
+## 2026-11-03 — Permission mode persists to the global config
+
+Decision: `/permissions` (TUI) now saves the picked mode to `permissionMode` in the global config (`savePermissionMode` — merges keys, replaces a malformed file) and the TUI starts in `config.permissionMode` (default `normal`, invalid value warns and falls back). The pick always writes the global file, never the project's `lugent.json`; load is first-file-wins like `providers`, so a project `permissionMode` (e.g. `"yolo"`) overrides the saved global choice while present.
+Why: the user wants yolo as a *saved choice*, not per-session state; but a repo must not be able to flip trust on or off silently by itself — hence global-only writes with project-side override allowed explicitly, mirroring the existing providers precedence.
+Cost if wrong: a user who saves `yolo` globally forgets it and later opens an untrusted repo — every call auto-approves with no dialog (the red `YOLO` badge is the only signal). A per-project trust prompt would be the upgrade if that bites.

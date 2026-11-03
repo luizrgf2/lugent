@@ -4,6 +4,7 @@ import type { ReplEnv } from "../repl"
 import type { Agent } from "../../core/types"
 import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
+import { savePermissionMode, globalConfigPath } from "../../core/config"
 import { toolsForAgent, agentModelTarget, resolveAgent } from "../../core/agents"
 import { buildPromptInput, safeAgentsMd } from "../context"
 import { frameRows, logoTopPad, transcriptWindow } from "../logo"
@@ -30,7 +31,7 @@ function patchTail(items: TItem[], item: TItem): TItem[] {
     : [...items, item]
 }
 
-export function App(props: { env: TuiEnv }) {
+export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
   const { exit } = useApp()
   const env = props.env
   // items = finalized turns (rendered once via <Static> into the terminal's own
@@ -67,10 +68,12 @@ export function App(props: { env: TuiEnv }) {
   const [mcpStates, setMcpStates] = useState<McpServerState[]>([])
   /** Set while /mcp authenticate waits for the browser, so ctrl+c can cancel that, not the session. */
   const authAbortRef = useRef<AbortController | null>(null)
-  const [yolo, setYolo] = useState(false)
+  // Startup mode comes from the config (project file overrides the global
+  // default); picking in /permissions re-persists it to the global config.
+  const [yolo, setYolo] = useState(env.config.permissionMode === "yolo")
   const [retry, setRetry] = useState("")
   // Ref mirrors state: submit reads it — ink batching can make state stale.
-  const yoloRef = useRef(false)
+  const yoloRef = useRef(yolo)
   const { stdout } = useStdout()
 
   const closeOverlay = () => { overlayRef.current = null; setOverlay(null) }
@@ -317,6 +320,7 @@ export function App(props: { env: TuiEnv }) {
                   closeOverlay()
                   yoloRef.current = m === "yolo"
                   setYolo(m === "yolo")
+                  savePermissionMode(m, props.globalConfigPath ?? globalConfigPath())
                   setItems(is => [...is, { kind: "system", text: m === "yolo" ? "permission mode: yolo (auto-approve)" : "permission mode: normal" }])
                 }}
                 onClose={closeOverlay} />
