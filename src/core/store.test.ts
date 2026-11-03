@@ -162,3 +162,27 @@ test("reopening the database keeps the agent column (migration is idempotent)", 
   again.close()
   store = new Store(DB)   // restore the shared instance for afterAll cleanup
 })
+
+test("setModel switches provider/model on an existing session", () => {
+  const s = store.createSession("local", "qwen")
+  store.setModel(s.id, "9router", "deepseek/deepseek-chat")
+  const row = store.loadSession(s.id)
+  expect(row?.provider).toBe("9router")
+  expect(row?.model).toBe("deepseek/deepseek-chat")
+})
+
+test("setModel choice survives reopening the database (session remembers)", () => {
+  const s = store.createSession("local", "qwen", "/proj")
+  store.appendMessage({ id: "m1", sessionId: s.id, role: "user", content: "hi", createdAt: new Date(0).toISOString() })
+  store.setModel(s.id, "9router", "deepseek/deepseek-chat")
+  store.close()
+  const again = new Store(DB)
+  const row = again.loadSession(s.id)
+  expect(row?.provider).toBe("9router")
+  expect(row?.model).toBe("deepseek/deepseek-chat")
+  const summary = again.listSessions("/proj")[0]
+  expect(summary.provider).toBe("9router")
+  expect(summary.model).toBe("deepseek/deepseek-chat")
+  again.close()
+  store = new Store(DB)   // restore the shared instance for afterAll cleanup
+})

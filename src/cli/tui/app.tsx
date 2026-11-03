@@ -297,6 +297,8 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
               closeOverlay()
               setProvider(prov)
               setModel(m)
+              // The session remembers the picked model: /resume restores it later.
+              env.store.setModel(session.id, prov, m)
               setItems(is => [...is, { kind: "system", text: `${prov} · ${m}` }])
             }}
           />
@@ -330,7 +332,8 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
               if (target) {
                 setProvider(target.provider)
                 setModel(target.model)
-              } else if (row.model) setModel(row.model)
+              } else if (row.provider) setProvider(row.provider)   // resume the session's own provider, not the current one
+              if (target?.model ?? row.model) setModel(target?.model ?? row.model)
               // Replayed history is finalized content: it belongs in the scrollback.
               // APPEND, never replace: <Static> prints only new items, and the
               // scrollback of the previous session cannot be taken back — a

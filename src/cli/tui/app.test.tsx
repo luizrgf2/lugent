@@ -674,6 +674,60 @@ test("/model picker: provider → model → applied in status and transcript", a
   expect(f).toContain("→ 9router · qwen3.5:14b")     // transcript system line
 })
 
+test("/model picker persists the choice to the session row (session remembers)", async () => {
+  const provider = {
+    chat: async (a: any) => { a.onToken?.("ok"); return { content: "ok", toolCalls: [] } },
+    listModels: async () => ["qwen3.5:14b", "glm/glm-5.2"],
+  }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  const waitFor = async (want: string, ms = 3000) => {
+    const t0 = Date.now()
+    while (!lastFrame().includes(want)) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout waiting for "${want}"`)
+      await new Promise(r => setTimeout(r, 20))
+    }
+    await new Promise(r => setTimeout(r, 30))
+  }
+  await new Promise(r => setTimeout(r, 30))
+  type("hi\r")                                       // a turn first: session becomes listable
+  await waitFor("ok")
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                         // enter on 9router (current provider)
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                         // pick qwen3.5:14b
+  await waitFor("9router · qwen3.5:14b")
+  // the DB row carries the picked model, not the creation default
+  const rows = env.store.listSessions(env.projectRoot)
+  expect(rows.length).toBe(1)
+  expect(rows[0].provider).toBe("9router")
+  expect(rows[0].model).toBe("qwen3.5:14b")
+})
+
+test("/resume restores the resumed session's provider and model", async () => {
+  // past session worked on ollama/glm — the app now starts on the 9router default
+  const env = fakeEnv()
+  const old = env.store.createSession("ollama", "glm/glm-5.2", env.projectRoot)
+  env.store.appendMessage({ id: "u1", sessionId: old.id, role: "user", content: "past question", createdAt: new Date(0).toISOString() })
+
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  const waitFor = async (want: string, ms = 3000) => {
+    const t0 = Date.now()
+    while (!lastFrame().includes(want)) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout waiting for "${want}"`)
+      await new Promise(r => setTimeout(r, 20))
+    }
+    await new Promise(r => setTimeout(r, 30))
+  }
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("9router · glm/glm-5.2")   // starts on defaults
+  type("/resume\r")
+  await waitFor("past question")
+  type("\r")                                               // pick it
+  await waitFor("ollama · glm/glm-5.2")                    // provider AND model restored
+})
+
 test("ctrl+c while picker is open closes the picker, app stays alive", async () => {
   const provider = {
     chat: async () => ({ content: "ok", toolCalls: [] }),

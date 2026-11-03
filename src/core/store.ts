@@ -71,6 +71,11 @@ export class Store {
     this.db.run(`UPDATE session SET agent = ? WHERE id = ?`, [agent, sessionId])
   }
 
+  /** Manual /model switch: the session remembers its last provider/model, so /resume restores the choice. */
+  setModel(sessionId: string, provider: string, model: string): void {
+    this.db.run(`UPDATE session SET provider = ?, model = ? WHERE id = ?`, [provider, model, sessionId])
+  }
+
   /** Sessions of one directory, most recently active first (last message wins),
    *  preview = distilled first user message. Empty/legacy (null directory) rows excluded. */
   listSessions(directory: string): SessionSummary[] {

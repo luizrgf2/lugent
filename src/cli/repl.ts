@@ -67,7 +67,7 @@ export async function runRepl(env: ReplEnv): Promise<void> {
     if (slash) {
       if (slash.cmd === "exit") break
       if (slash.cmd === "clear") {
-        session = env.store.createSession(env.config.defaultProvider, model, env.projectRoot, agent?.id ?? null)
+        session = env.store.createSession(providerName, model, env.projectRoot, agent?.id ?? null)
         console.log(`new session ${session.id}`)
         continue
       }
@@ -86,7 +86,12 @@ export async function runRepl(env: ReplEnv): Promise<void> {
         agent = row.agent ? env.agents.find(a => a.id === row.agent) : undefined
         const target = agentModelTarget(agent, env.config.providers)
         if (target) { providerCfg = env.config.providers[target.provider]; providerName = target.provider; model = target.model }
-        else if (row.model) model = row.model
+        else {
+          // the session remembers its last provider/model — restore both, not just the model
+          if (row.provider && env.config.providers[row.provider]) { providerCfg = env.config.providers[row.provider]; providerName = row.provider }
+          else if (row.provider) { providerName = row.provider; providerCfg = undefined }
+          if (row.model) model = row.model
+        }
         console.log(`resumed ${row.id} (${env.store.getMessages(row.id).length} messages)${agent ? ` · agent ${agent.id}` : ""}`)
         continue
       }
@@ -163,6 +168,8 @@ export async function runRepl(env: ReplEnv): Promise<void> {
           providerCfg = env.config.providers[provName]
           providerName = provName
           if (modelName) model = modelName
+          // The session remembers the picked model: /resume restores it later.
+          env.store.setModel(session.id, providerName, model)
           console.log(`provider ${provName} model ${model}`)
         } else {
           console.log("usage: /model <provider> [model]")
