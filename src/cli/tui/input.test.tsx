@@ -104,3 +104,120 @@ test("no prefix match hides suggestions", async () => {
   expect(f).toContain("/x")
   expect(f).not.toContain("/exit"); expect(f).not.toContain("/model"); expect(f).not.toContain("/skills")
 })
+
+// --- Caret (cursor) state ---
+// The caret ▏ marks where insertion would happen. With the tail-only ornament it
+// always sat after the last character; these pin the real caret position.
+const LEFT = "\u001b[D"
+const RIGHT = "\u001b[C"
+const HOME = "\x1b[H"
+const END = "\x1b[F"
+
+test("mid-text cursor: arrows move the caret inside the text", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={() => {}} />)
+  type("hello")
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("hello▏")   // caret starts at the end
+  type(LEFT + LEFT)                          // caret between the l's
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  expect(f).toContain("hel▏lo")
+  expect(f).not.toContain("hello▏")
+})
+
+test("right arrow clamps at the end of the value", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={() => {}} />)
+  type("hello")
+  type(LEFT + LEFT)              // mid-text
+  type(RIGHT + RIGHT + RIGHT)    // one extra press: clamps at the end
+  type(LEFT)                     // ...so one left lands before the final 'o'
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("hell▏o")
+})
+
+test("left arrow clamps at the start; typing inserts there", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={() => {}} />)
+  type("hello")
+  type(LEFT.repeat(10))
+  type("X")
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("X▏hello")
+})
+
+test("home jumps to the start, end back to the end", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={() => {}} />)
+  type("hello")
+  type(HOME)
+  type("X")
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("X▏hello")
+  type(END)
+  type("!")
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("hello!▏")
+})
+
+test("backspace at the caret deletes the character before it", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={() => {}} />)
+  type("hello")
+  type(LEFT + LEFT)          // caret before the final 'l'
+  type("\u001b[3~")          // Delete key: deletes before the caret (lumped with Backspace)
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("he▏lo")
+})
+
+test("multi-line value: the caret renders on its line", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={() => {}} />)
+  // ink parses a bare \n as 'enter' (not key.return), so a typed \n inserts a
+  // newline without submitting — the same value shape a paste produces.
+  // (Ink pads box lines to full width, so assertions match per-line fragments.)
+  type("ab\ncd")
+  await new Promise(r => setTimeout(r, 30))
+  type(LEFT + LEFT + LEFT)   // caret at index 2: end of the first line, before \n
+  await new Promise(r => setTimeout(r, 30))
+  let f = lastFrame()
+  expect(f).toContain("ab▏")        // caret at line 1's end...
+  expect(f).not.toContain("cd▏")    // ...not at the value's tail
+  type(RIGHT)                // caret at index 3: start of line 2
+  await new Promise(r => setTimeout(r, 30))
+  f = lastFrame()
+  expect(f).toContain("▏cd")        // caret at line 2's start...
+  expect(f).not.toContain("ab▏")    // ...and no longer at line 1's end
+})
+
+test("history recall puts the caret at the end of the recalled text", async () => {
+  const got: string[] = []
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} />)
+  type("one\r")
+  await new Promise(r => setTimeout(r, 30))
+  type("\u001b[A")           // recall "one" — caret must land at the end
+  type(LEFT)                 // caret between 'n' and 'e'
+  type("!")                  // inserts there, caret moves past it
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  expect(f).toContain("on!▏e")
+  expect(f).not.toContain("!▏one")   // rules out a recall that reset the caret to 0
+})
+
+test("disabled input renders no caret at all", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={true} onSubmit={() => {}} />)
+  type("hi")
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).not.toContain("▏")
+})
+
+test("caret navigation leaves suggestions and history alone", async () => {
+  const got: string[] = []
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} completions={CMDS} />)
+  type("older\r")
+  await new Promise(r => setTimeout(r, 30))
+  type("/mo")                       // suggestions open on /mo
+  await new Promise(r => setTimeout(r, 30))
+  type(LEFT + RIGHT)                // navigate inside "/mo"
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  expect(f).toContain("switch provider/model")   // suggestions stayed open
+  type("\r")                        // enter still picks the highlighted suggestion
+  await new Promise(r => setTimeout(r, 30))
+  expect(got).toEqual(["older", "/model"])
+})

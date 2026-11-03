@@ -512,7 +512,7 @@ test("ctrl+c on a later turn aborts instead of exiting (counter resets per turn)
   expect(lastFrame()).toContain(">") // composer still alive
 })
 
-test("keyboard-only scroll: shift+up/down, home/end work like pageUp/pageDown", async () => {
+test("keyboard-only scroll: shift+up/down and pageUp/pageDown; plain home/end do not scroll", async () => {
   let release: () => void = () => {}
   const gate = new Promise<void>(r => { release = r })
   const prov = {
@@ -533,15 +533,15 @@ test("keyboard-only scroll: shift+up/down, home/end work like pageUp/pageDown", 
   type("\x1b[1;2B")                        // shift+down: back to tail
   await new Promise(r => setTimeout(r, 80))
   expect(lastFrame()).toContain("line-59")
-  type("\x1b[H")                           // home: jump to the very top
-  await new Promise(r => setTimeout(r, 80))
-  const f = lastFrame()
-  expect(f).toContain("line-00")
-  expect(f).not.toContain("line-59")
-  type("\x1b[F")                           // end: snap back to the tail
+  type("\x1b[H")                           // home: composer-owned now — frame stays at the tail
   await new Promise(r => setTimeout(r, 80))
   expect(lastFrame()).toContain("line-59")
-  expect(lastFrame()).not.toContain("line-00")
+  type("\x1b[F")                           // end: likewise a no-op for scrolling
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).toContain("line-59")
+  type("\x1b[5~")                          // pageUp still scrolls (plain Home/End left the frame handler)
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).not.toContain("line-59")
   release()
   await waitFor(() => lastFrame().includes(CARET))
 })

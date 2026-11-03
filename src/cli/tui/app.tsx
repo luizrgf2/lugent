@@ -209,12 +209,11 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
     const budget = transcriptWindow(rows)
     if (key.pageUp) { scrollRef.current += budget; setScroll(scrollRef.current); return }
     if (key.pageDown) { scrollRef.current = Math.max(0, scrollRef.current - budget); setScroll(scrollRef.current) }
-    // Keyboard-only scroll (no PageUp key on many keyboards):
-    // shift+up/down = page up/down, home = top, end = tail. plain up/down/left/right stay untouched.
+    // Keyboard-only scroll: shift+up/down = page up/down. Plain arrows and
+    // Home/End belong to the composer (its caret moves) — ink dispatches every
+    // key to every useInput handler, so frame scroll must not also consume them.
     else if (key.shift && key.upArrow) { scrollRef.current += budget; setScroll(scrollRef.current); return }
     else if (key.shift && key.downArrow) { scrollRef.current = Math.max(0, scrollRef.current - budget); setScroll(scrollRef.current); return }
-    else if (key.home) { scrollRef.current = 1e9; setScroll(scrollRef.current); return }
-    else if (key.end) { scrollRef.current = 0; setScroll(0); return }
   })
 
   // Splash pad: blank rows above the logo only while nothing has been said yet.
