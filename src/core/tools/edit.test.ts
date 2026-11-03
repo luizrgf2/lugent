@@ -33,3 +33,10 @@ test("edit result includes a diff", async () => {
   expect(r.output).toContain("-beta")
   expect(r.output).toContain("+gamma")
 })
+
+test("edit newString with $ patterns is inserted literally", async () => {
+  writeFileSync(F, "price: 10\n")
+  const replacement = "$" + "& USD ($$)"
+  await editTool.execute({ path: F, oldString: "10", newString: replacement }, { cwd: DIR })
+  expect(readFileSync(F, "utf8")).toBe("price: $& USD ($$)\n")
+})
