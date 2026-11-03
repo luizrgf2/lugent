@@ -378,3 +378,78 @@ test("paste while suggestions open does not submit the slash prefix", async () =
   await new Promise(r => setTimeout(r, 30))
   expect(got).toEqual(["/m\nx"])
 })
+
+// ---- token atomicity -------------------------------------------------------
+// The caret must never sit inside a token: ←/→ and Home/End snap to the
+// nearest token boundary, so typing or backspacing can never corrupt the
+// NUL-delimited label (a corrupted label no longer matches PASTE_TOKEN_RE and
+// would be submitted to the model literally, NUL bytes included).
+
+test("caret snaps over a token when walking left across it", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={() => {}} />)
+  type("ab")
+  type(PASTE("x\ny"))
+  type("cd")
+  await new Promise(r => setTimeout(r, 30))
+  // Walk left 1 → before "cd"; one more step must jump the whole token,
+  // landing before it, not inside its label.
+  type("\u001b[D\u001b[D\u001b[D")
+  await new Promise(r => setTimeout(r, 30))
+  type("\u007f")   // backspace: deletes the "b" before the token, not label bytes
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  expect(f).toContain("[paste #1: 2 lines]")   // token label intact
+  type("\r")
+  await new Promise(r => setTimeout(r, 30))
+})
+
+test("typing with the caret adjacent to a token never enters the label", async () => {
+  const got: string[] = []
+  const { type } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} />)
+  type(PASTE("x\ny"))
+  type("ab")
+  // Caret to the very start, then walk right: the first step skips the whole
+  // token (landing before "a"), the second lands between "a" and "b" — never
+  // inside the label.
+  type("\u001b[H")   // home
+  type("\u001b[C\u001b[C")   // right, right → after the token, between a|b
+  type("Z")
+  await new Promise(r => setTimeout(r, 30))
+  type("\r")
+  await new Promise(r => setTimeout(r, 30))
+  expect(got).toEqual(["x\nyaZb"])
+})
+
+test("home with a leading token leaves the caret before it, label intact", async () => {
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={() => {}} />)
+  type(PASTE("x\ny"))
+  type("tail")
+  type("\u001b[H")   // home: caret starts before the token already
+  type("\u001b[C")   // right: snaps past the whole token, not into it
+  type("\u007f")     // backspace at the token's left edge deletes the token whole
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  expect(f).not.toContain("[paste #1")
+  expect(f).not.toContain("\u0000")
+  type("\r")
+  await new Promise(r => setTimeout(r, 30))
+})
+
+test("corrupted-label regression: mid-token caret position is unreachable", async () => {
+  const got: string[] = []
+  const { type, lastFrame } = renderTui(<Input disabled={false} onSubmit={t => got.push(t)} />)
+  type("ab")
+  type(PASTE("x\ny"))
+  type("\u001b[D\u001b[D\u001b[D\u001b[D\u001b[D")   // walk left through/past the token
+  type("M")   // typed at a snapped boundary
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  expect(f).toContain("[paste #1: 2 lines]")   // label never mangled
+  expect(f).not.toContain("\u0000[l")          // no partial-label corruption
+  type("\r")
+  await new Promise(r => setTimeout(r, 30))
+  // Submitted text expands cleanly: no stray NUL bytes reach the model.
+  expect(got).toHaveLength(1)
+  expect(got[0]).not.toContain("\u0000")
+  expect(got[0]).toContain("x\ny")
+})
