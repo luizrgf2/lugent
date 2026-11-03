@@ -32,6 +32,7 @@ export interface PromptInput {
   date: string
   agentsMd: string | null
   skills: SkillMeta[]
+  subagents?: { id: string; description?: string }[]
   tools: { name: string; description: string; schema: unknown }[]
   agentPrompt?: string   // set when a session agent is selected: replaces SYSTEM_PROMPT
 }
@@ -44,6 +45,10 @@ export function buildPrefix(input: PromptInput): string {
   if (input.agentsMd) parts.push(`# Project instructions (AGENTS.md)\n\n${input.agentsMd}`)
   if (input.skills.length > 0) {
     parts.push("# Skills\n\n" + input.skills.map(s => `- ${s.id}: ${s.name} — ${s.description}`).join("\n"))
+  }
+  if (input.subagents && input.subagents.length > 0) {
+    parts.push("# Subagents\n\n" + input.subagents
+      .map(s => s.description ? `- ${s.id}: ${s.description}` : `- ${s.id}`).join("\n"))
   }
   parts.push("# Tools\n\n" + input.tools.map(t => `- ${t.name}: ${t.description}`).join("\n"))
   return parts.join("\n\n")
