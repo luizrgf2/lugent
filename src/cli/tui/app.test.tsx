@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test"
-import { rmSync, mkdtempSync, writeFileSync } from "node:fs"
+import { rmSync, mkdtempSync, writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs"
 import { join } from "node:path"
 import { EventEmitter } from "node:events"
 import { App, runTui } from "./app"
@@ -192,6 +192,64 @@ test("yolo badge sits on the context line, clearly separated", async () => {
   expect(line).toBeDefined()
   expect(line).toContain("AGENTS.md")   // same line as the context info
   expect(line).toContain("│")           // visible separator
+})
+
+test("permission mode: startup from config, /permissions persists to the global config", async () => {
+  const global = `/tmp/opencode/tui-mode-${Date.now()}.json`
+  rmSync(global, { force: true })
+  const provider = { chat: async () => ({ content: "ok", toolCalls: [] }) }
+  const env = fakeEnv({
+    makeProvider: () => provider,
+    config: { ...fakeEnv().config, permissionMode: "yolo" },
+  })
+  const { type, lastFrame } = renderTui(<App env={env} globalConfigPath={global} />)
+  const waitFor = async (want: string, ms = 3000) => {
+    const t0 = Date.now()
+    while (!lastFrame().includes(want)) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout waiting for "${want}"`)
+      await new Promise(r => setTimeout(r, 20))
+    }
+    await new Promise(r => setTimeout(r, 30))
+  }
+  await waitFor("YOLO")                                 // config yolo applies at startup
+  type("/permissions\r")
+  await waitFor("normal")
+  type("\u001b[A\r")                                    // yolo selected → ↑ to normal
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).not.toContain("YOLO")
+  expect(JSON.parse(readFileSync(global, "utf8")).permissionMode).toBe("normal")   // persisted
+  rmSync(global, { force: true })
+})
+
+test("permission mode: an unpersistable global config keeps the session mode and says so", async () => {
+  const global = "/tmp/opencode/tui-mode-fail"   // a directory → writeFileSync fails
+  rmSync(global, { recursive: true, force: true })
+  mkdirSync(global, { recursive: true })
+  const warns: string[] = []
+  const orig = console.warn
+  console.warn = (m: string) => { warns.push(String(m)) }
+  const { type, lastFrame } = renderTui(<App env={fakeEnv()} globalConfigPath={global} />)
+  const waitFor = async (want: string, ms = 3000) => {
+    const t0 = Date.now()
+    while (!lastFrame().includes(want)) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout waiting for "${want}"`)
+      await new Promise(r => setTimeout(r, 20))
+    }
+    await new Promise(r => setTimeout(r, 30))
+  }
+  try {
+    type("/permissions\r")
+    await waitFor("yolo")
+    type("\x1b[B\r")                                    // pick yolo
+    await new Promise(r => setTimeout(r, 80))
+    expect(lastFrame()).toContain("YOLO")               // session mode still applied
+    expect(lastFrame()).toContain("session only")       // with the failure called out
+    expect(warns.join("\n")).toMatch(/permission mode/)
+    expect(existsSync(join(global, "config.json"))).toBe(false)   // nothing half-written
+  } finally {
+    console.warn = orig
+    rmSync(global, { recursive: true, force: true })
+  }
 })
 
 const askTool = {

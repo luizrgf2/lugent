@@ -52,6 +52,7 @@ For `providers`, `defaultProvider`, `defaultModel` and `defaultAgent` lugent rea
 | `defaultProvider` | Key into `providers` used at startup |
 | `defaultModel` | Model id sent as `model` on every request |
 | `defaultAgent` | Optional agent id selected at startup. Defaults to `build`; unknown id → warning, then `build` |
+| `permissionMode` | Optional, `normal` (default) or `yolo`. Startup permission mode — TUI only. Saved to the global config by `/permissions`; a project value overrides it while present |
 | `mcp.<name>.type` | `local` (spawns `command`) or `remote` (`url`); `http` is an alias for `remote`. Inferred when absent |
 | `mcp.<name>.command` | `local`: argv array, e.g. `["npx","-y","pkg@latest"]` |
 | `mcp.<name>.environment` / `.cwd` | `local`: extra env (values support `{env:VAR}`) and working dir relative to the project |
@@ -269,7 +270,7 @@ Every tool has a default (`allow` / `ask`, table above). During a turn the model
 - Answer `y` (once), `n` (deny — the model sees the refusal), or `a` (always this session, for that tool+resource). Anything else — including Enter — denies.
 - Any resource outside the project root (absolute path, `..`, `~`) forces `ask` even for `allow` tools.
 
-**Yolo mode** (TUI only — `--plain` REPL has no equivalent): `/permissions` → pick `yolo` and every tool call is auto-approved — no dialogs, **including outside-project paths**. The status bar shows a red `YOLO` while active. It is runtime state: not persisted, reset on restart, and it does not modify the per-session `a` grants. `/permissions` → `normal` (or restart) turns it off.
+**Yolo mode** (TUI only — `--plain` REPL has no equivalent): `/permissions` → pick `yolo` and every tool call is auto-approved — no dialogs, **including outside-project paths**. The status bar shows a red `YOLO` while active. The choice is **persisted to the global config** (`permissionMode` in `~/.config/lugent/config.json`) and applied at startup; a `permissionMode` in the project's `lugent.json` overrides it while present (first-file-wins, like `providers`). Yolo does not modify the per-session `a` grants. `/permissions` → `normal` (or edit the config) turns it off.
 
 ## Data
 
