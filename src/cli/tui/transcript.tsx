@@ -2,9 +2,10 @@ import { memo } from "react"
 import { Box, Text } from "ink"
 import { parseMarkdown, type Seg } from "./markdown"
 import { glyph } from "../ui"
+import { LOGO_ROWS, WORDMARK_ROWS, WORDMARK_SPLIT, logoHex } from "../logo"
 import type { Message } from "../../core/types"
 
-export type TItem = { kind: "user" | "reasoning" | "tool" | "assistant" | "error" | "system"; text: string; tool?: string }
+export type TItem = { kind: "user" | "reasoning" | "tool" | "assistant" | "error" | "system" | "logo"; text: string; tool?: string }
 
 /** Map stored history to transcript items on resume (reasoning is never persisted). */
 export function itemsFromHistory(messages: Message[]): TItem[] {
@@ -94,6 +95,27 @@ export function clampItems(items: TItem[], maxLines: number, skipBottom = 0): TI
   return out
 }
 
+// The big L-mark + wordmark, as a scrollback item: ink prints it once at the
+// very top of the conversation (<Static>), where the terminal's own scrollback
+// keeps it — the live frame must never re-render it (that showed the logo
+// between history and every new turn). Same rows/colors as LogoMark.
+function LogoItem() {
+  const cyan = logoHex(LOGO_ROWS.length - 1)
+  return (
+    <Box flexDirection="column" alignItems="center">
+      {LOGO_ROWS.map((l, i) => (
+        <Text key={i} color={logoHex(i)}>{l}</Text>
+      ))}
+      {WORDMARK_ROWS.map((l, i) => (
+        <Text key={`w${i}`} bold>
+          <Text>{l.slice(0, WORDMARK_SPLIT)}</Text>
+          <Text color={cyan}>{l.slice(WORDMARK_SPLIT)}</Text>
+        </Text>
+      ))}
+    </Box>
+  )
+}
+
 const Markdown = memo(function Markdown({ text }: { text: string }) {
   return (
     <Box flexDirection="column" paddingLeft={1}>
@@ -121,6 +143,7 @@ export function TranscriptItem({ it, marginTop }: { it: TItem; marginTop?: boole
   // let the window clip it instead.
   return (
     <Box flexDirection="column" flexShrink={0} marginTop={marginTop ? 1 : 0}>
+      {it.kind === "logo" && <LogoItem />}
       {it.kind === "user" && <Text color="blue">&gt; {it.text}</Text>}
       {it.kind === "reasoning" && (
         <Box flexDirection="column" marginBottom={1}>

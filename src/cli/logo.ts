@@ -37,9 +37,10 @@ export const WORDMARK_ROWS = Array.from({ length: 5 }, (_, y) =>
 // L,U,G are 5 wide + 1 gap each → LUG spans [0,18).
 export const WORDMARK_SPLIT = 3 * 6
 
-// Rendered height of <LogoMark/> in the TUI: raster rows + wordmark block
-// rows + 1 bottom margin. The transcript window must subtract this exact
-// number or every frame is taller than the terminal and scrolls history off-screen.
+// Rendered height of <LogoMark/>: raster rows + wordmark block rows + 1 bottom
+// margin. Subtracted only on the splash screen (splashWindow) and by
+// logoTopPad's cap — the live transcript window does not subtract it: once the
+// conversation starts the logo lives in the scrollback, not the frame.
 export const LOGO_HEIGHT = LOGO_ROWS.length + WORDMARK_ROWS.length + 1
 
 // Rows the TUI keeps below the transcript: composer box 3 + context line 1
@@ -61,13 +62,23 @@ export function frameRows(rows: number): number {
 
 /**
  * Rows the transcript region gets on a terminal of `rows`: what is left after
- * the logo block and the chrome. The region is rendered at this height
- * (bottom-aligned, clipped) so the composer below it cannot move — sized from
- * its content instead, a page of scroll or a wrapped long line changed the frame
- * height and shifted the input on screen.
+ * the chrome. The logo no longer lives in the frame (it prints once to the
+ * scrollback at the start of the conversation), so the transcript gets every
+ * row the chrome leaves. The region is rendered at this height (bottom-aligned,
+ * clipped) so the composer below it cannot move.
  */
-export function transcriptWindow(rows: number, pad = 0): number {
-  return Math.max(0, frameRows(rows) - CHROME_HEIGHT - LOGO_HEIGHT - pad)
+export function transcriptWindow(rows: number): number {
+  return Math.max(0, frameRows(rows) - CHROME_HEIGHT)
+}
+
+/**
+ * Transcript rows on the empty splash screen: the frame also carries the
+ * centered logo block plus its top pad there, so the region usually gets
+ * nothing. One row short of `logoTopPad`'s cap on purpose — the pad leaves
+ * room for the chrome, the logo itself is charged here.
+ */
+export function splashWindow(rows: number): number {
+  return Math.max(0, frameRows(rows) - CHROME_HEIGHT - LOGO_HEIGHT - logoTopPad(rows))
 }
 
 /**
