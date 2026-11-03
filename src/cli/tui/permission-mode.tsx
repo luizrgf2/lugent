@@ -20,7 +20,7 @@ export function PermissionMode(p: { current: "normal" | "yolo"; onPick(m: "norma
 
   return (
     <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1}>
-      <Text dimColor>/permissions · permission mode (session-scoped, not persisted)</Text>
+      <Text dimColor>/permissions · permission mode (saved to the global config)</Text>
       {MODES.map((m, i) => (
         <Text key={m.id} color={i === sel ? "cyan" : undefined}>
           {i === sel ? "❯" : " "} {m.id}{m.id === p.current ? " ●" : ""}

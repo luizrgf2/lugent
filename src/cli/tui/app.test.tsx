@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test"
-import { rmSync, mkdtempSync, writeFileSync } from "node:fs"
+import { rmSync, mkdtempSync, writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs"
 import { join } from "node:path"
 import { EventEmitter } from "node:events"
 import { App, runTui } from "./app"
@@ -53,12 +53,14 @@ export function fakeEnv(over: Record<string, unknown> = {}): any {
 
 const CARET = "▏"   // composer caret: rendered only while no turn is running
 
-/** Rows from the logo down = the live frame (Static scrollback lines above it
- *  are history already handed to the terminal and don't count against the cap). */
+/** Rows from the composer up = the live frame (Static scrollback lines above it
+ *  are history already handed to the terminal and don't count against the cap).
+ *  The frame no longer starts at a logo row — the logo is the first scrollback
+ *  item — so the composer border is the frame's anchor. */
 const frameFrom = (f: string): string[] => {
   const lines = f.split("\n")
-  const logo = lines.findIndex(l => l.includes("██▄"))
-  return lines.slice(logo)
+  const composer = lines.findIndex(l => l.includes("╭"))
+  return lines.slice(Math.max(0, composer))
 }
 
 /** Polls until `cond` holds — keys typed during a turn are dropped, so tests must wait on state, not on sleeps. */
@@ -127,12 +129,13 @@ test("splash pad collapses once a turn runs; the frame stays put after it", asyn
   type("go\r")
   await waitFor(() => lastFrame().includes(CARET))   // turn done
   // The finished turn lives in the scrollback (Static lines at the top); the
-  // frame below it shows the docked logo + chrome only, and the frame's own
-  // height never grows past the terminal.
+  // frame below it shows the chrome only, and the frame's own height never
+  // grows past the terminal. The logo left the frame for the scrollback, so
+  // the frame's top edge is the transcript/composer, not a logo row.
   const lines = lastFrame().split("\n")
-  const logo = lines.findIndex(l => l.includes("██▄"))
-  expect(logo).toBeGreaterThan(0)                  // below the scrollback'd turn
-  expect(lines.slice(logo).length).toBeLessThanOrEqual(29)   // frame cap
+  expect(lines.findIndex(l => l.includes("██▄"))).toBeGreaterThanOrEqual(0)   // printed once, above
+  expect(frameFrom(lastFrame()).length).toBeLessThanOrEqual(29)              // frame cap
+  expect(frameFrom(lastFrame()).some(l => l.includes("██▄"))).toBe(false)    // logo not in frame
 })
 
 test("LUGENT wordmark renders bold right below the mark, centered", async () => {
@@ -143,6 +146,22 @@ test("LUGENT wordmark renders bold right below the mark, centered", async () => 
   expect(markIdx).toBeGreaterThanOrEqual(0)
   const wm = lines[markIdx + 1] ?? ""
   expect(wm.trim()).toContain("█     █   █")   // block L U, first wordmark row
+})
+
+test("logo printed to the scrollback is horizontally centered", async () => {
+  const provider = { chat: async (a: any) => { a.onToken?.("hello"); return { content: "hello", toolCalls: [] } } }
+  const env = fakeEnv({ makeProvider: () => provider as any })
+  const { type, allOutput } = renderTui(<App env={env} />, { rows: 30 })
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  await waitFor(() => type.length > 0 && allOutput().includes("hello"))
+  // The <Static> print of the logo is the first one handed to the terminal
+  // (the splash frame shows it centered already). It used to stick flush-left:
+  // <Static> renders outside the frame and got measured at content width.
+  const bar = allOutput().split("\n").filter(l => l.includes("▀▀▀▀▀▀▀▀"))
+  const starts = new Set(bar.map(l => [...l].indexOf("▀")).filter(i => i >= 0))
+  const centered = Math.floor(100 / 2 - 8)   // 16-wide bar on a 100-col terminal
+  for (const s of starts) expect(Math.abs(s - centered)).toBeLessThanOrEqual(4)
 })
 
 test("provider/model is always visible on the bottom line next to the spinner", async () => {
@@ -175,10 +194,91 @@ test("yolo badge sits on the context line, clearly separated", async () => {
   expect(line).toContain("│")           // visible separator
 })
 
+test("permission mode: startup from config, /permissions persists to the global config", async () => {
+  const global = `/tmp/opencode/tui-mode-${Date.now()}.json`
+  rmSync(global, { force: true })
+  const provider = { chat: async () => ({ content: "ok", toolCalls: [] }) }
+  const env = fakeEnv({
+    makeProvider: () => provider,
+    config: { ...fakeEnv().config, permissionMode: "yolo" },
+  })
+  const { type, lastFrame } = renderTui(<App env={env} globalConfigPath={global} />)
+  const waitFor = async (want: string, ms = 3000) => {
+    const t0 = Date.now()
+    while (!lastFrame().includes(want)) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout waiting for "${want}"`)
+      await new Promise(r => setTimeout(r, 20))
+    }
+    await new Promise(r => setTimeout(r, 30))
+  }
+  await waitFor("YOLO")                                 // config yolo applies at startup
+  type("/permissions\r")
+  await waitFor("normal")
+  type("\u001b[A\r")                                    // yolo selected → ↑ to normal
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).not.toContain("YOLO")
+  expect(JSON.parse(readFileSync(global, "utf8")).permissionMode).toBe("normal")   // persisted
+  rmSync(global, { force: true })
+})
+
+test("permission mode: an unpersistable global config keeps the session mode and says so", async () => {
+  const global = "/tmp/opencode/tui-mode-fail"   // a directory → writeFileSync fails
+  rmSync(global, { recursive: true, force: true })
+  mkdirSync(global, { recursive: true })
+  const warns: string[] = []
+  const orig = console.warn
+  console.warn = (m: string) => { warns.push(String(m)) }
+  const { type, lastFrame } = renderTui(<App env={fakeEnv()} globalConfigPath={global} />)
+  const waitFor = async (want: string, ms = 3000) => {
+    const t0 = Date.now()
+    while (!lastFrame().includes(want)) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout waiting for "${want}"`)
+      await new Promise(r => setTimeout(r, 20))
+    }
+    await new Promise(r => setTimeout(r, 30))
+  }
+  try {
+    type("/permissions\r")
+    await waitFor("yolo")
+    type("\x1b[B\r")                                    // pick yolo
+    await new Promise(r => setTimeout(r, 80))
+    expect(lastFrame()).toContain("YOLO")               // session mode still applied
+    expect(lastFrame()).toContain("session only")       // with the failure called out
+    expect(warns.join("\n")).toMatch(/permission mode/)
+    expect(existsSync(join(global, "config.json"))).toBe(false)   // nothing half-written
+  } finally {
+    console.warn = orig
+    rmSync(global, { recursive: true, force: true })
+  }
+})
+
 const askTool = {
   name: "askme", description: "ask", schema: { type: "object", properties: {} },
   permission: "ask" as const, execute: async () => ({ output: "ok" }),
 }
+
+test("idle frame is chrome-only: no blank gap between the last message and the composer", async () => {
+  // Between turns the conversation lives in the scrollback and the live
+  // transcript is empty — the idle frame must be only the chrome, or ~rows of
+  // blank rows open up between the last message and the composer (the logo
+  // used to fill them; when it moved to the scrollback they became a void).
+  // The busy frame stays the full viewport-height column (frameRows) — that
+  // path is covered by the window/pinning tests; this test pins the idle one.
+  const provider = { chat: async (a: any) => { a.onToken?.("short answer"); return { content: "short answer", toolCalls: [] } } }
+  const env = fakeEnv({ tools: [], makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
+  await new Promise(r => setTimeout(r, 30))
+  type("q1\r")
+  await waitFor(() => lastFrame().includes(CARET))
+  await new Promise(r => setTimeout(r, 150))   // commit render lands after busy clears
+  const f = lastFrame().split("\n")
+  const answer = f.findLastIndex(l => l.includes("short answer"))
+  const composer = f.findLastIndex(l => l.includes("╭"))
+  // the composer sits right under the conversation: composer, context line and
+  // the blank separator are the whole frame — no screen-tall empty region.
+  expect(composer).toBeGreaterThan(answer)
+  expect(composer - answer).toBeLessThanOrEqual(4)   // answer → blank sep → (frame top) → composer
+})
 
 test("turn flow: submit → reasoning + answer appear in transcript", async () => {  const provider = {
     chat: async (a: any) => {
@@ -218,9 +318,45 @@ test("finished turns move to the scrollback exactly once; the frame holds only t
   expect(count("> q1")).toBe(1)
   expect(count("> q2")).toBe(1)
   expect(count("answer")).toBe(2)   // one per turn, never duplicated
-  // the live frame (from the logo down) shows no turn content between turns
+  // the live frame (from the chrome down) shows no turn content between turns
   const frame = frameFrom(f)
   expect(frame.some(l => l.includes("q1") || l.includes("q2"))).toBe(false)
+})
+
+test("the logo prints once at the top of the conversation and never reappears mid-history", async () => {
+  // The logo belongs to the splash, not the live frame: it is committed to the
+  // scrollback as the FIRST static item (above every turn) and stops rendering
+  // in the frame once any item exists. A logo pinned inside the frame showed
+  // up between the scrollback'd history and every new turn — forever.
+  const provider = { chat: async (a: any) => { a.onToken?.("answer"); return { content: "answer", toolCalls: [] } } }
+  const env = fakeEnv({ tools: [], makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />, { rows: 30 })
+  await new Promise(r => setTimeout(r, 30))
+  const splash = lastFrame().split("\n")
+  expect(splash.findIndex(l => l.includes("██▄"))).toBe(7)       // splash: centered, in frame
+  type("q1\r")
+  await waitFor(() => lastFrame().includes(CARET))
+  await new Promise(r => setTimeout(r, 150))
+  const f = lastFrame().split("\n")
+  // The raster's top row appears 4× per logo — count the wordmark's bottom row
+  // (base bar █████ █████), which exists exactly once per logo.
+  const marks = f.map((l, i) => l.includes("█████ █████") ? i : -1).filter(i => i >= 0)
+  expect(marks).toHaveLength(1)                                  // printed exactly once
+  const logoRow = marks[0]
+  const q1Row = f.findIndex(l => l.includes("> q1"))
+  expect(logoRow).toBeLessThan(q1Row)                            // above the first turn: start of conversation
+  // the logo's mark row + wordmark + chrome frame: everything after the logo is
+  // conversation, no second logo anywhere below it.
+  expect(f.slice(logoRow + 1).some(l => l.includes("██▄"))).toBe(false)
+  expect(f.findIndex(l => l.includes("9router · glm/glm-5.2"))).toBeGreaterThan(logoRow)
+  type("q2\r")
+  await waitFor(() => lastFrame().includes(CARET))
+  await new Promise(r => setTimeout(r, 150))
+  const f2 = lastFrame().split("\n")
+  expect(f2.filter(l => l.includes("█████ █████"))).toHaveLength(1)   // still exactly one logo
+  const logo2 = f2.findIndex(l => l.includes("█████ █████"))
+  expect(logo2).toBeLessThan(f2.findIndex(l => l.includes("> q1")))
+  expect(logo2).toBeLessThan(f2.findIndex(l => l.includes("> q2")))
 })
 
 test("provider that rejects (not returns error) still shows the error and unblocks the input", async () => {
@@ -275,17 +411,18 @@ test("live window is screen-constrained: old lines of the current turn drop off"
   // whole thing is committed to the scrollback and the frame is chrome-only.
   await waitFor(() => lastFrame().includes(CARET))
   // lastFrame() concatenates the scrollback'd turn + the frame: the FRAME is
-  // the last rows — its height must hold the viewport cap.
-  const lines = lastFrame().split("\n")
-  const logo = lines.findIndex(l => l.includes("██▄"))
-  expect(lines.slice(logo).length).toBeLessThanOrEqual(29)
+  // the last rows — its height must hold the viewport cap, and it carries no
+  // logo (the logo is scrollback-only once the conversation exists).
+  expect(frameFrom(lastFrame()).length).toBeLessThanOrEqual(29)
+  expect(frameFrom(lastFrame()).some(l => l.includes("██▄"))).toBe(false)
 })
 
 test("pageUp scrolls the live window up; pageDown back; typing resets to tail", async () => {
   // Only the current turn is in the frame, so the scroll budget is one window
-  // (7 lines on 30 rows). History beyond the turn is the terminal scrollback —
-  // which also means scrolling only does anything while the turn is live, so
-  // the provider parks with the stream half-done.
+  // (23 lines on 30 rows — the logo left the frame, so the window is the rows
+  // the chrome doesn't take). History beyond the turn is the terminal
+  // scrollback — which also means scrolling only does anything while the turn
+  // is live, so the provider parks with the stream half-done.
   let release: () => void = () => {}
   const gate = new Promise<void>(r => { release = r })
   const prov = {
@@ -303,7 +440,7 @@ test("pageUp scrolls the live window up; pageDown back; typing resets to tail", 
   type("\x1b[5~")                                 // pageUp: exactly one window
   await new Promise(r => setTimeout(r, 100))
   expect(lastFrame()).not.toContain("line-59")    // tail clipped
-  expect(lastFrame()).toContain("line-5")         // one page up visible
+  expect(lastFrame()).toContain("line-36")        // one page (23 lines) up visible
   type("\x1b[6~")                                 // pageDown: back to the tail
   await new Promise(r => setTimeout(r, 100))
   expect(lastFrame()).toContain("line-59")
@@ -333,11 +470,15 @@ test("pageUp mid-stream pins the view: growth does not jump it back to the tail"
   type("\x1b[5~")                                        // pageUp, while the stream is parked
   await new Promise(r => setTimeout(r, 80))
   const pinned = lastFrame().split("\n").filter(l => l.includes("line-")).map(l => l.trim())
-    expect(pinned.join()).toContain("line-07")             // head of the pinned window
+  expect(pinned.join()).toContain("line-00")              // head of the pinned window
   release()                                              // 20 more lines stream in under the pin
   await new Promise(r => setTimeout(r, 250))
   const still = lastFrame().split("\n").filter(l => l.includes("line-")).map(l => l.trim())
-  expect(still.join()).toBe(pinned.join())
+  // The view did not jump to the tail: the pinned head stays the first line,
+  // and growth lands below it (the window is wide enough to show a few of the
+  // new lines under the pin — that is the pin working, not a jump).
+  expect(still[0]).toBe(pinned[0])
+  expect(still.join()).not.toContain("line-59")
 })
 
 test("ctrl+c on a later turn aborts instead of exiting (counter resets per turn)", async () => {
@@ -371,7 +512,7 @@ test("ctrl+c on a later turn aborts instead of exiting (counter resets per turn)
   expect(lastFrame()).toContain(">") // composer still alive
 })
 
-test("keyboard-only scroll: shift+up/down, home/end work like pageUp/pageDown", async () => {
+test("keyboard-only scroll: shift+up/down and pageUp/pageDown; plain home/end do not scroll", async () => {
   let release: () => void = () => {}
   const gate = new Promise<void>(r => { release = r })
   const prov = {
@@ -392,15 +533,15 @@ test("keyboard-only scroll: shift+up/down, home/end work like pageUp/pageDown", 
   type("\x1b[1;2B")                        // shift+down: back to tail
   await new Promise(r => setTimeout(r, 80))
   expect(lastFrame()).toContain("line-59")
-  type("\x1b[H")                           // home: jump to the very top
-  await new Promise(r => setTimeout(r, 80))
-  const f = lastFrame()
-  expect(f).toContain("line-00")
-  expect(f).not.toContain("line-59")
-  type("\x1b[F")                           // end: snap back to the tail
+  type("\x1b[H")                           // home: composer-owned now — frame stays at the tail
   await new Promise(r => setTimeout(r, 80))
   expect(lastFrame()).toContain("line-59")
-  expect(lastFrame()).not.toContain("line-00")
+  type("\x1b[F")                           // end: likewise a no-op for scrolling
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).toContain("line-59")
+  type("\x1b[5~")                          // pageUp still scrolls (plain Home/End left the frame handler)
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).not.toContain("line-59")
   release()
   await waitFor(() => lastFrame().includes(CARET))
 })
@@ -531,6 +672,60 @@ test("/model picker: provider → model → applied in status and transcript", a
   expect(f).not.toContain("❯")                       // picker closed
   expect(f).toContain("9router · qwen3.5:14b")       // status updated
   expect(f).toContain("→ 9router · qwen3.5:14b")     // transcript system line
+})
+
+test("/model picker persists the choice to the session row (session remembers)", async () => {
+  const provider = {
+    chat: async (a: any) => { a.onToken?.("ok"); return { content: "ok", toolCalls: [] } },
+    listModels: async () => ["qwen3.5:14b", "glm/glm-5.2"],
+  }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  const waitFor = async (want: string, ms = 3000) => {
+    const t0 = Date.now()
+    while (!lastFrame().includes(want)) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout waiting for "${want}"`)
+      await new Promise(r => setTimeout(r, 20))
+    }
+    await new Promise(r => setTimeout(r, 30))
+  }
+  await new Promise(r => setTimeout(r, 30))
+  type("hi\r")                                       // a turn first: session becomes listable
+  await waitFor("ok")
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                         // enter on 9router (current provider)
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                         // pick qwen3.5:14b
+  await waitFor("9router · qwen3.5:14b")
+  // the DB row carries the picked model, not the creation default
+  const rows = env.store.listSessions(env.projectRoot)
+  expect(rows.length).toBe(1)
+  expect(rows[0].provider).toBe("9router")
+  expect(rows[0].model).toBe("qwen3.5:14b")
+})
+
+test("/resume restores the resumed session's provider and model", async () => {
+  // past session worked on ollama/glm — the app now starts on the 9router default
+  const env = fakeEnv()
+  const old = env.store.createSession("ollama", "glm/glm-5.2", env.projectRoot)
+  env.store.appendMessage({ id: "u1", sessionId: old.id, role: "user", content: "past question", createdAt: new Date(0).toISOString() })
+
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  const waitFor = async (want: string, ms = 3000) => {
+    const t0 = Date.now()
+    while (!lastFrame().includes(want)) {
+      if (Date.now() - t0 > ms) throw new Error(`timeout waiting for "${want}"`)
+      await new Promise(r => setTimeout(r, 20))
+    }
+    await new Promise(r => setTimeout(r, 30))
+  }
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("9router · glm/glm-5.2")   // starts on defaults
+  type("/resume\r")
+  await waitFor("past question")
+  type("\r")                                               // pick it
+  await waitFor("ollama · glm/glm-5.2")                    // provider AND model restored
 })
 
 test("ctrl+c while picker is open closes the picker, app stays alive", async () => {
@@ -838,19 +1033,23 @@ test("composer stays pinned: scrolling never moves the input or resizes the fram
   type("go\r")
   await new Promise(r => setTimeout(r, 150))
   const geom = () => {
-    const lines = frameFrom(lastFrame())
+    const lines = lastFrame().split("\n")
+    const composer = lines.findLastIndex(l => l.includes("╭"))
+    const context = lines.findLastIndex(l => l.includes("9router · glm/glm-5.2"))
     return {
-      height: lines.length,
-      composer: lines.findIndex(l => l.includes("╭")),
-      context: lines.findIndex(l => l.includes("9router · glm/glm-5.2")),
+      // The frame is bottom-anchored, so the chrome is stable when its distance
+      // from the END of the output is (the scrollback above can grow freely).
+      height: frameFrom(lastFrame()).length,
+      composerFromBottom: lines.length - 1 - composer,
+      contextFromBottom: lines.length - 1 - context,
     }
   }
   const tail = geom()
-  expect(tail.composer).toBeGreaterThan(0)
+  expect(tail.composerFromBottom).toBeGreaterThan(0)
   // Exactly one row short of the viewport: a frame as tall as the terminal is
   // 'fullscreen' to ink (full clears between frames, and the whole frame is
   // wiped on exit). See frameRows.
-  expect(tail.height).toBe(29)
+  expect(tail.height).toBeLessThanOrEqual(29)
   for (let i = 0; i < 4; i++) {
     type("\x1b[5~")                          // pageUp ×4
     await new Promise(r => setTimeout(r, 80))

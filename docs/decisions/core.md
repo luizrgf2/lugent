@@ -67,3 +67,35 @@ Third follow-up (same day): backoff rescheduled per user preference — first re
 Decision: `MAX_TOOL_ROUNDS` (50) is gone — a turn runs until the model stops calling tools; ctrl+c aborts is the only bound.
 Why: the cap cut real work mid-task twice in production use (the user saw "turn was stopped after 50 tool rounds" mid-debug); a tool-heavy turn is legitimate, and the user watching the transcript IS the runaway detector. The 10min stream cap and the MCP pagination cap remain — they guard byte-drip/proxy hangs, not work volume.
 Cost if wrong: a degenerate model looping tool calls forever bills tokens until the user hits ctrl+c. Re-add a cap (config-gated, default off) if that ever happens in practice.
+
+## 2026-11-03 — Permission mode persists to the global config
+
+Decision: `/permissions` (TUI) now saves the picked mode to `permissionMode` in the global config (`savePermissionMode` — merges keys, replaces a malformed file) and the TUI starts in `config.permissionMode` (default `normal`, invalid value warns and falls back). The pick always writes the global file, never the project's `lugent.json`; load is first-file-wins like `providers`, so a project `permissionMode` (e.g. `"yolo"`) overrides the saved global choice while present.
+Why: the user wants yolo as a *saved choice*, not per-session state; but a repo must not be able to flip trust on or off silently by itself — hence global-only writes with project-side override allowed explicitly, mirroring the existing providers precedence.
+Cost if wrong: a user who saves `yolo` globally forgets it and later opens an untrusted repo — every call auto-approves with no dialog (the red `YOLO` badge is the only signal). A per-project trust prompt would be the upgrade if that bites.
+
+## 2026-11-03 — Permission-mode save failure is warn + session-only; `permissionMode` stays required on `AppConfig`
+
+Context: the audit of the persistence work (issue #9) left two calls open. (1) When `savePermissionMode` cannot write (e.g. `EACCES` on a read-only `~/.config/lugent`), should the pick still apply? (2) `AppConfig.permissionMode` is required on the exported interface, which breaks out-of-tree config-object literals — keep, optional, or add a `tsc --noEmit` gate?
+
+Decision: (1) a failed save **warns and keeps the mode for the session only** — `savePermissionMode` returns `false`, `console.warn` fires (the repo's loader convention), and the transcript notes `… — save failed, session only`. Not blocking: blocking yolo entry on writability punishes locked-down hosts for a trust setting the session guard still enforces everywhere else; the red `YOLO` badge keeps the session state visible, and the warning names the path so the cause is diagnosable. Not retrying: a persistent `EACCES` cannot be fixed by retrying and an alternate-path prompt is UX complexity for a rare failure. (2) **`permissionMode` stays required.** `loadConfig()` always populates the field (default `normal`), so the only way to observe `undefined` is an out-of-tree literal that skipped loading — exactly the object the field exists to constrain; making it optional would push `undefined` handling onto every `=== "yolo"` reader for a hypothetical consumer. No `typecheck` script is added — this repo deliberately ships none, and `tsc --noEmit` flags ~20 pre-existing strictness findings unrelated to this change; adopting a gate is its own decision, not a rider on this one.
+Why: the session-only policy matches how every other recoverable config problem in the repo behaves (warn and continue), and the required field is the honest contract — there is no meaningful default for "the user never expressed a trust preference" other than `normal`, which `loadConfig()` already supplies.
+Cost if wrong: if session-only proves too lax, the upgrade path is blocking yolo entry when the save fails — additive, no API change. If external literal builders materialize and hurt, making the field optional is a one-line, non-breaking relaxation (readers already handle only `=== "yolo"`).
+
+## 2026-11-03 — Rate limit recovers by exponential-backoff retry, not a circuit breaker
+
+Context: issue #7 asked for a decision (retry vs circuit breaker) said to be about PR #1. That PR is a fully static landing page — no fetches, no API calls — and its audited head SHA does not exist in the repo (the audit payload carried the all-zero placeholder), so the question has no code behind it on that branch. The real rate-limit handling lives in `Provider.chat` (`src/core/provider.ts`): 429/5xx enter the retry loop (10s base, doubling, 60s cap, retries indefinite by user choice since 2026-10-30, other 4xx fatal), with `onRetry` surfaced in both UIs.
+
+Decision: **exponential-backoff retry stays; no circuit breaker.** A circuit breaker protects callers that keep hammering an unhealthy endpoint automatically — but lugent is a single-user, single-turn client where every retry is visible (`attempt N failed — retrying in Xs`) and ESC/ctrl+c aborts instantly. The user *is* the circuit breaker, with better judgment than any threshold. A breaker would add state (open/half-open/closed), tuning knobs and flapping failure modes to a process that lives and dies with one session. `Retry-After` header parsing remains the ponytail from 2026-10-30: it refines the wait length without changing the strategy.
+Why: retries handle transient 429s (the common case with local routers and rate-limited gateways); sustained outages are handled by the human watching the transcript, not by more machinery.
+Cost if wrong: a headless/automated caller looping turns against a throttled endpoint would bill repeated 10s→60s waits with no tripping. If lugent ever grows a non-interactive batch mode, that is the trigger to revisit a breaker.
+
+## 2026-11-03 — session preview is local heuristics, not LLM-generated
+Decision: `/resume` previews are distilled locally (`sessionPreview()` in `store.ts`): first significant prose line of the first user message, whitespace collapsed, markdown chrome (fences/bullets/headings) skipped, 96-char cap. No LLM call.
+Why: zero deps in core, zero latency, zero cost; the REPL truncates to 48 chars anyway, so model-quality titles add nothing visible.
+Cost if wrong: sessions whose first message is pure data (logs with no prose) get a mediocre summary — trigger to revisit: an LLM title cache column + provider hook, opt-in.
+
+## 2026-11-03 — session order is last-message time, computed at query time
+Decision: `listSessions()` orders by `COALESCE(MAX(message.created_at), session.created_at) DESC` with an `(session_id, created_at)` index; no denormalized `updated_at` column.
+Why: no schema migration, no write-path change; local single-user scale makes the indexed MAX cheap, and `updatedAt` also surfaces in the summary for display.
+Cost if wrong: listing cost grows with per-session message count on huge DBs — escape hatch is adding the column + trigger later, query shape stays.

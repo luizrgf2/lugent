@@ -4,9 +4,10 @@ import type { ReplEnv } from "../repl"
 import type { Agent } from "../../core/types"
 import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
+import { savePermissionMode, globalConfigPath } from "../../core/config"
 import { toolsForAgent, agentModelTarget, resolveAgent, primaryAgents } from "../../core/agents"
 import { buildPromptInput, safeAgentsMd } from "../context"
-import { frameRows, logoTopPad, transcriptWindow } from "../logo"
+import { frameRows, logoTopPad, splashWindow, transcriptWindow, CHROME_HEIGHT } from "../logo"
 import { ContextLine, LogoMark } from "./status"
 import { Transcript, TranscriptItem, clampItems, itemsFromHistory, type TItem } from "./transcript"
 import { Input } from "./input"
@@ -30,13 +31,16 @@ function patchTail(items: TItem[], item: TItem): TItem[] {
     : [...items, item]
 }
 
-export function App(props: { env: TuiEnv }) {
+export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
   const { exit } = useApp()
   const env = props.env
   // items = finalized turns (rendered once via <Static> into the terminal's own
   // scrollback — the wheel and text selection scroll it natively, no mouse
   // tracking needed). live = the turn in progress, kept in the fixed frame.
-  const [items, setItems] = useState<TItem[]>([])
+  // The first static item is the logo: printed once at the top of the
+  // conversation, never re-rendered by the frame (a frame-pinned logo showed
+  // up between history and every new turn, forever).
+  const [items, setItems] = useState<TItem[]>([{ kind: "logo", text: "" }])
   const [live, setLive] = useState<TItem[]>([])
   const [busy, setBusy] = useState(false)
   const [ask, setAsk] = useState<{ tool: string; resource: string; resolve(a: "y" | "n" | "a"): void } | null>(null)
@@ -67,10 +71,12 @@ export function App(props: { env: TuiEnv }) {
   const [mcpStates, setMcpStates] = useState<McpServerState[]>([])
   /** Set while /mcp authenticate waits for the browser, so ctrl+c can cancel that, not the session. */
   const authAbortRef = useRef<AbortController | null>(null)
-  const [yolo, setYolo] = useState(false)
+  // Startup mode comes from the config (project file overrides the global
+  // default); picking in /permissions re-persists it to the global config.
+  const [yolo, setYolo] = useState(env.config.permissionMode === "yolo")
   const [retry, setRetry] = useState("")
   // Ref mirrors state: submit reads it — ink batching can make state stale.
-  const yoloRef = useRef(false)
+  const yoloRef = useRef(yolo)
   const { stdout } = useStdout()
 
   const closeOverlay = () => { overlayRef.current = null; setOverlay(null) }
@@ -203,21 +209,29 @@ export function App(props: { env: TuiEnv }) {
     }
     if (overlayRef.current || ask) return   // overlays/dialogs own the keys
     // page size = the live window (same value the region gets below)
-    const budget = transcriptWindow(rows, 0)
+    const budget = transcriptWindow(rows)
     if (key.pageUp) { scrollRef.current += budget; setScroll(scrollRef.current); return }
     if (key.pageDown) { scrollRef.current = Math.max(0, scrollRef.current - budget); setScroll(scrollRef.current) }
-    // Keyboard-only scroll (no PageUp key on many keyboards):
-    // shift+up/down = page up/down, home = top, end = tail. plain up/down/left/right stay untouched.
+    // Keyboard-only scroll: shift+up/down = page up/down. Plain arrows and
+    // Home/End belong to the composer (its caret moves) — ink dispatches every
+    // key to every useInput handler, so frame scroll must not also consume them.
     else if (key.shift && key.upArrow) { scrollRef.current += budget; setScroll(scrollRef.current); return }
     else if (key.shift && key.downArrow) { scrollRef.current = Math.max(0, scrollRef.current - budget); setScroll(scrollRef.current); return }
-    else if (key.home) { scrollRef.current = 1e9; setScroll(scrollRef.current); return }
-    else if (key.end) { scrollRef.current = 0; setScroll(0); return }
   })
 
   // Splash pad: blank rows above the logo only while nothing has been said yet.
-  const pad = items.length === 0 && live.length === 0 ? logoTopPad(rows) : 0
-  const window = transcriptWindow(rows, pad)
+  const said = items.length > 1 || live.length > 0   // items[0] is the logo
+  const pad = !said ? logoTopPad(rows) : 0
+  const window = said ? transcriptWindow(rows) : splashWindow(rows)
   const visible = clampItems(live, window, scroll)
+  // Frame height: capped at the viewport while a turn runs, an overlay/dialog
+  // is open or the splash is up, but only as tall as the chrome when idle with
+  // an empty live transcript — the conversation lives in the terminal's own
+  // scrollback above, so a viewport-tall idle frame would put ~rows of blank
+  // rows between the last message and the composer (the logo used to fill
+  // them). Bottom-anchored frames make the growing/shrinking invisible in ink.
+  const busyView = busy || !!overlay || !!ask || live.length > 0 || !said
+  const frameH = busyView ? frameRows(rows) : Math.min(CHROME_HEIGHT, frameRows(rows))
   const agentsMd = safeAgentsMd(env.projectRoot)
   return (
     <>
@@ -226,16 +240,26 @@ export function App(props: { env: TuiEnv }) {
           scroll it natively — no mouse tracking, no virtualization. It must sit
           OUTSIDE the fixed-height frame: ink measures it as zero height in the
           layout, but nesting it inside height={frameRows} made the frame's own
-          rows collapse whenever new static lines were printed. */}
-      <Static items={items}>
-        {(it, i) => <TranscriptItem key={i} it={it} marginTop={i > 0} />}
-      </Static>
-      {/* Root pinned to the viewport (minus one row, see frameRows): every region
-          below the transcript is a fixed block, so the transcript is the only one
-          that can give — sized from its content instead, a page of scroll or a
-          wrapped long line changed the frame height and shifted the composer. */}
-      <Box flexDirection="column" flexShrink={0} height={frameRows(rows)}>
-      <LogoMark topPad={pad} />
+          rows collapse whenever new static lines were printed.
+          Mounted only once the conversation starts (`said`): items[0] is the
+          logo, which must print to the scrollback ABOVE the first turn — on the
+          empty splash the logo renders in the frame instead, so it is never
+          printed twice. */}
+      {said && (
+        <Static items={items}>
+          {(it, i) => <TranscriptItem key={i} it={it} marginTop={i > 0} />}
+        </Static>
+      )}
+      {/* Root pinned to the viewport (minus one row, see frameRows) while busy;
+          when idle with an empty live transcript it shrinks to the chrome alone
+          (frameH above) so the composer sits right under the scrollback'd
+          conversation instead of rows of blank. */}
+      <Box flexDirection="column" flexShrink={0} height={frameH}>
+      {/* Splash only: while nothing has been said, the logo opens centered in
+          the frame. Once the conversation starts it lives exclusively in the
+          scrollback (first <Static> item) — rendering it here put it between
+          the history and every new turn, forever. */}
+      {!said && <LogoMark topPad={pad} />}
       <Box flexDirection="column" flexGrow={1} flexShrink={1} minHeight={0} justifyContent="flex-end" overflowY="hidden">
         <Transcript items={visible} />
       </Box>
@@ -275,6 +299,8 @@ export function App(props: { env: TuiEnv }) {
               closeOverlay()
               setProvider(prov)
               setModel(m)
+              // The session remembers the picked model: /resume restores it later.
+              env.store.setModel(session.id, prov, m)
               setItems(is => [...is, { kind: "system", text: `${prov} · ${m}` }])
             }}
           />
@@ -308,10 +334,15 @@ export function App(props: { env: TuiEnv }) {
               if (target) {
                 setProvider(target.provider)
                 setModel(target.model)
-              } else if (row.model) setModel(row.model)
+              } else if (row.provider) setProvider(row.provider)   // resume the session's own provider, not the current one
+              if (target?.model ?? row.model) setModel(target?.model ?? row.model)
               // Replayed history is finalized content: it belongs in the scrollback.
-              setItems(itemsFromHistory(env.store.getMessages(id)).map(it =>
-                it.kind === "assistant" ? { ...it, kind: "system" } : it))
+              // APPEND, never replace: <Static> prints only new items, and the
+              // scrollback of the previous session cannot be taken back — a
+              // replace would leave the old lines in scrollback AND print the
+              // replayed ones again on top.
+              setItems(is => [...is, ...itemsFromHistory(env.store.getMessages(id)).map(it =>
+                it.kind === "assistant" ? { ...it, kind: "system" } : it)])
             }} />
           : overlay === "permissions"
             ? <PermissionMode
@@ -320,7 +351,9 @@ export function App(props: { env: TuiEnv }) {
                   closeOverlay()
                   yoloRef.current = m === "yolo"
                   setYolo(m === "yolo")
-                  setItems(is => [...is, { kind: "system", text: m === "yolo" ? "permission mode: yolo (auto-approve)" : "permission mode: normal" }])
+                  const saved = savePermissionMode(m, props.globalConfigPath ?? globalConfigPath())
+                  const note = m === "yolo" ? "permission mode: yolo (auto-approve)" : "permission mode: normal"
+                  setItems(is => [...is, { kind: "system", text: saved ? note : `${note} — save failed, session only` }])
                 }}
                 onClose={closeOverlay} />
           : ask

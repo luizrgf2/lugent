@@ -10,14 +10,24 @@ export function Input(p: {
 }) {
   const [value, setValue] = useState("")
   // Refs mirror state: ink may batch several keys into one render, so the
-  // useInput closure can see a stale value/history mid-batch.
+  // useInput closure can see a stale value/history/caret mid-batch.
   const vRef = useRef("")
   const historyRef = useRef<string[]>([])
   const hIdxRef = useRef(-1)
   const [sel, setSel] = useState(0)
   const selRef = useRef(0)
+  // Insertion caret: a flat index into `value`, always clamped to 0..value.length.
+  const [cur, setCur] = useState(0)
+  const curRef = useRef(0)
 
-  const setVal = (v: string) => { vRef.current = v; setValue(v) }
+  const clamp = (v: string, i: number) => Math.max(0, Math.min(i, v.length))
+  const moveCur = (i: number) => { curRef.current = clamp(vRef.current, i); setCur(curRef.current) }
+  // Replacements default the caret to the end (history recall, completion, paste
+  // chunks); a plain `setVal("")` (submit-clear) clamps it to 0.
+  const setVal = (v: string, caret = v.length) => {
+    vRef.current = v; setValue(v)
+    curRef.current = clamp(v, caret); setCur(curRef.current)
+  }
   // Reset only on change: an unconditional reset adds a setState per keystroke
   // and the extra renders shift ink's commit timing (racy key dispatch).
   const resetSel = () => { if (selRef.current !== 0) { selRef.current = 0; setSel(0) } }
@@ -66,8 +76,23 @@ export function Input(p: {
       }
       return
     }
-    if (key.backspace || key.delete) { resetSel(); setVal(vRef.current.slice(0, -1)); return }
-    if (input && !key.escape) { resetSel(); setVal(vRef.current + input) }
+    if (key.leftArrow) { moveCur(curRef.current - 1); return }
+    if (key.rightArrow) { moveCur(curRef.current + 1); return }
+    if (key.home) { moveCur(0); return }
+    if (key.end) { moveCur(vRef.current.length); return }
+    if (key.backspace || key.delete) {
+      resetSel()
+      const v = vRef.current
+      const c = curRef.current
+      if (c > 0) setVal(v.slice(0, c - 1) + v.slice(c), c - 1)
+      return
+    }
+    if (input && !key.escape) {
+      resetSel()
+      const v = vRef.current
+      const c = curRef.current
+      setVal(v.slice(0, c) + input + v.slice(c), c + input.length)
+    }
   })
 
   const matches = matchesFor(value)
@@ -76,8 +101,16 @@ export function Input(p: {
     <Box flexDirection="column">
       <Box borderStyle="round" borderDimColor paddingX={1}>
         <Text color="cyan">&gt; </Text>
-        <Text>{value}</Text>
-        {!p.disabled && <Text dimColor>▏</Text>}
+        {/* One text node, split around the caret: ink measures sibling <Text>s
+            by their widest line, so a multi-line half would collapse its own
+            newline into phantom width — nested children squash into a single
+            string (measured and wrapped like the old whole-value text), while
+            the dim caret keeps its style via its own inner <Text>. */}
+        <Text>
+          {value.slice(0, cur)}
+          {!p.disabled && <Text dimColor>▏</Text>}
+          {value.slice(cur)}
+        </Text>
       </Box>
       {matches.length > 0 && (
         <Box flexDirection="column" paddingLeft={1}>

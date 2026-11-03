@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test"
-import { subEnv, loadConfig, parseMcpServer, loadMcpConfig } from "./config"
-import { rmSync, writeFileSync, mkdirSync } from "node:fs"
+import { subEnv, loadConfig, parseMcpServer, loadMcpConfig, savePermissionMode } from "./config"
+import { rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs"
 
 describe("subEnv", () => {
   test("substitutes {env:VAR}", () => {
@@ -66,6 +66,86 @@ describe("loadConfig", () => {
     writeFileSync(`${dir}/lugent.json`, JSON.stringify({ providers: {}, defaultProvider: "", defaultModel: "" }))
     expect(loadConfig(dir).defaultAgent).toBeUndefined()
     rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("permissionMode defaults to normal, project overrides global", () => {
+    const dir = `/tmp/opencode/cfg-perm-${Date.now()}`
+    mkdirSync(dir, { recursive: true })
+    const global = `/tmp/opencode/perm-global-${Date.now()}.json`
+    writeFileSync(global, JSON.stringify({ providers: {}, defaultProvider: "", defaultModel: "", permissionMode: "yolo" }))
+    writeFileSync(`${dir}/lugent.json`, JSON.stringify({ providers: {}, defaultProvider: "", defaultModel: "", permissionMode: "normal" }))
+    expect(loadConfig(dir, global).permissionMode).toBe("normal")
+    rmSync(`${dir}/lugent.json`)
+    expect(loadConfig(dir, global).permissionMode).toBe("yolo")   // global default stands
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(global, { force: true })
+  })
+
+  test("an invalid permissionMode warns and falls back to normal", () => {
+    const dir = `/tmp/opencode/cfg-perm-bad-${Date.now()}`
+    mkdirSync(dir, { recursive: true })
+    const global = `/tmp/opencode/nope-${Date.now()}.json`
+    writeFileSync(`${dir}/lugent.json`, JSON.stringify({ providers: {}, defaultProvider: "", defaultModel: "", permissionMode: "sudo" }))
+    const warns: string[] = []
+    const orig = console.warn
+    console.warn = (m: string) => { warns.push(String(m)) }
+    try {
+      expect(loadConfig(dir, global).permissionMode).toBe("normal")
+      expect(warns.join("\n")).toMatch(/permissionMode/)
+    } finally { console.warn = orig }
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe("savePermissionMode", () => {
+  test("creates the global config when missing, updating only permissionMode", () => {
+    const global = `/tmp/opencode/save-mode-${Date.now()}.json`
+    rmSync(global, { force: true })
+    savePermissionMode("yolo", global)
+    expect(JSON.parse(readFileSync(global, "utf8"))).toEqual({ permissionMode: "yolo" })
+    savePermissionMode("normal", global)
+    expect(JSON.parse(readFileSync(global, "utf8"))).toEqual({ permissionMode: "normal" })
+    rmSync(global, { force: true })
+  })
+
+  test("preserves existing keys and never touches the project file", () => {
+    const dir = `/tmp/opencode/save-mode-${Date.now()}`
+    mkdirSync(dir, { recursive: true })
+    const global = `${dir}/global.json`
+    writeFileSync(global, JSON.stringify({ defaultProvider: "9router", permissionMode: "yolo" }))
+    writeFileSync(`${dir}/lugent.json`, JSON.stringify({ defaultProvider: "ollama" }))
+    savePermissionMode("normal", global)
+    expect(JSON.parse(readFileSync(global, "utf8"))).toEqual({ defaultProvider: "9router", permissionMode: "normal" })
+    expect(JSON.parse(readFileSync(`${dir}/lugent.json`, "utf8"))).toEqual({ defaultProvider: "ollama" })
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("a malformed global file is replaced, not merged", () => {
+    const global = `/tmp/opencode/save-mode-bad-${Date.now()}.json`
+    writeFileSync(global, "{not json")
+    savePermissionMode("yolo", global)
+    expect(JSON.parse(readFileSync(global, "utf8"))).toEqual({ permissionMode: "yolo" })
+    rmSync(global, { force: true })
+  })
+
+  test("a failing write is reported and logged, not thrown", () => {
+    const dir = `/tmp/opencode/save-mode-fail-${Date.now()}`
+    mkdirSync(dir, { recursive: true })
+    const warns: string[] = []
+    const orig = console.warn
+    console.warn = (m: string) => { warns.push(String(m)) }
+    try {
+      expect(savePermissionMode("yolo", dir)).toBe(false)   // path is a directory → write fails
+      expect(warns.join("\n")).toMatch(/permission mode/)
+    } finally { console.warn = orig }
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("returns true when the mode is persisted", () => {
+    const global = `/tmp/opencode/save-mode-ok-${Date.now()}.json`
+    expect(savePermissionMode("yolo", global)).toBe(true)
+    expect(JSON.parse(readFileSync(global, "utf8")).permissionMode).toBe("yolo")
+    rmSync(global, { force: true })
   })
 })
 

@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test"
-import { CHROME_HEIGHT, LOGO_HEIGHT, LOGO_ROWS, WORDMARK_ROWS, WORDMARK_SPLIT, frameRows, logoHex, logoAnsi, logoTopPad, transcriptWindow } from "./logo"
+import { CHROME_HEIGHT, LOGO_HEIGHT, LOGO_ROWS, WORDMARK_ROWS, WORDMARK_SPLIT, frameRows, logoHex, logoAnsi, logoTopPad, splashWindow, transcriptWindow } from "./logo"
 
 test("logoTopPad centers the mark on the splash screen, without overflow", () => {
   // Upper pad = half the rows left over by the mark, so mark + pad is centered
@@ -63,16 +63,25 @@ test("frameRows leaves the last row of the terminal free", () => {
   expect(frameRows(1)).toBe(1)    // never 0: an empty root renders nothing
 })
 
-test("transcriptWindow is what the logo and the chrome leave over", () => {
-  // 30 rows: 29 painted - logo 16 - chrome 6 = 7. The region below the
-  // transcript never moves, so this is also the PageUp/PageDown page size.
-  expect(transcriptWindow(30)).toBe(7)
-  expect(transcriptWindow(24)).toBe(1)
-  // The splash pad is charged to the transcript, not to the chrome.
-  expect(transcriptWindow(30, logoTopPad(30))).toBe(0)
+test("transcriptWindow is what the chrome leaves over — the logo moved to scrollback", () => {
+  // 30 rows: 29 painted - chrome 6 = 23. The logo no longer lives in the frame:
+  // it prints once to the scrollback, so the live window gets every row the
+  // chrome doesn't take. This is also the PageUp/PageDown page size.
+  expect(transcriptWindow(30)).toBe(23)
+  expect(transcriptWindow(24)).toBe(17)
   // Short terminals degrade to an empty window, never a negative height.
-  expect(transcriptWindow(20)).toBe(0)
-  expect(transcriptWindow(10)).toBe(0)
+  expect(transcriptWindow(6)).toBe(0)
+  expect(transcriptWindow(10)).toBe(3)
+})
+
+test("splashWindow charges the centered logo + pad to the transcript", () => {
+  // 30 rows: pad 7 + logo 16 + chrome 6 = 29 painted — nothing left over.
+  expect(splashWindow(30)).toBe(0)
+  // 40 rows: pad 12 + 16 + 6 = 34 < 39 → 5 rows left for an (empty) splash pad.
+  expect(splashWindow(40)).toBe(5)
+  // Short terminals degrade to 0, never negative.
+  expect(splashWindow(24)).toBe(0)
+  expect(splashWindow(10)).toBe(0)
 })
 
 test("hex gradient samples the svg diagonal (monotonic green → cyan)", () => {
