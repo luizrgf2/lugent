@@ -94,3 +94,23 @@ test("buildMessages maps history roles to wire format", () => {
   expect(msgs[2].tool_calls).toEqual([{ id: "tc1", type: "function", function: { name: "read", arguments: "{\"path\":\"a\"}" } }])
   expect(msgs[3]).toEqual({ role: "tool", tool_call_id: "tc1", content: "file text" })
 })
+
+test("subagent catalog renders a # Subagents section between skills and tools", () => {
+  const p = buildPrefix({ ...input, subagents: [{ id: "reviewer", description: "Reviews a diff" }] })
+  expect(p).toContain("# Subagents")
+  expect(p).toContain("- reviewer: Reviews a diff")
+  expect(p.indexOf("git-release")).toBeLessThan(p.indexOf("# Subagents"))
+  expect(p.indexOf("# Subagents")).toBeLessThan(p.indexOf("- read:"))
+})
+
+test("no subagents → no section", () => {
+  expect(buildPrefix(input)).not.toContain("# Subagents")
+  expect(buildPrefix({ ...input, subagents: [] })).not.toContain("# Subagents")
+})
+
+test("golden: a prefix with a subagent catalog is byte-stable and frozen", () => {
+  const withSubs = { ...input, subagents: [{ id: "reviewer", description: "Reviews a diff" }] }
+  const a = buildPrefix(withSubs)
+  expect(a).toBe(buildPrefix(withSubs))
+  expect(a).toMatchSnapshot()
+})

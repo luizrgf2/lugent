@@ -1,7 +1,7 @@
 import * as readline from "node:readline/promises"
 import { runTurn } from "../core/loop"
 import { Provider } from "../core/provider"
-import { toolsForAgent, agentModelTarget, resolveAgent } from "../core/agents"
+import { toolsForAgent, agentModelTarget, resolveAgent, primaryAgents } from "../core/agents"
 import type { Store } from "../core/store"
 import type { AppConfig } from "../core/config"
 import type { ToolDef } from "../core/tools/registry"
@@ -143,10 +143,10 @@ export async function runRepl(env: ReplEnv): Promise<void> {
       if (slash.cmd === "agent") {
         const [id] = slash.args
         if (!id) {
-          console.log(env.agents.map(a => `- ${a.id}${a.description ? `: ${a.description}` : ""}`).join("\n") || "(none)")
+          console.log(primaryAgents(env.agents).map(a => `- ${a.id}${a.description ? `: ${a.description}` : ""}`).join("\n") || "(none)")
           continue
         }
-        const found = env.agents.find(a => a.id === id)
+        const found = primaryAgents(env.agents).find(a => a.id === id)
         if (!found) { console.log(`unknown agent "${id}" — /agent lists them`); continue }
         agent = found
         env.store.setAgent(session.id, found.id)
@@ -190,6 +190,9 @@ export async function runRepl(env: ReplEnv): Promise<void> {
     const r = await runTurn({
       store: env.store, provider, tools: env.tools, promptInput,
       signal: abortCtrl.signal,
+      agents: env.agents,
+      config: env.config,
+      providerFor: (p, m) => new Provider(env.config.providers[p], m),
       onToken: t => { clearSpin(); process.stdout.write(t) },
       onRetry: i => { clearSpin(); process.stdout.write(yellow(`attempt ${i.attempt} failed — ${i.error} · retrying in ${Math.round(i.delayMs / 1000)}s\n`)) },
       onToolStart: (name, resource) => {

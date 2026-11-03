@@ -30,6 +30,31 @@ Decision: `Agent.color` (optional, frontmatter `color:`) accepts an ink color na
 Why: the user asked "does lugent support per-agent colors?" — it didn't; the status bar already showed the agent id, so the color slot existed visually but not in data. Defaults on built-ins mean the line is colored out of the box; fallback keeps legacy agent files valid without touching them.
 Cost if wrong: two agents can pick the same color (no uniqueness check) — acceptable, color is a hint not an identity; hex parsing accepts `#rgb` shorthand ink also accepts, so no divergence.
 
+## 2026-11-03 — Subagents: one `subagent` tool with a `# Subagents` catalog
+Decision: `mode: primary|subagent|all` on the agent profile; a single `subagent` tool takes an `agent` id and a `prompt`; the catalog of launchable agents (id + description) is advertised in a `# Subagents` prompt section, not in the tool description.
+Why: Mirrors OpenCode (one stable tool, id parameter) while keeping the tool description short and the catalog as legible as `# Skills`. The section is rendered only when non-empty, so no `mode: subagent` agent means no prefix change (the golden snapshot stays byte-identical).
+Cost if wrong: two places describe subagents (section + tool schema); a model that ignores the section can still call the tool and earn an "unknown subagent" error.
+
+## 2026-11-03 — A subagent is another `runTurn`, in the same process
+Decision: the `subagent` tool receives a `ctx.spawn` closure that `runTurn` itself builds; spawn creates a child session and calls the same `runTurn`, returning the child's last assistant message. No child process, no separate loop function.
+Why: a child is the current chat instantiated again — same loop, same reason to change — so reusing `runTurn` avoids a second code path that would drift. It is asynchronous concurrency (a promise), not OS parallelism.
+Cost if wrong: the loop must own the spawn wiring (deps for agents/config/provider); a future background-subagent mode needs a lifecycle outside a single awaited call.
+
+## 2026-11-03 — Subagent depth is 1; the child never gets the tool
+Decision: `spawn` filters `subagent` out of the child toolset and sets the child's catalog to empty, so a child cannot launch a grandchild.
+Why: matches OpenCode's default and closes the recursion/cost loop with no depth counter — the tool simply does not exist for the child.
+Cost if wrong: a genuinely hierarchical task must be flattened by the parent; making depth configurable later means carrying a depth value on the session.
+
+## 2026-11-03 — Child sessions are hidden from the session list
+Decision: `listSessions` excludes rows with a non-null `parent`; the child is persisted and addressable by id (and via `children(parentId)`), but `/resume` and the TUI picker show only top-level sessions.
+Why: the child's answer already lives in the parent's transcript; listing children would clutter the picker for no user action. Hiding is one SQL predicate.
+Cost if wrong: inspecting a past child needs its id or a future child browser; no data is lost.
+
+## 2026-11-03 — `general`: a built-in subagent, so delegation works out of the box
+Decision: `BUILTIN_AGENTS` gains `general` — `mode: subagent`, full toolset, tool-default permissions, cyan — mirroring OpenCode's default delegate; it shadows like any built-in (`.agents/agents/general.md`).
+Why: without it the `subagent` tool errors "unknown subagent" in a clean install, and the whole feature is invisible until the user writes a file; OpenCode ships `general` for the same reason.
+Cost if wrong: every default prefix now carries a one-line `# Subagents` section (the golden snapshot still pins stability, and a project shadowing `general` with a primary-mode file removes it); the built-in's prompt is code, so rewording is a commit.
+
 ---
 
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.

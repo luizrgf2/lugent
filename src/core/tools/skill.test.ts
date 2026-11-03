@@ -22,7 +22,7 @@ test("unknown skill id is an error result", async () => {
   expect(r.error).toBe(true)
 })
 
-test("makeTools returns the 7 tools with unique names", async () => {
+test("makeTools returns the 8 tools with unique names", async () => {
   const names = makeTools(ROOT).map(t => t.name)
-  expect(names).toEqual(["read", "glob", "grep", "edit", "write", "shell", "skill"])
+  expect(names).toEqual(["read", "glob", "grep", "edit", "write", "shell", "skill", "subagent"])
 })

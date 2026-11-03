@@ -1,5 +1,7 @@
 export type Role = "user" | "assistant" | "tool"
 
+export type AgentMode = "primary" | "subagent" | "all"
+
 export interface ToolCall { id: string; name: string; args: unknown }
 
 export interface Message {
@@ -15,7 +17,12 @@ export interface Message {
 
 export interface ToolResult { output: string; error?: boolean }
 
-export interface ToolContext { cwd: string; signal?: AbortSignal }
+export interface ToolContext {
+  cwd: string
+  signal?: AbortSignal
+  /** Set by runTurn: launches a subagent in a child session. Absent when subagents are unavailable. */
+  spawn?: (agentId: string, prompt: string) => Promise<ToolResult>
+}
 
 export interface SkillMeta {
   id: string
@@ -29,6 +36,7 @@ export interface AgentModelRef { provider: string; model: string }
 export interface Agent {
   id: string
   description?: string
+  mode?: AgentMode
   model?: AgentModelRef
   tools?: string[]
   permissions?: Record<string, "allow" | "ask" | "deny">

@@ -5,7 +5,7 @@ export const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "
 
 const TOOL_GLYPHS: Record<string, string> = {
   read: "▸", edit: "✎", write: "+", shell: "$",
-  grep: "⌕", glob: "✳", skill: "★",
+  grep: "⌕", glob: "✳", skill: "★", subagent: "↗",
 }
 
 export function glyph(tool: string): string {

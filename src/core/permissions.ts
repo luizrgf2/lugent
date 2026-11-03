@@ -9,6 +9,7 @@ export function resourceFor(call: ToolCall): string {
   const a = (call.args ?? {}) as Record<string, unknown>
   if (typeof a.path === "string") return a.path
   if (typeof a.command === "string") return a.command
+  if (typeof a.agent === "string") return a.agent
   if (typeof a.id === "string") return a.id
   return "*"
 }

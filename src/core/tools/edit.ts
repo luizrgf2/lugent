@@ -26,7 +26,7 @@ export const editTool: ToolDef = {
       }
       const next = args.replaceAll
         ? text.split(args.oldString).join(args.newString)
-        : text.replace(args.oldString, args.newString)
+        : text.replace(args.oldString, () => args.newString)
       await Bun.write(path, next)
       return { output: unifiedDiff(path, args.oldString, args.newString) }
     } catch (e: any) {

@@ -17,8 +17,8 @@ src/core/
   prompt.ts                system prefix builder + history→wire mapping
   provider.ts              OpenAI-compatible SSE client
   permissions.ts           allow/ask decision, resource extraction
-  loop.ts                  agent turn loop
-  tools/                   registry + read glob grep edit write shell skill
+  loop.ts                  agent turn loop; subagent spawn = another runTurn over the same store (child session)
+  tools/                   registry + read glob grep edit write shell skill subagent
   mcp/                     MCP: config parsing, transports (stdio/http), client, tool bridge, runtime manager
 ```
 

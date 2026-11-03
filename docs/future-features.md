@@ -52,9 +52,16 @@ selected with `/agent`, default from `defaultAgent`; two built-ins (`build` defa
 `plan` read-only) compiled into the loader and overridable by a same-id file.
 Loader: `src/core/agents.ts`; usage and fields: `README.md` § "Agents".
 
+**Shipped 2026-11-03: Subagents** — child sessions with fresh context, `mode: subagent`,
+and the `subagent` tool (`{agent, prompt}`, depth 1, parallel launches, children hidden
+from `/resume`). Implementation: `src/core/loop.ts` (spawn = another `runTurn`) +
+`src/core/tools/subagent.ts`; usage: `README.md` § "Agents" → Subagents.
+
 | Feature | Why deferred | Add when |
 | --- | --- | --- |
-| Subagents (child sessions, fresh context, parallel work) | Significant session-model complexity | Long tasks need context isolation or parallelism |
+| Background subagents (fire-and-forget, no awaiting the child) | The `subagent` tool call awaits its child; a background mode needs a lifecycle outside a single tool call | Users want to keep working while a review runs |
+| Child browser (inspect a past child session's transcript from the parent) | Children are persisted but hidden; no UI lists them | Debugging "what did the subagent actually do" becomes common |
+| Subagent depth > 1 (a child launching a child) | Depth 1 closes the recursion/cost loop; hierarchical tasks flatten fine | A real task cannot be expressed without grandchildren |
 | Hidden maintenance agents (title, summary generation) | Cosmetic | Session lists get unwieldy |
 | Steps limit (remove tools on final step, force text answer) | Loop discipline not yet a problem | Agents loop excessively on hard tasks |
 | Agent permission rule engine (wildcards, per-resource patterns, ordered rules) | One flag per tool covers the real cases (`plan`) | A policy needs "deny `git push`, allow `git status`" |
@@ -68,7 +75,6 @@ Loader: `src/core/agents.ts`; usage and fields: `README.md` § "Agents".
 | `patch` (multi-file add/update/delete in one call) | `edit` + `write` cover v1; `patch` maps to GPT-style tool APIs | Multi-file refactor churn hurts |
 | `question` tool (structured choices for the user) | Permission `ask` prompts cover basic interaction | Agents need mid-task branching decisions |
 | `execute` (JS sandbox for parallel tool calls + result processing) | Nice-to-have; loop can issue parallel calls natively | Context pollution from intermediate results hurts |
-| `subagent` tool | See Subagents above | Same trigger |
 | Formatter integration after `edit` / `write` | Projects vary; no default | Config exposes `formatter` |
 | Browser namespace (tabs, snapshots, screenshots, network inspection) | Large surface, desktop-app territory | Frontend iteration workflow needed |
 | Worktree / session management utilities | REPL covers basic flow | Parallel experiment workflow needed |

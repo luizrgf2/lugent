@@ -139,6 +139,7 @@ LUGENT
 | `write` | ask | Create/replace file, creates parent dirs |
 | `shell` | ask | `bash -c` (`cmd /c` on Windows), timeout default 2min, `background: true` |
 | `skill` | allow | Load a skill body by id |
+| `subagent` | ask | Launch a subagent in a child session (id from the `# Subagents` list, fresh context); returns the child's final message |
 
 **Extra guard:** any resource outside the project root (absolute path, `..`, `~`) forces an `ask` even for `allow` tools, unless already granted for the session.
 
@@ -229,14 +230,15 @@ An agent is a named profile — system prompt, model, tool allowlist, permission
 
 ### Built-in agents
 
-Two agents are always present, in every install (inspired by OpenCode's pair, adapted: no rule engine, no plan files):
+Three agents are always present, in every install (`build`/`plan` from OpenCode's pair, adapted: no rule engine, no plan files; `general` its default subagent):
 
-| Id | Prompt | Tools | Permissions |
-| --- | --- | --- | --- |
-| `build` | the base system prompt | all | tool defaults |
-| `plan` | "plan mode": explore and design, no file changes | all but `edit`/`write` | `{edit: deny, write: deny}` |
+| Id | Mode | Prompt | Tools | Permissions |
+| --- | --- | --- | --- | --- |
+| `build` | primary | the base system prompt | all | tool defaults |
+| `plan` | primary | "plan mode": explore and design, no file changes | all but `edit`/`write` | `{edit: deny, write: deny}` |
+| `general` | subagent | general-purpose task runner, fresh context | all (spawn drops `subagent` itself) | tool defaults |
 
-Built-ins carry display colors (`build` magenta, `plan` yellow); the TUI context line — fixed above the input — shows a yellow `§ AGENTS.md loaded` when a project `AGENTS.md` was loaded, plus `· agent <id>` in the agent's color.
+Built-ins carry display colors (`build` magenta, `plan` yellow, `general` cyan); the TUI context line — fixed above the input — shows a yellow `§ AGENTS.md loaded` when a project `AGENTS.md` was loaded, plus `· agent <id>` in the agent's color.
 
 `build` is the startup default, so there is always a way back to a normal session (`/agent build`). `plan` can read, search and run shell commands — shell stays permission-controlled, as in OpenCode — it just cannot modify files. Both load **first**, so a file with the same id (user or project) overrides the built-in without removing it: drop `.agents/agents/plan.md` to give your own plan agent.
 
@@ -258,10 +260,36 @@ You are a code reviewer. Report findings with file and line references.
 | `model` | `provider/model`, both required — provider must exist in the config | inherit the session's |
 | `tools` | tool ids sent to the model; anything else is invisible to it — a `tools` key that parses to nothing (typo, block-style YAML) fails closed to **no** tools, with a warning | all tools |
 | `permissions` | per-tool `allow` / `ask` / `deny`; `deny` also removes the tool | tool default |
+| `mode` | `primary` \| `subagent` \| `all` — who may launch this agent | primary |
+
+### Subagents
+
+A `mode: subagent` (or `all`) agent is not a session you switch into — it is a worker the model launches. During a turn the model can call the `subagent` tool with `{ agent, prompt }`; lugent starts a **child session** (a second session in the same store, same process) that runs with the subagent's own prompt, model and tools, and the child's final message comes back as the tool result.
+
+- The model discovers subagents from a `# Subagents` section of the prompt (id + description), rendered only when at least one is launchable — same mechanism as `# Skills`.
+- The child starts with **no** shared history: the prompt must be self-contained.
+- Several `subagent` calls in one tool round run in parallel.
+- **Depth 1**: a child never gets the `subagent` tool or the catalog, so it cannot launch a grandchild.
+- Children are persisted (with a `parent` link) but **hidden** from `/resume` and the TUI picker; only the child's final message returns to the parent.
+- `mode: subagent` agents are not offered in `/agent` — they are launch targets, not session personas.
+- The `general` built-in ships as a subagent, so delegation works with zero files; shadow or repurpose it with `.agents/agents/general.md` like any built-in.
+
+```markdown
+---
+description: Probes one file and summarizes it
+mode: subagent
+tools: [read]
+---
+You are a probe. Read exactly one file and summarize it in three lines.
+```
+
+Usage: `/agent` lists loaded agents (`build` and `plan` plus your file agents), `/agent reviewer` switches.
 
 The body is the agent's system prompt: it **replaces** the base prompt, and AGENTS.md plus the skills advertisement are still added on top. A permission override replaces the tool's default — a session `always` grant still wins over it, and the outside-project guard still forces an ask.
 
 Usage: `/agent` lists loaded agents (`build` and `plan` plus your file agents), `/agent reviewer` switches. Switching works mid-session — history is kept and the next turn runs with the new prompt, model and toolset; the switch line confirms provider/model/toolset, and the `# Tools` section of the prompt is filtered to match. An agent's `model` applies at startup (`defaultAgent`) and on `/resume`, not only when switched to. `/resume` restores the agent together with provider and model; `defaultAgent` picks the startup agent and defaults to `build` — an unknown id warns and falls back to `build`. Because `build` reuses the base prompt, the default system prefix stays byte-identical to a session with no agent (and sessions created before agents existed keep the base prompt). Bad frontmatter never breaks startup: an empty body drops that agent, and an unknown tool id or a `model` without `provider/` warns and falls back.
+
+**Index:** [`docs/architecture/prompt-and-agents.md`](docs/architecture/prompt-and-agents.md) (the `# Subagents` catalog) · [`docs/architecture/turn-flow.md`](docs/architecture/turn-flow.md) (the child branch in the loop) · [`docs/decisions/agents.md`](docs/decisions/agents.md) (why one tool, why depth 1) · [`docs/future-features.md`](docs/future-features.md) § Agents (background subagents, deferred).
 
 ## Permissions & yolo
 

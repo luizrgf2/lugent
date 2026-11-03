@@ -3,7 +3,7 @@ import { runTurn } from "./core/loop"
 import { Store } from "./core/store"
 import { makeTools } from "./core/tools"
 import { loadSkills } from "./core/skills"
-import { loadAgents, toolsForAgent } from "./core/agents"
+import { loadAgents, toolsForAgent, subagentsFor } from "./core/agents"
 import { rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs"
 
 const ROOT = "/tmp/opencode/e2e"
@@ -19,6 +19,10 @@ beforeAll(() => {
   mkdirSync(`${ROOT}/.agents/agents`, { recursive: true })
   writeFileSync(`${ROOT}/.agents/agents/reviewer.md`,
     `---\ndescription: Reviews read-only\nmodel: fake/fake-model\ntools: [read, glob]\n---\nYou are a reviewer. Do not edit files.`)
+  writeFileSync(`${ROOT}/.agents/agents/probe.md`,
+    `---\ndescription: Probes a file\nmode: subagent\ntools: [read]\n---\nYou are PROBE. Read one file and summarize it.`)
+  writeFileSync(`${ROOT}/.agents/agents/allrounder.md`,
+    `---\ndescription: Handles anything\nmode: all\ntools: [read]\n---\nYou are ALLROUNDER.`)
 })
 afterAll(() => {
   rmSync(ROOT, { recursive: true, force: true })
@@ -155,5 +159,51 @@ test("e2e: a plan turn cannot edit — the tool is withheld and refused", async 
   const refused = store.getMessages(session.id).find(m => m.role === "tool")
   expect(refused?.content).toBe("unknown tool: edit")        // even if the model tries, nothing runs
   expect(readFileSync(`${ROOT}/src.txt`, "utf8")).toBe("42\n")   // the file is untouched
+  store.close()
+})
+
+test("e2e: a turn launches a disk subagent and folds its answer back", async () => {
+  const store = new Store(DB)
+  const session = store.createSession("fake", "fake-model", ROOT)
+  const tools = makeTools(ROOT)
+  const agents = loadAgents(ROOT)
+  const subagents = subagentsFor(agents)
+  const childPrefixes: string[] = []
+  const childTools: string[][] = []
+  let parentRounds = 0
+  const provider = {
+    chat: async (a: any) => {
+      const sys: string = a.messages[0].content
+      if (sys.includes("You are PROBE")) {
+        childPrefixes.push(sys)
+        childTools.push(a.tools.map((t: any) => t.name))
+        return { content: "probe says 42", toolCalls: [] }
+      }
+      parentRounds++
+      if (parentRounds === 1) return { content: "", toolCalls: [{ id: "t1", name: "subagent", args: { agent: "probe", prompt: "summarize src.txt" } }] }
+      return { content: "done", toolCalls: [] }
+    },
+  }
+
+  const r = await runTurn({
+    store, provider, tools, agents,
+    signal: new AbortController().signal,
+    onAsk: async () => "y" as const,
+    promptInput: {
+      cwd: ROOT, os: "linux", gitBranch: null, date: "2026-11-03",
+      agentsMd: null, skills: [],
+      tools: tools.map(t => ({ name: t.name, description: t.description, schema: t.schema })),
+      subagents: subagents.map(a => ({ id: a.id, description: a.description })),
+    },
+  }, session.id, "use a subagent")
+
+  expect(r.aborted).toBe(false)
+  expect(subagents.map(a => a.id).sort()).toEqual(["allrounder", "general", "probe"])  // built-in + mode: all + mode: subagent
+  expect(store.getMessages(session.id).find(m => m.role === "tool")!.content).toBe("probe says 42")
+  expect(childPrefixes[0]).toContain("You are PROBE")
+  expect(childPrefixes[0]).not.toContain("# Subagents")   // the catalog is gone in the child
+  expect(childTools[0]).not.toContain("subagent")          // depth 1
+  expect(childTools[0]).toContain("read")
+  expect(store.children(session.id).length).toBe(1)
   store.close()
 })

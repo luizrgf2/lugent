@@ -5,7 +5,7 @@ import type { Agent } from "../../core/types"
 import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
 import { savePermissionMode, globalConfigPath } from "../../core/config"
-import { toolsForAgent, agentModelTarget, resolveAgent } from "../../core/agents"
+import { toolsForAgent, agentModelTarget, resolveAgent, primaryAgents } from "../../core/agents"
 import { buildPromptInput, safeAgentsMd } from "../context"
 import { frameRows, logoTopPad, splashWindow, transcriptWindow, CHROME_HEIGHT } from "../logo"
 import { ContextLine, LogoMark } from "./status"
@@ -157,6 +157,9 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
       signal: ac.signal,
       yolo: yoloRef.current,
       agent,
+      agents: env.agents,
+      config: env.config,
+      providerFor: (p: string, m: string) => env.makeProvider?.(env.config.providers[p], m) ?? new Provider(env.config.providers[p], m),
       onReasoning: t => { reasoning += t; pushLive(cur => patchTail(cur, { kind: "reasoning", text: reasoning })) },
       onToken: t => { answer += t; setRetry(""); pushLive(cur => patchTail(cur, { kind: "assistant", text: answer })) },
       onRetry: i => setRetry(`attempt ${i.attempt} failed — ${i.error} · retrying in ${Math.round(i.delayMs / 1000)}s`),
@@ -267,7 +270,7 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
       {retry && <Text color="yellow">{retry}</Text>}
       <ContextLine agent={agent} agentsMd={agentsMd} yolo={yolo} off={env.offProviders.includes(provider)} model={`${provider} · ${model}`} busy={busy && !ask} />
       {overlay === "agent"        ? <AgentPicker
-            agents={env.agents}
+            agents={primaryAgents(env.agents)}
             current={agent?.id}
             onClose={closeOverlay}
             onPick={a => {

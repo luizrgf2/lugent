@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto"
 import type { Store } from "./store"
-import type { Agent, ChatResponse, Message } from "./types"
+import type { Agent, ChatResponse, Message, ToolContext, ToolResult } from "./types"
 import type { ToolDef } from "./tools/registry"
 import { validateArgs } from "./tools/registry"
 import { buildPrefix, buildMessages, type PromptInput } from "./prompt"
 import { checkPermission, resourceFor } from "./permissions"
-import { toolsForAgent } from "./agents"
+import { toolsForAgent, canBeSubagent, agentModelTarget } from "./agents"
+import type { AppConfig } from "./config"
 import { expandImages } from "./images"
 
 const TRUNCATE = 10_000
@@ -24,6 +25,10 @@ export interface LoopDeps {
   onAsk: (tool: string, resource: string) => Promise<"y" | "n" | "a">
   yolo?: boolean   // auto-approve every tool call, including outside-project ones
   agent?: Agent    // selected agent: filters the toolset, overrides permission defaults
+  agents?: Agent[] // launchable catalog; also enables the subagent tool's spawn
+  config?: AppConfig
+  /** Builds the provider for a child whose agent pins a model; the child inherits the parent's otherwise. */
+  providerFor?: (provider: string, model: string) => { chat(args: any): Promise<ChatResponse> }
 }
 
 function msg(partial: Partial<Message> & { sessionId: string; role: Message["role"] }): Message {
@@ -57,9 +62,51 @@ function isOutsideProject(resource: string, cwd: string): boolean {
   return !rel
 }
 
+function buildSpawn(deps: LoopDeps, parentId: string): NonNullable<ToolContext["spawn"]> {
+  return async (agentId, prompt) => {
+    const child = (deps.agents ?? []).find(a => a.id === agentId)
+    if (!child) return { output: `unknown subagent: ${agentId}`, error: true } satisfies ToolResult
+    if (!canBeSubagent(child)) return { output: `agent ${agentId} is not a subagent (mode: primary)`, error: true } satisfies ToolResult
+
+    const parent = deps.store.loadSession(parentId)
+    const target = agentModelTarget(child, deps.config?.providers ?? {})
+    let provider = deps.provider
+    if (target) {
+      const built = deps.providerFor?.(target.provider, target.model)
+      if (!built) return { output: `no provider configured for ${target.provider}/${target.model}`, error: true } satisfies ToolResult
+      provider = built
+    }
+
+    // Depth 1: the child never gets the subagent tool, so it cannot spawn a grandchild.
+    const childTools = toolsForAgent(deps.tools, child).filter(t => t.name !== "subagent")
+    const childInput: PromptInput = {
+      ...deps.promptInput,
+      agentPrompt: child.prompt,
+      tools: childTools.map(t => ({ name: t.name, description: t.description, schema: t.schema })),
+      skills: childTools.some(t => t.name === "skill") ? deps.promptInput.skills : [],
+      subagents: [],
+    }
+    const childId = deps.store.createSession(
+      target?.provider ?? parent?.provider ?? "",
+      target?.model ?? parent?.model ?? "",
+      deps.promptInput.cwd, child.id, parentId).id
+
+    const r = await runTurn({
+      ...deps, provider, tools: childTools, promptInput: childInput, agent: child,
+      onToken: undefined, onReasoning: undefined, onToolStart: undefined,
+    }, childId, prompt, deps.promptInput.cwd)
+
+    if (r.aborted) return { output: `subagent ${agentId} aborted`, error: true } satisfies ToolResult
+    const last = [...deps.store.getMessages(childId)].reverse().find(m => m.role === "assistant" && m.content)
+    if (!last?.content) return { output: `subagent ${agentId} produced no answer${r.error ? `: ${r.error}` : ""}`, error: true } satisfies ToolResult
+    return { output: last.content } satisfies ToolResult
+  }
+}
+
 export async function runTurn(deps: LoopDeps, sessionId: string, userText: string, cwd = process.cwd()): Promise<{ aborted: boolean; error?: string }> {
   const { store } = deps
   const tools = toolsForAgent(deps.tools, deps.agent)
+  const spawn = deps.agents ? buildSpawn(deps, sessionId) : undefined
   store.appendMessage(msg({ sessionId, role: "user", content: userText }))
   const userContent = expandImages(userText, cwd)
 
@@ -126,7 +173,7 @@ export async function runTurn(deps: LoopDeps, sessionId: string, userText: strin
       deps.onToolStart?.(call.name, resource)
       let result
       try {
-        result = await tool.execute(call.args, { cwd: deps.promptInput.cwd, signal: deps.signal })
+        result = await tool.execute(call.args, { cwd: deps.promptInput.cwd, signal: deps.signal, spawn })
       } catch (e: any) {
         result = { output: `tool error: ${e.message}`, error: true }
       }

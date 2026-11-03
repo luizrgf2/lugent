@@ -6,7 +6,7 @@ import { Store } from "./core/store"
 import { makeTools } from "./core/tools"
 import type { ToolDef } from "./core/tools/registry"
 import { loadSkills } from "./core/skills"
-import { loadAgents } from "./core/agents"
+import { loadAgents, primaryAgents } from "./core/agents"
 import { McpManager } from "./core/mcp/manager"
 import { Provider } from "./core/provider"
 import { defaultDbPath, defaultMcpOAuthPath } from "./core/platform"
@@ -47,7 +47,7 @@ for (const s of mcp.states()) {
 }
 
 const agents = loadAgents(projectRoot, homedir(), allTools.map(t => t.name))
-if (config.defaultAgent && !agents.some(a => a.id === config.defaultAgent))
+if (config.defaultAgent && !primaryAgents(agents).some(a => a.id === config.defaultAgent))
   console.log(`defaultAgent "${config.defaultAgent}" not found — using the build agent`)
 
 // startup health check: report OFF providers, never crash

@@ -2,6 +2,8 @@ import { test, expect, beforeEach, afterAll } from "bun:test"
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { loadAgents, resolveAgent, BUILTIN_AGENTS, parseList, parsePermMap, parseModelRef, toolsForAgent, effectivePermission, agentModelTarget } from "./agents"
+import { canBeSubagent, canBePrimary, subagentsFor, primaryAgents } from "./agents"
+import type { Agent } from "./types"
 import { SYSTEM_PROMPT } from "./prompt"
 import type { ToolDef } from "./tools/registry"
 
@@ -125,7 +127,15 @@ test("effectivePermission: override wins over registry default", () => {
 
 test("build and plan always load, even with no files on disk", () => {
   expect(fileAgents()).toEqual([])
-  expect(loadAgents(PROJ, HOME, KNOWN).map(a => a.id).sort()).toEqual(["build", "plan"])
+  expect(loadAgents(PROJ, HOME, KNOWN).map(a => a.id).sort()).toEqual(["build", "general", "plan"])
+})
+
+test("general is a subagent out of the box: full toolset, no overrides, no skills section needed", () => {
+  const general = byId("general")
+  expect(general.mode).toBe("subagent")
+  expect(general.tools).toBeUndefined()
+  expect(general.permissions).toBeUndefined()
+  expect(toolsForAgent(ALL_TOOLS, general).map(t => t.name)).toEqual(["read", "edit", "write", "shell"])
 })
 
 test("build reuses the base system prompt and keeps every tool", () => {
@@ -171,4 +181,33 @@ test("resolveAgent: named id, else build, even for an unknown id", () => {
   expect(resolveAgent(agents, undefined)?.id).toBe("build")
   expect(resolveAgent(agents, "ghost")?.id).toBe("build")
   expect(resolveAgent([])?.id).toBeUndefined()
+})
+
+test("mode: valid values kept, invalid warns and stays primary (absent)", () => {
+  write(join(PROJ, ".agents", "agents"), "sub.md", "---\nmode: subagent\n---\nSub.")
+  write(join(PROJ, ".agents", "agents"), "all.md", "---\nmode: all\n---\nAll.")
+  write(join(PROJ, ".agents", "agents"), "bad.md", "---\nmode: ghost\n---\nBad.")
+  expect(byId("sub").mode).toBe("subagent")
+  expect(byId("all").mode).toBe("all")
+  expect(byId("bad").mode).toBeUndefined()
+})
+
+test("canBeSubagent / canBePrimary and the filters", () => {
+  const p: Agent = { id: "p", prompt: "p" }
+  const s: Agent = { id: "s", prompt: "s", mode: "subagent" }
+  const a: Agent = { id: "a", prompt: "a", mode: "all" }
+  expect(canBeSubagent(p)).toBe(false)
+  expect(canBeSubagent(s)).toBe(true)
+  expect(canBeSubagent(a)).toBe(true)
+  expect(canBePrimary(s)).toBe(false)
+  expect(canBePrimary(p)).toBe(true)
+  expect(canBePrimary(a)).toBe(true)
+  expect(subagentsFor([p, s, a]).map(x => x.id)).toEqual(["s", "a"])
+  expect(primaryAgents([p, s, a]).map(x => x.id)).toEqual(["p", "a"])
+})
+
+test("out of the box, `general` is the only launchable subagent", () => {
+  const subs = loadAgents(PROJ, HOME, KNOWN).filter(canBeSubagent)
+  expect(subs.map(a => a.id)).toEqual(["general"])
+  expect(loadAgents(PROJ, HOME, KNOWN).filter(canBePrimary).map(a => a.id).sort()).toEqual(["build", "plan"])
 })

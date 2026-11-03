@@ -15,10 +15,18 @@ You cannot edit or write files — those tools are withheld from you. When work 
 needed, state exactly what to change and let the user switch to the build agent
 to apply it.`
 
+const GENERAL_PROMPT = `You are a lugent subagent executing one delegated task in a child session.
+
+You see none of the parent conversation: the prompt that spawned you is your entire
+brief. Treat it as self-contained — if context you need is missing, say exactly what
+is missing instead of guessing. Explore the codebase with your tools, do the work,
+and return the result the parent asked for: concise and factual, no preamble.`
+
 /**
  * Agents every install has (OpenCode's `build` / `plan` pair, adapted: no rule
- * engine and no plan files). They load first, so a file with the same id — user
- * or project scope — overrides one without removing it.
+ * engine and no plan files, plus its default `general` subagent). They load
+ * first, so a file with the same id — user or project scope — overrides one
+ * without removing it.
  */
 const COLORS = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "gray", "grey"]
 
@@ -43,11 +51,39 @@ export const BUILTIN_AGENTS: Agent[] = [
     color: "yellow",
     prompt: PLAN_PROMPT,
   },
+  {
+    // OpenCode's default subagent: every install can delegate out of the box.
+    // Full toolset (spawn already filters `subagent` for depth 1) and tool-default
+    // permissions; shadow it with .agents/agents/general.md like any built-in.
+    id: "general",
+    description: "General-purpose task runner — full toolset, fresh context",
+    mode: "subagent",
+    color: "cyan",
+    prompt: GENERAL_PROMPT,
+  },
 ]
 
 /** The session's agent: the requested id when it exists, else `build`. Undefined only if build is gone. */
 export function resolveAgent(agents: Agent[], id?: string): Agent | undefined {
   return (id ? agents.find(a => a.id === id) : undefined) ?? agents.find(a => a.id === "build")
+}
+
+/** Launchable through the `subagent` tool (`mode: subagent` or `all`). */
+export function canBeSubagent(agent: Agent): boolean {
+  return agent.mode === "subagent" || agent.mode === "all"
+}
+
+/** Selectable as the session's agent (absent mode counts as `primary`). */
+export function canBePrimary(agent: Agent): boolean {
+  return agent.mode !== "subagent"
+}
+
+export function subagentsFor(agents: Agent[]): Agent[] {
+  return agents.filter(canBeSubagent)
+}
+
+export function primaryAgents(agents: Agent[]): Agent[] {
+  return agents.filter(canBePrimary)
 }
 
 /** "[read, \"glob\"]" → ["read", "glob"] */
@@ -104,6 +140,11 @@ function loadAgentFile(dir: string, rel: string, knownTools: string[]): Agent | 
   const known = (t: string) => knownTools.length === 0 || knownTools.includes(t)
   const agent: Agent = { id, prompt }
   if (data.description) agent.description = data.description
+  if (data.mode !== undefined) {
+    const m = data.mode.trim()
+    if (m === "primary" || m === "subagent" || m === "all") agent.mode = m
+    else console.warn(`agent ${id}: bad mode "${data.mode}" — using primary`)
+  }
   if (data.color !== undefined) {
     const c = parseColor(data.color)
     if (c) agent.color = c

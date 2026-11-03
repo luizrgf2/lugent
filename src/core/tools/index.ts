@@ -6,7 +6,8 @@ import { editTool } from "./edit"
 import { writeTool } from "./write"
 import { shellTool } from "./shell"
 import { makeSkillTool } from "./skill"
+import { makeSubagentTool } from "./subagent"
 
 export function makeTools(projectRoot: string): ToolDef[] {
-  return [readTool, globTool, grepTool, editTool, writeTool, shellTool, makeSkillTool(projectRoot)]
+  return [readTool, globTool, grepTool, editTool, writeTool, shellTool, makeSkillTool(projectRoot), makeSubagentTool()]
 }

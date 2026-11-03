@@ -34,6 +34,10 @@ test("resourceFor picks path/command/id in order", () => {
   expect(resourceFor({ id: "1", name: "glob", args: {} })).toBe("*")
 })
 
+test("resourceFor: subagent uses the agent id", () => {
+  expect(resourceFor({ id: "1", name: "subagent", args: { agent: "reviewer", prompt: "x" } })).toBe("reviewer")
+})
+
 test("agent override replaces the tool default, grants still win", () => {
   const tool = { name: "edit", description: "", schema: { type: "object", properties: {} }, permission: "ask" as const, execute: async () => ({ output: "" }) }
   const agent = { id: "a", prompt: "p", permissions: { edit: "allow" as const } }

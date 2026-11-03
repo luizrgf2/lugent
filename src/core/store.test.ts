@@ -163,6 +163,38 @@ test("reopening the database keeps the agent column (migration is idempotent)", 
   store = new Store(DB)   // restore the shared instance for afterAll cleanup
 })
 
+test("createSession stores a parent; children() returns child rows", () => {
+  const parent = store.createSession("local", "qwen", "/proj")
+  const child = store.createSession("local", "qwen", "/proj", "reviewer", parent.id)
+  expect(store.loadSession(child.id)?.parent).toBe(parent.id)
+  expect(store.loadSession(parent.id)?.parent).toBe(null)
+  expect(store.children(parent.id).map(s => s.id)).toEqual([child.id])
+  expect(store.children(parent.id)[0].agent).toBe("reviewer")
+})
+
+test("listSessions hides child sessions (parent not null)", () => {
+  const parent = store.createSession("local", "qwen", "/proj")
+  const child = store.createSession("local", "qwen", "/proj", "reviewer", parent.id)
+  store.appendMessage({ id: "mp", sessionId: parent.id, role: "user", content: "task", createdAt: new Date(1).toISOString() })
+  store.appendMessage({ id: "mc", sessionId: child.id, role: "user", content: "subtask", createdAt: new Date(2).toISOString() })
+  expect(store.listSessions("/proj").map(s => s.id)).toEqual([parent.id])
+})
+
+test("migrates a pre-parent database: sessions load with parent null", () => {
+  store.close()
+  rmSync(DB, { force: true })
+  const db = new Database(DB, { create: true })
+  db.run(`CREATE TABLE session (
+    id TEXT PRIMARY KEY, title TEXT, created_at TEXT,
+    provider TEXT, model TEXT, aborted INTEGER DEFAULT 0)`)
+  db.run(`INSERT INTO session (id, created_at, provider, model) VALUES ('ses_old', '2026-01-01', 'local', 'qwen')`)
+  db.close()
+  const store2 = new Store(DB)
+  expect(store2.loadSession("ses_old")?.parent).toBe(null)
+  store2.close()
+  store = new Store(DB)   // restore the shared instance for afterAll cleanup
+})
+
 test("setModel switches provider/model on an existing session", () => {
   const s = store.createSession("local", "qwen")
   store.setModel(s.id, "9router", "deepseek/deepseek-chat")
