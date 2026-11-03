@@ -8,7 +8,7 @@ import type { ToolDef } from "../core/tools/registry"
 import type { McpManager } from "../core/mcp/manager"
 import type { SkillMeta, Agent } from "../core/types"
 import { parseSlash, parseAnswer, mcpActions, formatMcpState, type McpAction } from "./commands"
-import { box, glyph, truncate, dim, cyan, red, yellow, Spinner, logo } from "./ui"
+import { box, glyph, truncate, dim, cyan, red, yellow, Spinner, logo, timeAgo } from "./ui"
 import { buildPromptInput } from "./context"
 
 export interface ReplEnv {
@@ -75,7 +75,7 @@ export async function runRepl(env: ReplEnv): Promise<void> {
         const list = env.store.listSessions(env.projectRoot)
         if (!list.length) { console.log("no sessions in this directory"); continue }
         list.forEach((s, i) =>
-          console.log(`${i + 1}. ${s.id.slice(0, 8)} · ${s.model} · ${truncate(s.preview, 48)}`))
+          console.log(`${i + 1}. ${s.id.slice(0, 8)} · ${s.model} · ${dim(timeAgo(s.updatedAt))} · ${truncate(s.preview, 48)}`))
         const answer = await rl.question("resume which? [1] ")
         const i = parseInt(answer.trim(), 10) - 1
         const pick = list[Number.isNaN(i) ? 0 : i]

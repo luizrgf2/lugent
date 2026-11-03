@@ -89,3 +89,13 @@ Context: issue #7 asked for a decision (retry vs circuit breaker) said to be abo
 Decision: **exponential-backoff retry stays; no circuit breaker.** A circuit breaker protects callers that keep hammering an unhealthy endpoint automatically — but lugent is a single-user, single-turn client where every retry is visible (`attempt N failed — retrying in Xs`) and ESC/ctrl+c aborts instantly. The user *is* the circuit breaker, with better judgment than any threshold. A breaker would add state (open/half-open/closed), tuning knobs and flapping failure modes to a process that lives and dies with one session. `Retry-After` header parsing remains the ponytail from 2026-10-30: it refines the wait length without changing the strategy.
 Why: retries handle transient 429s (the common case with local routers and rate-limited gateways); sustained outages are handled by the human watching the transcript, not by more machinery.
 Cost if wrong: a headless/automated caller looping turns against a throttled endpoint would bill repeated 10s→60s waits with no tripping. If lugent ever grows a non-interactive batch mode, that is the trigger to revisit a breaker.
+
+## 2026-11-03 — session preview is local heuristics, not LLM-generated
+Decision: `/resume` previews are distilled locally (`sessionPreview()` in `store.ts`): first significant prose line of the first user message, whitespace collapsed, markdown chrome (fences/bullets/headings) skipped, 96-char cap. No LLM call.
+Why: zero deps in core, zero latency, zero cost; the REPL truncates to 48 chars anyway, so model-quality titles add nothing visible.
+Cost if wrong: sessions whose first message is pure data (logs with no prose) get a mediocre summary — trigger to revisit: an LLM title cache column + provider hook, opt-in.
+
+## 2026-11-03 — session order is last-message time, computed at query time
+Decision: `listSessions()` orders by `COALESCE(MAX(message.created_at), session.created_at) DESC` with an `(session_id, created_at)` index; no denormalized `updated_at` column.
+Why: no schema migration, no write-path change; local single-user scale makes the indexed MAX cheap, and `updatedAt` also surfaces in the summary for display.
+Cost if wrong: listing cost grows with per-session message count on huge DBs — escape hatch is adding the column + trigger later, query shape stays.
