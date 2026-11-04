@@ -510,6 +510,7 @@ ${next ? `        <a class="next" href="${link(next)}"><span>NEXT</span><strong>
 <link rel="stylesheet" href="../site.css">
 </head>
 <body>
+<canvas id="stars" aria-hidden="true"></canvas>
 
 <header class="hdr">
   <div class="brand">
@@ -558,6 +559,7 @@ ${pager}
   </span>
 </footer>
 
+<script src="../stars.js" defer></script>
 <script>
 var menu = document.querySelector(".menu-btn");
 var nav = document.getElementById("nav");

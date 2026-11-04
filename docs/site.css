@@ -11,6 +11,7 @@
   --muted:   #8a8478;
   --accent:  #00f5a0;
   --amber:   #ffcc66;
+  --sky:     #06070a;   /* the night behind everything; not the page bg */
 
   --mono:"JetBrains Mono","Fira Code",ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
 }
@@ -20,11 +21,36 @@ html{scroll-behavior:smooth}
 
 body{
   font-family:var(--mono);
-  background:var(--bg);
+  /* the sky is a fixed layer under the page; body bg stays transparent so the
+     stars show through everywhere that is not an opaque surface */
+  background:var(--sky);
   color:var(--dim);
   font-size:15px;
   line-height:1.6;
   -webkit-font-smoothing:antialiased;
+}
+
+/* starfield — behind every opaque surface, frozen when motion is reduced */
+#stars{
+  position:fixed;
+  inset:0;
+  width:100%;
+  height:100%;
+  z-index:-1;
+  pointer-events:none;
+  display:block;
+}
+
+/* a very soft vignette so the sky does not read as flat black */
+#stars::after{content:""}
+
+body::before{
+  content:"";
+  position:fixed;
+  inset:0;
+  z-index:-1;
+  pointer-events:none;
+  background:radial-gradient(ellipse 120% 80% at 50% -10%, rgba(0,245,160,0.045), transparent 62%);
 }
 
 ::selection{background:var(--amber);color:var(--bg)}
@@ -38,7 +64,10 @@ code{font-family:var(--mono);font-size:.92em;color:var(--ink)}
   display:flex;align-items:center;justify-content:space-between;
   height:72px;padding:0 64px;
   border-bottom:1px solid var(--rule);
-  background:var(--bg);
+  /* translucent over the starfield: the stars drift behind the chrome */
+  background:rgba(6,7,10,0.72);
+  backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px);
 }
 .brand{display:flex;align-items:center;gap:12px}
 .mark{
@@ -131,6 +160,9 @@ h1{
   display:flex;align-items:center;justify-content:space-between;
   gap:24px;flex-wrap:wrap;
   padding:32px 64px;border-top:1px solid var(--rule);font-size:12px;
+  background:rgba(6,7,10,0.72);
+  backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px);
 }
 .ftr-links{display:flex;align-items:center;gap:24px;flex-wrap:wrap}
 .ftr a{color:var(--dim)}
@@ -228,7 +260,7 @@ pre .m{color:var(--muted)}
   .nav{
     display:none;position:absolute;top:64px;left:0;right:0;
     flex-direction:column;align-items:stretch;gap:0;
-    padding:8px 20px 16px;background:var(--bg);
+    padding:8px 20px 16px;background:var(--sky);
     border-bottom:1px solid var(--rule);z-index:10;
   }
   .nav[data-open="true"]{display:flex}
@@ -273,4 +305,6 @@ pre .m{color:var(--muted)}
 @media (prefers-reduced-motion:reduce){
   html{scroll-behavior:auto}
   *{transition:none !important}
+  /* the starfield freezes to a single static frame (stars.js stops the loop) */
+  #stars{animation:none !important}
 }
