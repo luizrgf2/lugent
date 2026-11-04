@@ -1,6 +1,26 @@
 {
   "name": "lugent",
-  "version": "0.1.1",
+  "version": "0.1.2",
+  "description": "A minimal OpenCode-style coding agent for the terminal. TypeScript + Bun, zero runtime dependencies.",
+  "homepage": "https://luizrgf2.github.io/lugent/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/luizrgf2/lugent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/luizrgf2/lugent/issues"
+  },
+  "keywords": [
+    "agent",
+    "ai",
+    "cli",
+    "coding-agent",
+    "llm",
+    "tui",
+    "terminal",
+    "bun",
+    "opencode"
+  ],
   "type": "module",
   "bin": {
     "lugent": "./src/main.ts"
