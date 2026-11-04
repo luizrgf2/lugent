@@ -1154,6 +1154,47 @@ test("subagent tool line shows live child status while the child runs", async ()
   expect(f).not.toContain("reviewer · read a.txt")    // live status is gone
 })
 
+test("ctrl+c closing the child viewer leaves no exit count armed (next ctrl+c aborts, not exits)", async () => {
+  // Parent round 1 spawns the reviewer; round 2 hangs until ctrl+c aborts it.
+  let parentRounds = 0
+  let release: () => void = () => {}
+  const gate = new Promise<void>(r => { release = r })
+  const provider = {
+    chat: async (a: any) => {
+      const sys: string = a.messages[0].content
+      if (sys.includes("You are REVIEWER.")) {
+        await new Promise(r => setTimeout(r, 120))   // hold the child open so the viewer can be opened mid-turn
+        a.onToken?.("child answer")
+        return { content: "child answer", toolCalls: [] }
+      }
+      parentRounds++
+      if (parentRounds === 1) return { content: "", toolCalls: [{ id: "t1", name: "subagent", args: { agent: "reviewer", prompt: "review" } }] }
+      return new Promise<any>((resolve, reject) => {
+        if (a.signal?.aborted) { reject(new Error("aborted")); return }   // ctrl+c landed before this round started
+        const onAbort = () => reject(new Error("aborted"))
+        a.signal?.addEventListener("abort", onAbort, { once: true })
+        gate.then(() => { a.signal?.removeEventListener("abort", onAbort); resolve({ content: "parent done", toolCalls: [] }) })
+      })
+    },
+  }
+  const env = yoloEnv({ tools: [readTool, makeSubagentTool()], agents: [reviewerAgent()], makeProvider: () => provider })
+  const { type, lastFrame, waitUntilExit } = renderTui(<App env={env} />, { rows: 30 })
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  await waitFor(() => /subagent reviewer ·/.test(lastFrame()))   // child is up, turn busy
+  type(CTRL1)
+  await waitFor(() => lastFrame().includes("esc close"))         // viewer open mid-turn
+  type("\x03")                                                   // ctrl+c #1: closes the viewer only
+  await waitFor(() => !lastFrame().includes("esc close"))
+  expect(lastFrame()).toContain(">")                             // composer back
+  type("\x03")                                                   // ctrl+c #2: must abort the busy turn, NOT exit
+  await waitFor(() => lastFrame().includes(CARET))               // turn unwound
+  const exited = await Promise.race([waitUntilExit().then(() => true), new Promise(r => setTimeout(() => r(false), 200))])
+  expect(exited).toBe(false)                                     // app still alive
+  expect(lastFrame()).toContain(">")
+  release()
+})
+
 test("ctrl+1 opens the running child's live transcript; esc closes", async () => {
   const env = yoloEnv({ tools: [readTool, makeSubagentTool()], agents: [reviewerAgent()], makeProvider: () => reviewerProvider() })
   const { type, lastFrame } = renderTui(<App env={env} />)

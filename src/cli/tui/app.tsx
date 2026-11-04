@@ -98,7 +98,7 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
   const yoloRef = useRef(yolo)
   const { stdout } = useStdout()
 
-  const closeOverlay = () => { overlayRef.current = null; setOverlay(null); setChildIdx(null) }
+  const closeOverlay = () => { overlayRef.current = null; setOverlay(null); setChildIdx(null); sigintRef.current = 0 }
 
   const rows = (stdout as any)?.rows ?? 24
 
