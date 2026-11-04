@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/lugent.svg" alt="lugent — CLI agent" width="480"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/luizrgf2/lugent/main/docs/lugent.svg" alt="lugent — CLI agent" width="480"></p>
 
 # lugent
 
@@ -15,6 +15,8 @@ bunx lugent
 ```
 
 Runs the TUI on a TTY, plain REPL otherwise (`--plain` forces it).
+
+<p align="center"><img src="https://raw.githubusercontent.com/luizrgf2/lugent/main/docs/screenshot.png" alt="lugent TUI — splash, agent/model status bar, prompt box and slash-command menu" width="820"></p>
 
 ## Run from source
 

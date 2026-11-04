@@ -45,3 +45,13 @@ Why: parallel tasks in the shared `/projects/lugent` checkout clobber each other
 
 Cost if wrong: the child sees only committed `main` at spawn time, so anything uncommitted or gitignored (`docs/specs/`, `docs/plans/`) is invisible to it — briefings must carry what the task needs inline; parallel PRs touching the same files still conflict at merge time (resolved then, not during execution); worktrees accumulate under `/tmp` (ephemeral — fine).
 
+
+## 2026-11-04 — distribute via npm under Bun; publish from CI on merge to main
+
+Decision: the package ships **unbuilt TypeScript** through npm (`bin` → `src/main.ts` with a `#!/usr/bin/env bun` shebang, `engines.bun >= 1.4`), `files` is an allowlist (`src`, `README.md`, `LICENSE`), and `.github/workflows/publish.yml` runs `bun test` then `npm publish` on every push to `main` — **only when the `package.json` version is not yet on the registry**.
+
+Why: the code is Bun-native end to end (`bun:sqlite`, `Bun.spawn`, `Bun.Glob`), so a Node-targeted build would need a shim layer or a bundler for zero gain; publishing the sources keeps the package the same bytes the tests ran against. The version guard makes merges idempotent: squash-merging a feature without a bump publishes nothing instead of failing the pipeline with a 409. Auth is a granular `NPM_TOKEN` secret written to `~/.npmrc` (`NODE_AUTH_TOKEN` alone is only wired up by `setup-node --registry-url`) because the owner's account forces web-auth 2FA, which a CI runner cannot answer.
+
+Cost if wrong: `npm i -g lugent` is useless without Bun installed (`engines` only warns); a forgotten version bump silently ships nothing — the release is a deliberate act, never a side effect of merging. Rotating the token is manual (revoke on npmjs.com, update the secret).
+
+README images are absolute `raw.githubusercontent.com` URLs inside the tarball-less `docs/` tree: npm cannot resolve relative paths, and shipping the PNGs inside the package just to satisfy the GitHub README would inflate the tarball.
