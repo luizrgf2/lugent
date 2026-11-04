@@ -1,7 +1,7 @@
 import * as readline from "node:readline/promises"
 import { runTurn } from "../core/loop"
 import { Provider } from "../core/provider"
-import { toolsForAgent, agentModelTarget, resolveAgent, primaryAgents } from "../core/agents"
+import { toolsForAgent, agentActivationModel, resolveAgent, primaryAgents } from "../core/agents"
 import type { Store } from "../core/store"
 import type { AppConfig } from "../core/config"
 import type { ToolDef } from "../core/tools/registry"
@@ -23,8 +23,15 @@ export interface ReplEnv {
 
 export async function runRepl(env: ReplEnv): Promise<void> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+  // A declared model that cannot be honored kills the process at activation —
+  // an agent that pins a model must run on it or not run at all.
+  const activation = (a: Agent | undefined) => {
+    const r = agentActivationModel(a, env.config.providers)
+    if ("fatal" in r) { console.error(r.fatal); process.exit(1) }
+    return r.model
+  }
   let agent = resolveAgent(env.agents, env.config.defaultAgent)
-  const startTarget = agentModelTarget(agent, env.config.providers)   // defaultAgent's model wins at startup
+  const startTarget = activation(agent)   // defaultAgent's model wins at startup
   let session = env.store.createSession(startTarget?.provider ?? env.config.defaultProvider, startTarget?.model ?? env.config.defaultModel, env.projectRoot, agent?.id ?? null)
   let model = startTarget?.model ?? env.config.defaultModel
   let providerName = startTarget?.provider ?? env.config.defaultProvider
@@ -84,7 +91,7 @@ export async function runRepl(env: ReplEnv): Promise<void> {
         if (!row) { console.log("no such session"); continue }
         session = row
         agent = row.agent ? env.agents.find(a => a.id === row.agent) : undefined
-        const target = agentModelTarget(agent, env.config.providers)
+        const target = activation(agent)
         if (target) { providerCfg = env.config.providers[target.provider]; providerName = target.provider; model = target.model }
         else {
           // the session remembers its last provider/model — restore both, not just the model
@@ -150,7 +157,7 @@ export async function runRepl(env: ReplEnv): Promise<void> {
         if (!found) { console.log(`unknown agent "${id}" — /agent lists them`); continue }
         agent = found
         env.store.setAgent(session.id, found.id)
-        const target = agentModelTarget(found, env.config.providers)
+        const target = activation(found)
         if (target) { providerCfg = env.config.providers[target.provider]; providerName = target.provider; model = target.model }
         console.log(`agent ${found.id}${target ? ` · ${target.provider}/${target.model}` : ""} · tools: ${toolsForAgent(env.tools, found).map(t => t.name).join(",") || "none"}`)
         continue

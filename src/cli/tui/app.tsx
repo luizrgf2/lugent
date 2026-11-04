@@ -5,7 +5,7 @@ import type { Agent } from "../../core/types"
 import { Provider } from "../../core/provider"
 import { runTurn } from "../../core/loop"
 import { savePermissionMode, globalConfigPath } from "../../core/config"
-import { toolsForAgent, agentModelTarget, resolveAgent, primaryAgents } from "../../core/agents"
+import { toolsForAgent, agentActivationModel, resolveAgent, primaryAgents } from "../../core/agents"
 import { buildPromptInput, safeAgentsMd } from "../context"
 import { frameRows, logoTopPad, splashWindow, transcriptWindow, CHROME_HEIGHT } from "../logo"
 import { ContextLine, LogoMark } from "./status"
@@ -63,11 +63,16 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
   const askChainRef = useRef<Promise<void>>(Promise.resolve())
   const askRef = useRef<{ tool: string; resource: string; resolve(a: "y" | "n" | "a"): void } | null>(null)
   const [abort, setAbort] = useState<AbortController | null>(null)
-  const [agent, setAgentState] = useState<Agent | undefined>(() => resolveAgent(env.agents, env.config.defaultAgent))
+  const initialAgent = resolveAgent(env.agents, env.config.defaultAgent)
+  // A defaultAgent whose declared model cannot be honored kills the process
+  // before the first render — an agent that pins a model runs on it or not at all.
+  const startupTarget = agentActivationModel(initialAgent, env.config.providers)
+  if ("fatal" in startupTarget) { console.error(startupTarget.fatal); process.exit(1) }
+  const [agent, setAgentState] = useState<Agent | undefined>(initialAgent)
   const [session, setSession] = useState(() => env.store.createSession(env.config.defaultProvider, env.config.defaultModel, env.projectRoot, agent?.id ?? null))
   // A defaultAgent's model (when its provider is configured) wins over the config default at startup.
-  const [provider, setProvider] = useState(() => agentModelTarget(agent, env.config.providers)?.provider ?? env.config.defaultProvider)
-  const [model, setModel] = useState(() => agentModelTarget(agent, env.config.providers)?.model ?? env.config.defaultModel)
+  const [provider, setProvider] = useState(() => startupTarget.model?.provider ?? env.config.defaultProvider)
+  const [model, setModel] = useState(() => startupTarget.model?.model ?? env.config.defaultModel)
   const [overlay, setOverlay] = useState<null | "model" | "skills" | "resume" | "permissions" | "agent" | "mcp" | "child" | "childpick">(null)
   const overlayRef = useRef<null | "model" | "skills" | "resume" | "permissions" | "agent" | "mcp" | "child" | "childpick">(null)
   const [mcpStates, setMcpStates] = useState<McpServerState[]>([])
@@ -364,9 +369,11 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
             onClose={closeOverlay}
             onPick={a => {
               closeOverlay()
+              const r = agentActivationModel(a, env.config.providers)
+              if ("fatal" in r) { setItems(is => [...is, { kind: "error", text: r.fatal }]); return }
               setAgentState(a)
               env.store.setAgent(session.id, a.id)
-              const target = agentModelTarget(a, env.config.providers)
+              const target = r.model
               if (target) {
                 setProvider(target.provider)
                 setModel(target.model)
@@ -418,8 +425,10 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
               if (!row) return
               setSession(row)
               const next = row.agent ? env.agents.find(a => a.id === row.agent) : undefined
+              const r = agentActivationModel(next, env.config.providers)
+              if ("fatal" in r) { setItems(is => [...is, { kind: "error", text: r.fatal }]); return }
               setAgentState(next)
-              const target = agentModelTarget(next, env.config.providers)
+              const target = r.model
               if (target) {
                 setProvider(target.provider)
                 setModel(target.model)
