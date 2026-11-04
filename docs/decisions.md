@@ -8,7 +8,7 @@ Append-only. Format and inclusion rules: `.agents/skills/git-conventions/SKILL.m
 | --- | --- | --- |
 | Core — store, prompt, permissions, provider | [`core.md`](decisions/core.md) | 9 |
 | CLI & TUI | [`cli-tui.md`](decisions/cli-tui.md) | 8 |
-| Agents | [`agents.md`](decisions/agents.md) | 6 |
+| Agents | [`agents.md`](decisions/agents.md) | 14 |
 | MCP | [`mcp.md`](decisions/mcp.md) | 16 |
 | Process & docs | [`process.md`](decisions/process.md) | 7 |
 

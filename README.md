@@ -66,6 +66,7 @@ For `providers`, `defaultProvider`, `defaultModel` and `defaultAgent` lugent rea
 | `defaultProvider` | Key into `providers` used at startup |
 | `defaultModel` | Model id sent as `model` on every request |
 | `defaultAgent` | Optional agent id selected at startup. Defaults to `build`; unknown id → warning, then `build` |
+| `defaultSubagentModel` | Optional `provider/model` a subagent **without** its own `model` runs on. Hierarchy: the subagent's `model` → `defaultSubagentModel` → the chat's current model. A bad format warns and is ignored | none — subagents inherit the chat's model |
 | `permissionMode` | Optional, `normal` (default) or `yolo`. Startup permission mode — TUI only. Saved to the global config by `/permissions`; a project value overrides it while present |
 | `mcp.<name>.type` | `local` (spawns `command`) or `remote` (`url`); `http` is an alias for `remote`. Inferred when absent |
 | `mcp.<name>.command` | `local`: argv array, e.g. `["npx","-y","pkg@latest"]` |
@@ -270,12 +271,15 @@ You are a code reviewer. Report findings with file and line references.
 
 | Field | Meaning | Default when absent |
 | --- | --- | --- |
-| `description` | shown by `/agent` | none |
+| `name` | the agent's **id** (what `/agent` and the `subagent` tool address). The file's relative path (`team/x.md` → `team/x`) is only the fallback, so a nested `reviewer/agent.md` with `name: reviewer-2` loads as `reviewer-2`. Precedence compares the final id, so a project file wins a user file that picks the same `name` | the path |
+| `description` | shown by `/agent` and the `# Subagents` catalog; surrounding quotes are stripped | none |
 | `color` | TUI display color for the agent: an ink color name (`red`, `cyan`…) or `#rrggbb`; display-only, invalid warns and uses the default | `magenta` (build's) |
-| `model` | `provider/model`, both required — provider must exist in the config | inherit the session's |
+| `model` | `provider/model`, both required — provider must exist in the config. **Explicit or fatal**: a declared model whose provider is not configured stops lugent at activation (`/agent`, startup, `/resume`) or before the child session is created (spawn) — it never silently inherits | inherit the session's |
 | `tools` | tool ids sent to the model; anything else is invisible to it — a `tools` key that parses to nothing (typo, block-style YAML) fails closed to **no** tools, with a warning | all tools |
 | `permissions` | per-tool `allow` / `ask` / `deny`; `deny` also removes the tool | tool default |
-| `mode` | `primary` \| `subagent` \| `all` — who may launch this agent | primary |
+| `mode` | `primary` \| `subagent` \| `all` — who may launch this agent (`agent` is accepted as a spelling of `primary`); invalid warns and uses the default | primary |
+
+Legacy frontmatter from Claude Code-style files is translated, never dropped: `subagent: true` loads as `mode: subagent` (deprecation warning; an explicit `mode` wins), and `commandExecutionPolicy: off` loads as `permissions: {shell: deny}` — unless the same file declares `permissions.shell` explicitly, which wins.
 
 ### Subagents
 
@@ -283,6 +287,7 @@ A `mode: subagent` (or `all`) agent is not a session you switch into — it is a
 
 - The model discovers subagents from a `# Subagents` section of the prompt (id + description), rendered only when at least one is launchable — same mechanism as `# Skills`.
 - The child starts with **no** shared history: the prompt must be self-contained.
+- **Model hierarchy** (explicit, no silent fallbacks): the subagent's declared `model` → `defaultSubagentModel` from the config → the chat's current model. A declared model whose provider is not configured is **fatal** — the spawn stops before any child session exists and lugent exits with the error, instead of running the child on the wrong model.
 - Several `subagent` calls in one tool round run in parallel.
 - **Live view (TUI)**: while a child runs, its `subagent` tool line shows `agent · activity · elapsed` in real time (`ctrl+c` behavior unchanged). **`ctrl+1`..`ctrl+9`** open child N of the current turn — a read-only live transcript of that child (tokens, reasoning, tool lines, same windowing as the frame); `esc` or Ctrl+C closes. Past 8 children `ctrl+9` opens a windowed picker instead of a direct map. Children keep working after the turn commits and after `/resume` (rehydrated from the store; reasoning was never persisted). The keys need a terminal with the [kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/) (lugent enables its disambiguate flag and pops it on exit) — without it, ctrl+digit is indistinguishable from a plain digit and the viewer stays unreachable. `--plain` prints a dim `↳ subagent … started/finished` line pair instead.
 - **Depth 1**: a child never gets the `subagent` tool or the catalog, so it cannot launch a grandchild.
@@ -303,7 +308,7 @@ Usage: `/agent` lists loaded agents (`build` and `plan` plus your file agents), 
 
 The body is the agent's system prompt: it **replaces** the base prompt, and AGENTS.md plus the skills advertisement are still added on top. A permission override replaces the tool's default — a session `always` grant still wins over it, and the outside-project guard still forces an ask.
 
-Usage: `/agent` lists loaded agents (`build` and `plan` plus your file agents), `/agent reviewer` switches. Switching works mid-session — history is kept and the next turn runs with the new prompt, model and toolset; the switch line confirms provider/model/toolset, and the `# Tools` section of the prompt is filtered to match. An agent's `model` applies at startup (`defaultAgent`) and on `/resume`, not only when switched to. `/resume` restores the agent together with provider and model; `defaultAgent` picks the startup agent and defaults to `build` — an unknown id warns and falls back to `build`. Because `build` reuses the base prompt, the default system prefix stays byte-identical to a session with no agent (and sessions created before agents existed keep the base prompt). Bad frontmatter never breaks startup: an empty body drops that agent, and an unknown tool id or a `model` without `provider/` warns and falls back.
+Usage: `/agent` lists loaded agents (`build` and `plan` plus your file agents), `/agent reviewer` switches. Switching works mid-session — history is kept and the next turn runs with the new prompt, model and toolset; the switch line confirms provider/model/toolset, and the `# Tools` section of the prompt is filtered to match. An agent's `model` applies at startup (`defaultAgent`) and on `/resume`, not only when switched to — and a declared model whose provider is missing **kills the process** at that moment (`/agent`, startup, `/resume`) instead of falling back; the TUI picker and resume print the error and refuse the switch. `/resume` restores the agent together with provider and model; `defaultAgent` picks the startup agent and defaults to `build` — an unknown id warns and falls back to `build`. Because `build` reuses the base prompt, the default system prefix stays byte-identical to a session with no agent (and sessions created before agents existed keep the base prompt). Bad frontmatter never breaks startup: an empty body drops that agent, and an unknown tool id or a `model` without `provider/` warns and falls back.
 
 **Index:** [`docs/architecture/prompt-and-agents.md`](docs/architecture/prompt-and-agents.md) (the `# Subagents` catalog) · [`docs/architecture/turn-flow.md`](docs/architecture/turn-flow.md) (the child branch in the loop) · [`docs/decisions/agents.md`](docs/decisions/agents.md) (why one tool, why depth 1) · [`docs/future-features.md`](docs/future-features.md) § Agents (background subagents, deferred).
 

@@ -55,6 +55,21 @@ Decision: `BUILTIN_AGENTS` gains `general` — `mode: subagent`, full toolset, t
 Why: without it the `subagent` tool errors "unknown subagent" in a clean install, and the whole feature is invisible until the user writes a file; OpenCode ships `general` for the same reason.
 Cost if wrong: every default prefix now carries a one-line `# Subagents` section (the golden snapshot still pins stability, and a project shadowing `general` with a primary-mode file removes it); the built-in's prompt is code, so rewording is a commit.
 
+## 2026-11-04 — Frontmatter `name` is the agent id; the path is the fallback
+Decision: `loadAgentFile` takes the id from a non-empty `name` field; the file's relative path stays the fallback, and scope precedence compares the final id (project beats user on equal `name`).
+Why: external agent files (Claude Code style) nest them (`reviewer/agent.md`) and pin the identity in frontmatter — a path-derived id like `reviewer/agent` is noise the user never typed, and `/agent reviewer/agent` is hostile. Explicit identity matches the repo's "the name should be explicit" rule.
+Cost if wrong: renaming an agent's `name` orphans old sessions that reference the old id — `/resume` falls back to the session's stored prompt-less state (agent not found → base prompt), never an error.
+
+## 2026-11-04 — Legacy Claude Code fields are translated, not dropped
+Decision: the loader maps `subagent: true` → `mode: subagent` (deprecation warning; explicit `mode` wins), `commandExecutionPolicy: off` → `permissions: {shell: deny}` unless the same file declares `permissions.shell` explicitly, and accepts `mode: agent` as a spelling of `primary`. `description` strips surrounding quotes like `color` already did.
+Why: real agent files in other repos carry these fields; silently ignoring them changes behavior (a read-only reviewer silently gains shell, a subagent silently becomes unlaunchable), while dropping the file is worse. Translation keeps one canonical format with loud warnings pointing at the canonical spelling.
+Cost if wrong: two spellings for one concept live forever in docs and code; the warnings are the pressure that retires them.
+
+## 2026-11-04 — Subagent model hierarchy: agent → `defaultSubagentModel` → chat; unresolved declared models are fatal
+Decision: `resolveChildModel` walks the subagent's declared `model`, then the config's `defaultSubagentModel`, then the chat's current model. `agentActivationModel` covers primary activation (switch/startup/resume). A declared model whose provider is not configured is fatal everywhere: spawn stops before creating a child session (loop `onFatal` seam; CLI prints and exits 1), the plain REPL exits at activation, the TUI picker/resume refuse the switch with an error item (a rendered UI cannot exit mid-picker).
+Why: a model declaration is a contract — silently inheriting the chat's model runs the child on the wrong provider at real cost (wrong context length, wrong pricing, wrong behavior), the exact failure mode the user hit with `model: flash`. Explicit-but-unhonored must fail loudly at the moment of activation, not mid-turn.
+Cost if wrong: a typo'd provider in an agent file now kills the REPL at switch time instead of degrading — intended fail-loud; `defaultSubagentModel` with a dead provider is likewise fatal at spawn, so the config must be checked after edits.
+
 ---
 
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.
