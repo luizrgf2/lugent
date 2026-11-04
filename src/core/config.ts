@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 import { homedir } from "node:os"
+import { parseModelRef } from "./agents"
+import type { AgentModelRef } from "./types"
 
 export interface ProviderConfig { baseUrl: string; apiKey?: string }
 export type PermissionMode = "normal" | "yolo"
@@ -9,6 +11,8 @@ export interface AppConfig {
   defaultProvider: string
   defaultModel: string
   defaultAgent?: string
+  /** Model a subagent without its own `model` runs on ("provider/model"). */
+  defaultSubagentModel?: AgentModelRef
   permissionMode: PermissionMode
 }
 
@@ -32,6 +36,12 @@ export function loadConfig(root: string, globalPath = `${homedir()}/.config/luge
     const pc = p as ProviderConfig
     providers[name] = { baseUrl: pc.baseUrl, apiKey: pc.apiKey ? subEnv(pc.apiKey) : undefined }
   }
+  let defaultSubagentModel: AgentModelRef | undefined
+  if (raw.defaultSubagentModel !== undefined) {
+    defaultSubagentModel = parseModelRef(String(raw.defaultSubagentModel))
+    if (!defaultSubagentModel)
+      console.warn(`defaultSubagentModel: expected "provider/model", got ${JSON.stringify(raw.defaultSubagentModel)} — subagents inherit the session model`)
+  }
   let permissionMode: PermissionMode = "normal"
   if (raw.permissionMode !== undefined) {
     if (raw.permissionMode === "normal" || raw.permissionMode === "yolo") permissionMode = raw.permissionMode
@@ -42,6 +52,7 @@ export function loadConfig(root: string, globalPath = `${homedir()}/.config/luge
     defaultProvider: raw.defaultProvider ?? "",
     defaultModel: raw.defaultModel ?? "",
     defaultAgent: raw.defaultAgent,
+    defaultSubagentModel,
     permissionMode,
   }
 }

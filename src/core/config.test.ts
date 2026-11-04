@@ -262,3 +262,46 @@ describe("loadMcpConfig", () => {
     rmSync(global, { force: true })
   })
 })
+
+describe("defaultSubagentModel", () => {
+  test("parses a provider/model pair", () => {
+    const dir = `/tmp/opencode/cfg-dsm-${Date.now()}`
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(`${dir}/lugent.json`, JSON.stringify({
+      providers: {}, defaultProvider: "", defaultModel: "",
+      defaultSubagentModel: "zai/glm-5.3-flash",
+    }))
+    expect(loadConfig(dir).defaultSubagentModel).toEqual({ provider: "zai", model: "glm-5.3-flash" })
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("keeps slashes inside the model part", () => {
+    const dir = `/tmp/opencode/cfg-dsm2-${Date.now()}`
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(`${dir}/lugent.json`, JSON.stringify({
+      providers: {}, defaultProvider: "", defaultModel: "",
+      defaultSubagentModel: "9router/openai/gpt-4o",
+    }))
+    expect(loadConfig(dir).defaultSubagentModel).toEqual({ provider: "9router", model: "openai/gpt-4o" })
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("a value without a provider warns and is ignored", () => {
+    const dir = `/tmp/opencode/cfg-dsm3-${Date.now()}`
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(`${dir}/lugent.json`, JSON.stringify({
+      providers: {}, defaultProvider: "", defaultModel: "",
+      defaultSubagentModel: "flash",
+    }))
+    expect(loadConfig(dir).defaultSubagentModel).toBeUndefined()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("absent stays undefined", () => {
+    const dir = `/tmp/opencode/cfg-dsm4-${Date.now()}`
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(`${dir}/lugent.json`, JSON.stringify({ providers: {}, defaultProvider: "", defaultModel: "" }))
+    expect(loadConfig(dir).defaultSubagentModel).toBeUndefined()
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
