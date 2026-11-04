@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import { homedir } from "node:os"

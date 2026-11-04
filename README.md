@@ -6,6 +6,18 @@ A minimal OpenCode-style coding agent. REPL CLI over a pure core library — Typ
 
 **[lugent(1) — landing page](https://luizrgf2.github.io/lugent/)**
 
+## Install
+
+```bash
+npm i -g lugent        # requires Bun installed (bun >= 1.4)
+# or straight from bunx
+bunx lugent
+```
+
+Runs the TUI on a TTY, plain REPL otherwise (`--plain` forces it).
+
+## Run from source
+
 ```
 bun src/main.ts
 ```
