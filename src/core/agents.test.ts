@@ -1,8 +1,8 @@
-import { test, expect, beforeEach, afterAll } from "bun:test"
+import { test, expect, describe, beforeEach, afterAll } from "bun:test"
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
-import { loadAgents, resolveAgent, BUILTIN_AGENTS, parseList, parsePermMap, parseModelRef, toolsForAgent, effectivePermission, agentModelTarget } from "./agents"
-import { canBeSubagent, canBePrimary, subagentsFor, primaryAgents } from "./agents"
+import { loadAgents, resolveAgent, BUILTIN_AGENTS, parseList, parsePermMap, parseModelRef, toolsForAgent, effectivePermission } from "./agents"
+import { canBeSubagent, canBePrimary, subagentsFor, primaryAgents, resolveChildModel, agentActivationModel } from "./agents"
 import type { Agent } from "./types"
 import { SYSTEM_PROMPT } from "./prompt"
 import type { ToolDef } from "./tools/registry"
@@ -112,13 +112,6 @@ test("block-style permissions stays absent instead of becoming an empty override
   expect(byId("reviewer").permissions).toBeUndefined()
 })
 
-test("agentModelTarget resolves only against a configured provider", () => {
-  const agent = { id: "r", prompt: "p", model: { provider: "9router", model: "glm/5.2" } }
-  expect(agentModelTarget(agent, { "9router": {} })).toEqual({ provider: "9router", model: "glm/5.2" })
-  expect(agentModelTarget(agent, {})).toBeUndefined()
-  expect(agentModelTarget(undefined, {})).toBeUndefined()
-})
-
 test("effectivePermission: override wins over registry default", () => {
   expect(effectivePermission(editTool)).toBe("ask")
   expect(effectivePermission(editTool, { id: "a", prompt: "p", permissions: { edit: "allow" } })).toBe("allow")
@@ -210,4 +203,124 @@ test("out of the box, `general` is the only launchable subagent", () => {
   const subs = loadAgents(PROJ, HOME, KNOWN).filter(canBeSubagent)
   expect(subs.map(a => a.id)).toEqual(["general"])
   expect(loadAgents(PROJ, HOME, KNOWN).filter(canBePrimary).map(a => a.id).sort()).toEqual(["build", "plan"])
+})
+
+test("frontmatter name becomes the id; the path is only the fallback", () => {
+  write(join(PROJ, ".agents", "agents"), "reviewer/agent.md",
+    "---\nname: reviewer-2\ndescription: d\n---\nBody.")
+  write(join(PROJ, ".agents", "agents"), "plain.md", "---\ndescription: d\n---\nBody.")
+  const agents = loadAgents(PROJ, HOME, KNOWN)
+  expect(agents.some(a => a.id === "reviewer-2")).toBe(true)
+  expect(agents.some(a => a.id === "reviewer/agent")).toBe(false)
+  expect(byId("plain")).toBeDefined()
+})
+
+test("name participates in precedence: project wins by the final id", () => {
+  write(join(HOME, ".agents", "agents"), "team/x.md", "---\nname: shared\n---\nUser.")
+  write(join(PROJ, ".agents", "agents"), "other.md", "---\nname: shared\n---\nProject.")
+  expect(byId("shared").prompt).toBe("Project.")
+})
+
+test("mode: agent is accepted as a synonym of primary", () => {
+  write(join(PROJ, ".agents", "agents"), "a.md", "---\nmode: agent\n---\nA.")
+  const a = byId("a")
+  expect(a.mode).toBe("primary")
+  expect(canBePrimary(a)).toBe(true)
+  expect(canBeSubagent(a)).toBe(false)
+})
+
+test("legacy subagent: true acts as mode: subagent and warns", () => {
+  write(join(PROJ, ".agents", "agents"), "old.md", "---\nsubagent: true\n---\nOld.")
+  const a = byId("old")
+  expect(a.mode).toBe("subagent")
+  expect(canBeSubagent(a)).toBe(true)
+})
+
+test("explicit mode wins over legacy subagent: true (warned, not dropped)", () => {
+  write(join(PROJ, ".agents", "agents"), "both.md", "---\nmode: all\nsubagent: true\n---\nBoth.")
+  expect(byId("both").mode).toBe("all")
+})
+
+test("legacy subagent: false is ignored with a warning", () => {
+  write(join(PROJ, ".agents", "agents"), "off.md", "---\nsubagent: false\n---\nOff.")
+  expect(byId("off").mode).toBeUndefined()
+})
+
+test("commandExecutionPolicy: off denies shell unless permissions declare it", () => {
+  write(join(PROJ, ".agents", "agents"), "ro.md",
+    "---\ncommandExecutionPolicy: off\n---\nRO.")
+  expect(byId("ro").permissions).toEqual({ shell: "deny" })
+
+  write(join(PROJ, ".agents", "agents"), "ask.md",
+    "---\ncommandExecutionPolicy: off\npermissions: {shell: ask}\n---\nAsk.")
+  expect(byId("ask").permissions).toEqual({ shell: "ask" })
+})
+
+test("description strips surrounding quotes", () => {
+  write(join(PROJ, ".agents", "agents"), "q.md",
+    '---\ndescription: "Second opinion, adversarial"\n---\nQ.')
+  write(join(PROJ, ".agents", "agents"), "sq.md",
+    "---\ndescription: 'single quoted'\n---\nSQ.")
+  expect(byId("q").description).toBe("Second opinion, adversarial")
+  expect(byId("sq").description).toBe("single quoted")
+})
+
+describe("resolveChildModel — subagent model hierarchy", () => {
+  const providers = { alt: { baseUrl: "http://x" }, zai: { baseUrl: "http://z" } }
+  const parent = { provider: "alt", model: "m-parent" }
+
+  test("declared model with a configured provider wins (source: agent)", () => {
+    const child: Agent = { id: "s", prompt: "p", model: { provider: "zai", model: "flash" } }
+    expect(resolveChildModel(child, providers, undefined, parent))
+      .toEqual({ provider: "zai", model: "flash", source: "agent" })
+  })
+
+  test("declared model whose provider is missing is fatal — never inherit", () => {
+    const child: Agent = { id: "s", prompt: "p", model: { provider: "nope", model: "m" } }
+    expect(resolveChildModel(child, providers, { provider: "zai", model: "flash" }, parent))
+      .toEqual({ fatal: `agent s: model nope/m not found (provider not configured)` })
+  })
+
+  test("no declared model falls back to defaultSubagentModel", () => {
+    const child: Agent = { id: "s", prompt: "p" }
+    expect(resolveChildModel(child, providers, { provider: "zai", model: "flash" }, parent))
+      .toEqual({ provider: "zai", model: "flash", source: "default" })
+  })
+
+  test("defaultSubagentModel whose provider is missing is fatal", () => {
+    const child: Agent = { id: "s", prompt: "p" }
+    expect(resolveChildModel(child, providers, { provider: "nope", model: "m" }, parent))
+      .toEqual({ fatal: `agent s: defaultSubagentModel nope/m not found (provider not configured)` })
+  })
+
+  test("nothing declared anywhere inherits the chat's current model", () => {
+    const child: Agent = { id: "s", prompt: "p" }
+    expect(resolveChildModel(child, providers, undefined, parent))
+      .toEqual({ provider: "alt", model: "m-parent", source: "session" })
+  })
+
+  test("a parent without a provider degrades to empty strings (existing behavior)", () => {
+    const child: Agent = { id: "s", prompt: "p" }
+    expect(resolveChildModel(child, {}, undefined, undefined))
+      .toEqual({ provider: "", model: "", source: "session" })
+  })
+})
+
+describe("agentActivationModel — primary activation fail-fast", () => {
+  const providers = { alt: { baseUrl: "http://x" } }
+
+  test("no model resolves to nothing", () => {
+    expect(agentActivationModel({ id: "a", prompt: "p" }, providers)).toEqual({})
+  })
+
+  test("configured provider resolves the model", () => {
+    const a: Agent = { id: "a", prompt: "p", model: { provider: "alt", model: "m" } }
+    expect(agentActivationModel(a, providers)).toEqual({ model: { provider: "alt", model: "m" } })
+  })
+
+  test("declared model with a missing provider is fatal", () => {
+    const a: Agent = { id: "a", prompt: "p", model: { provider: "nope", model: "m" } }
+    expect(agentActivationModel(a, providers))
+      .toEqual({ fatal: `agent a: model nope/m not found (provider not configured)` })
+  })
 })

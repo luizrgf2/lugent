@@ -608,3 +608,90 @@ test("subagent: an agent with a configured model runs on providerFor, not the pa
   expect(store.children(sessionId)[0].provider).toBe("alt")
   expect(store.children(sessionId)[0].model).toBe("m2")
 })
+
+test("subagent: no declared model and no default inherits the session model", async () => {
+  const reviewer: Agent = { id: "reviewer", mode: "subagent", prompt: "You are REVIEWER." }
+  let parentRounds = 0
+  const provider = {
+    chat: async (a: any) => {
+      if ((a.messages[0].content as string).includes("REVIEWER")) return { content: "child done", toolCalls: [] }
+      parentRounds++
+      if (parentRounds === 1) return { content: "", toolCalls: [{ id: "t1", name: "subagent", args: { agent: "reviewer", prompt: "x" } }] }
+      return { content: "parent done", toolCalls: [] }
+    },
+  }
+  await runTurn(deps(provider, {
+    tools: [...tools, subagentTool], agents: [reviewer],
+    providerFor: () => { throw new Error("providerFor must not be called when inheriting") },
+  }), sessionId, "go")
+  const kid = store.children(sessionId)[0]
+  expect(kid.provider).toBe(store.loadSession(sessionId)!.provider)
+  expect(kid.model).toBe(store.loadSession(sessionId)!.model)
+})
+
+test("subagent: no declared model uses defaultSubagentModel via providerFor", async () => {
+  const reviewer: Agent = { id: "reviewer", mode: "subagent", prompt: "You are REVIEWER." }
+  const built: Array<[string, string]> = []
+  const childProvider = { chat: async () => ({ content: "from default", toolCalls: [] }) }
+  let parentRounds = 0
+  const provider = {
+    chat: async (a: any) => {
+      if ((a.messages[0].content as string).includes("REVIEWER")) return { content: "ignored", toolCalls: [] }
+      parentRounds++
+      if (parentRounds === 1) return { content: "", toolCalls: [{ id: "t1", name: "subagent", args: { agent: "reviewer", prompt: "x" } }] }
+      return { content: "parent done", toolCalls: [] }
+    },
+  }
+  await runTurn(deps(provider, {
+    tools: [...tools, subagentTool], agents: [reviewer],
+    config: { providers: { alt: { baseUrl: "http://x" } }, defaultSubagentModel: { provider: "alt", model: "m2" } } as any,
+    providerFor: (p, m) => { built.push([p, m]); return childProvider },
+  }), sessionId, "go")
+  expect(built).toEqual([["alt", "m2"]])
+  expect(store.getMessages(sessionId).find(m => m.role === "tool")!.content).toBe("from default")
+  expect(store.children(sessionId)[0].provider).toBe("alt")
+})
+
+test("subagent: defaultSubagentModel with a missing provider is fatal", async () => {
+  const reviewer: Agent = { id: "reviewer", mode: "subagent", prompt: "You are REVIEWER." }
+  const fatal: string[] = []
+  let parentRounds = 0
+  const provider = {
+    chat: async () => {
+      parentRounds++
+      if (parentRounds === 1) return { content: "", toolCalls: [{ id: "t1", name: "subagent", args: { agent: "reviewer", prompt: "x" } }] }
+      return { content: "parent done", toolCalls: [] }
+    },
+  }
+  await runTurn(deps(provider, {
+    tools: [...tools, subagentTool], agents: [reviewer],
+    config: { providers: {}, defaultSubagentModel: { provider: "nope", model: "m" } } as any,
+    onFatal: msg => fatal.push(msg),
+  }), sessionId, "go")
+  expect(fatal.length).toBe(1)
+  expect(fatal[0]).toContain("defaultSubagentModel nope/m not found")
+  expect(store.children(sessionId).length).toBe(0)   // no child session was created
+  const toolMsg = store.getMessages(sessionId).find(m => m.role === "tool")!
+  expect(toolMsg.content).toContain("not found")
+})
+
+test("subagent: a declared model whose provider is missing is fatal — never inherits", async () => {
+  const pinned: Agent = { id: "pinned", mode: "subagent", model: { provider: "nope", model: "m" }, prompt: "You are PINNED." }
+  const fatal: string[] = []
+  let parentRounds = 0
+  const provider = {
+    chat: async () => {
+      parentRounds++
+      if (parentRounds === 1) return { content: "", toolCalls: [{ id: "t1", name: "subagent", args: { agent: "pinned", prompt: "x" } }] }
+      return { content: "parent done", toolCalls: [] }
+    },
+  }
+  await runTurn(deps(provider, {
+    tools: [...tools, subagentTool], agents: [pinned],
+    config: { providers: { alt: { baseUrl: "http://x" } } } as any,
+    onFatal: msg => fatal.push(msg),
+  }), sessionId, "go")
+  expect(fatal.length).toBe(1)
+  expect(fatal[0]).toContain("model nope/m not found")
+  expect(store.children(sessionId).length).toBe(0)
+})
