@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="A full-screen TUI on a TTY, a plain ANSI REPL otherwise. --plain forces the REPL.">
+<meta name="theme-color" content="#101010">
+<title>Usage & commands — lugent</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+
+<header class="hdr">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">
+      <svg viewBox="0 0 120 120" role="img">
+        <path d="M30 26 L66 60 L30 94" fill="none" stroke="#00f5a0" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M30 106 L92 106" fill="none" stroke="#00f5a0" stroke-width="13" stroke-linecap="round"/>
+      </svg>
+    </span>
+    <a class="wordmark" href="../">lugent</a>
+    <span class="chip">v0.1.3</span>
+  </div>
+
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="nav" aria-label="Menu">≡</button>
+
+  <nav class="nav" id="nav" aria-label="Main">
+    <a href="../getting-started/" aria-current="page">Documentation</a>
+    <a href="https://github.com/luizrgf2/lugent">GitHub</a>
+    <a href="https://www.npmjs.com/package/lugent">npm</a>
+  </nav>
+</header>
+
+<div class="docs">
+    <aside class="side" data-open="false">
+      <button class="side-toggle" type="button" aria-expanded="false">Documentation contents</button>
+      <div class="side-body">
+        <div class="side-group">
+          <p class="side-label">INSTALL</p>
+          <p class="side-install">npm i -g lugent</p>
+        </div>
+        <div class="side-group">
+          <p class="side-label">GETTING STARTED</p>
+          <a href="../getting-started/">Overview</a>
+          <a href="../config/">Configuration</a>
+          <a href="../usage/" aria-current="page">Usage & commands</a>
+        </div>
+        <div class="side-group">
+          <p class="side-label">SUBSYSTEMS</p>
+          <a href="../agents/">Agents</a>
+          <a href="../subagents/">Subagents</a>
+          <a href="../skills/">Skills</a>
+          <a href="../mcp/">MCP servers</a>
+          <a href="../permissions/">Permissions</a>
+        </div>
+        <div class="side-group">
+          <p class="side-label">SESSIONS</p>
+          <a href="../sessions/">Managing sessions</a>
+          <a href="../history/">Resume & history</a>
+          <a href="../data/">Data & storage</a>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="../getting-started/">docs</a><span aria-hidden="true">/</span><span aria-current="page">usage</span>
+      </nav>
+
+      <div class="doc-head">
+        <h1 class="doc">Usage & commands</h1>
+        <p>A full-screen TUI on a TTY, a plain ANSI REPL otherwise. --plain forces the REPL.</p>
+      </div>
+
+<section class="sec">
+  <h2>Starting</h2>
+  <pre>lugent [<span class="k">--plain</span>] [<span class="k">--db</span> <span class="m">path</span>]</pre>
+  <p>Piped stdin (non-TTY) falls back to the plain REPL automatically, so lugent is scriptable.</p>
+</section>
+
+<section class="sec">
+  <h2>Slash commands</h2>
+  <dl class="table">
+    <div class="row"><dt>/model</dt><dd>Two-level picker: provider, then live model list. Pinned to the session.</dd></div>
+    <div class="row"><dt>/agent</dt><dd>Agent picker. Prompt, model and toolset apply from the next turn.</dd></div>
+    <div class="row"><dt>/skills</dt><dd>Browse loaded skills, read-only.</dd></div>
+    <div class="row"><dt>/mcp</dt><dd>Servers with status. Reconnect, disable, enable, authenticate, logout.</dd></div>
+    <div class="row"><dt>/resume</dt><dd>Pick a past session of this directory and continue it.</dd></div>
+    <div class="row"><dt>/permissions</dt><dd>Toggle normal or yolo.</dd></div>
+    <div class="row"><dt>/clear</dt><dd>Start a fresh session.</dd></div>
+    <div class="row"><dt>/exit</dt><dd>Quit.</dd></div>
+  </dl>
+  <p>Typing <code>/</code> in the composer opens an autocomplete box: it filters as you type, arrows move, Enter or Tab completes.</p>
+</section>
+
+<section class="sec">
+  <h2>Keys</h2>
+  <dl class="table">
+    <div class="row"><dt>Ctrl+C ×1</dt><dd>Abort the running turn and deny a pending permission.</dd></div>
+    <div class="row"><dt>Ctrl+C ×2</dt><dd>Exit.</dd></div>
+    <div class="row"><dt>PageUp / PageDown</dt><dd>Page the live frame, or Shift+↑/↓.</dd></div>
+    <div class="row"><dt>Home / End</dt><dd>Jump to the top or tail of the live frame.</dd></div>
+    <div class="row"><dt>Esc</dt><dd>Stop a provider retry loop.</dd></div>
+  </dl>
+  <p>Finished turns land in the terminal's own scrollback, so the mouse wheel, touchpad and click-drag selection work natively.</p>
+</section>
+
+<section class="sec">
+  <h2>Tools</h2>
+  <dl class="table">
+    <div class="row"><dt>read</dt><dd>allow. File with numbered lines, or a directory listing.</dd></div>
+    <div class="row"><dt>glob</dt><dd>allow. Glob file search, limit 100.</dd></div>
+    <div class="row"><dt>grep</dt><dd>allow. Content search, regex or literal.</dd></div>
+    <div class="row"><dt>edit</dt><dd>ask. Unique-match string replace, returns a diff.</dd></div>
+    <div class="row"><dt>write</dt><dd>ask. Create or replace a file.</dd></div>
+    <div class="row"><dt>shell</dt><dd>ask. bash, or cmd on Windows. Two minute default timeout.</dd></div>
+    <div class="row"><dt>skill</dt><dd>allow. Load a skill body by id.</dd></div>
+    <div class="row"><dt>subagent</dt><dd>ask. Launch a subagent in a child session.</dd></div>
+  </dl>
+</section>
+
+      <nav class="pager" aria-label="Pagination">
+        <a class="prev" href="../config/"><span>PREVIOUS</span><strong>← Configuration</strong></a>
+        <a class="next" href="../agents/"><span>NEXT</span><strong>Agents →</strong></a>
+      </nav>
+    </main>
+</div>
+
+<footer class="ftr">
+  <span>lugent 0.1.3 · MIT</span>
+  <span class="ftr-links">
+    <a href="https://github.com/luizrgf2/lugent">GitHub</a>
+    <a href="https://www.npmjs.com/package/lugent">npm</a>
+    <a href="https://github.com/luizrgf2/lugent/blob/main/docs/decisions.md">Decisions</a>
+  </span>
+</footer>
+
+<script>
+var menu = document.querySelector(".menu-btn");
+var nav = document.getElementById("nav");
+if (menu && nav) menu.addEventListener("click", function () {
+  var open = nav.dataset.open === "true";
+  nav.dataset.open = String(!open);
+  menu.setAttribute("aria-expanded", String(!open));
+});
+
+var side = document.querySelector(".side");
+var toggle = document.querySelector(".side-toggle");
+if (side && toggle) {
+  side.dataset.open = matchMedia("(min-width: 901px)").matches ? "true" : "false";
+  toggle.setAttribute("aria-expanded", side.dataset.open);
+  toggle.addEventListener("click", function () {
+    var open = side.dataset.open === "true";
+    side.dataset.open = String(!open);
+    toggle.setAttribute("aria-expanded", String(!open));
+  });
+}
+</script>
+
+</body>
+</html>

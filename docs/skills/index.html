@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Markdown files in a folder. Advertised by name and description, loaded only when the model needs them.">
+<meta name="theme-color" content="#101010">
+<title>Skills — lugent</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+
+<header class="hdr">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">
+      <svg viewBox="0 0 120 120" role="img">
+        <path d="M30 26 L66 60 L30 94" fill="none" stroke="#00f5a0" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M30 106 L92 106" fill="none" stroke="#00f5a0" stroke-width="13" stroke-linecap="round"/>
+      </svg>
+    </span>
+    <a class="wordmark" href="../">lugent</a>
+    <span class="chip">v0.1.3</span>
+  </div>
+
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="nav" aria-label="Menu">≡</button>
+
+  <nav class="nav" id="nav" aria-label="Main">
+    <a href="../getting-started/" aria-current="page">Documentation</a>
+    <a href="https://github.com/luizrgf2/lugent">GitHub</a>
+    <a href="https://www.npmjs.com/package/lugent">npm</a>
+  </nav>
+</header>
+
+<div class="docs">
+    <aside class="side" data-open="false">
+      <button class="side-toggle" type="button" aria-expanded="false">Documentation contents</button>
+      <div class="side-body">
+        <div class="side-group">
+          <p class="side-label">INSTALL</p>
+          <p class="side-install">npm i -g lugent</p>
+        </div>
+        <div class="side-group">
+          <p class="side-label">GETTING STARTED</p>
+          <a href="../getting-started/">Overview</a>
+          <a href="../config/">Configuration</a>
+          <a href="../usage/">Usage & commands</a>
+        </div>
+        <div class="side-group">
+          <p class="side-label">SUBSYSTEMS</p>
+          <a href="../agents/">Agents</a>
+          <a href="../subagents/">Subagents</a>
+          <a href="../skills/" aria-current="page">Skills</a>
+          <a href="../mcp/">MCP servers</a>
+          <a href="../permissions/">Permissions</a>
+        </div>
+        <div class="side-group">
+          <p class="side-label">SESSIONS</p>
+          <a href="../sessions/">Managing sessions</a>
+          <a href="../history/">Resume & history</a>
+          <a href="../data/">Data & storage</a>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="../getting-started/">docs</a><span aria-hidden="true">/</span><span aria-current="page">skills</span>
+      </nav>
+
+      <div class="doc-head">
+        <h1 class="doc">Skills</h1>
+        <p>Markdown files in a folder. Advertised by name and description, loaded only when the model needs them.</p>
+      </div>
+
+<section class="sec">
+  <h2>Where they live</h2>
+  <p>Nested directory or flat file, both work. On the same id the project wins.</p>
+  <pre>.agents/skills/git-release/SKILL.md   <span class="m">→ id</span> <span class="c">git-release</span>
+.agents/skills/review.md              <span class="m">→ id</span> <span class="c">review</span>
+~/.agents/skills/                     <span class="m">→ user scope</span></pre>
+</section>
+
+<section class="sec">
+  <h2>Frontmatter</h2>
+  <pre><span class="m">---</span>
+<span class="k">name</span>: Git Release
+<span class="k">description</span>: Prepare and publish releases
+<span class="m">---</span>
+Step 1: ...</pre>
+  <p>A skill with a <code>description</code> is advertised in the system prompt, by id, name and description only. The model loads the full body on demand through the <code>skill</code> tool, so skill content never bloats the prompt upfront.</p>
+</section>
+
+<section class="sec">
+  <h2>Using one</h2>
+  <dl class="table">
+    <div class="row"><dt>Let the model pick</dt><dd>When your request matches an advertised description, it calls <code>skill git-release</code> itself.</dd></div>
+    <div class="row"><dt>Force one</dt><dd>Mention the id in your message.</dd></div>
+    <div class="row"><dt>Browse</dt><dd><code>/skills</code> lists what is loaded.</dd></div>
+  </dl>
+  <p>Toggling skills on or off is not implemented: every loaded skill is active in every session.</p>
+</section>
+
+      <nav class="pager" aria-label="Pagination">
+        <a class="prev" href="../subagents/"><span>PREVIOUS</span><strong>← Subagents</strong></a>
+        <a class="next" href="../mcp/"><span>NEXT</span><strong>MCP servers →</strong></a>
+      </nav>
+    </main>
+</div>
+
+<footer class="ftr">
+  <span>lugent 0.1.3 · MIT</span>
+  <span class="ftr-links">
+    <a href="https://github.com/luizrgf2/lugent">GitHub</a>
+    <a href="https://www.npmjs.com/package/lugent">npm</a>
+    <a href="https://github.com/luizrgf2/lugent/blob/main/docs/decisions.md">Decisions</a>
+  </span>
+</footer>
+
+<script>
+var menu = document.querySelector(".menu-btn");
+var nav = document.getElementById("nav");
+if (menu && nav) menu.addEventListener("click", function () {
+  var open = nav.dataset.open === "true";
+  nav.dataset.open = String(!open);
+  menu.setAttribute("aria-expanded", String(!open));
+});
+
+var side = document.querySelector(".side");
+var toggle = document.querySelector(".side-toggle");
+if (side && toggle) {
+  side.dataset.open = matchMedia("(min-width: 901px)").matches ? "true" : "false";
+  toggle.setAttribute("aria-expanded", side.dataset.open);
+  toggle.addEventListener("click", function () {
+    var open = side.dataset.open === "true";
+    side.dataset.open = String(!open);
+    toggle.setAttribute("aria-expanded", String(!open));
+  });
+}
+</script>
+
+</body>
+</html>

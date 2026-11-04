@@ -4,7 +4,7 @@
 
 A minimal OpenCode-style coding agent. REPL CLI over a pure core library — TypeScript + Bun, zero runtime dependencies.
 
-**[lugent(1) — landing page](https://luizrgf2.github.io/lugent/)**
+**[lugent(1) — landing page](https://luizrgf2.github.io/lugent/)** · **[docs](https://luizrgf2.github.io/lugent/getting-started/)** — one page per topic (agents, subagents, skills, MCP, permissions, sessions)
 
 ## Install
 

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="A subagent is not a persona you switch into. It is a worker the model launches.">
+<meta name="theme-color" content="#101010">
+<title>Subagents — lugent</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+
+<header class="hdr">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">
+      <svg viewBox="0 0 120 120" role="img">
+        <path d="M30 26 L66 60 L30 94" fill="none" stroke="#00f5a0" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M30 106 L92 106" fill="none" stroke="#00f5a0" stroke-width="13" stroke-linecap="round"/>
+      </svg>
+    </span>
+    <a class="wordmark" href="../">lugent</a>
+    <span class="chip">v0.1.3</span>
+  </div>
+
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="nav" aria-label="Menu">≡</button>
+
+  <nav class="nav" id="nav" aria-label="Main">
+    <a href="../getting-started/" aria-current="page">Documentation</a>
+    <a href="https://github.com/luizrgf2/lugent">GitHub</a>
+    <a href="https://www.npmjs.com/package/lugent">npm</a>
+  </nav>
+</header>
+
+<div class="docs">
+    <aside class="side" data-open="false">
+      <button class="side-toggle" type="button" aria-expanded="false">Documentation contents</button>
+      <div class="side-body">
+        <div class="side-group">
+          <p class="side-label">INSTALL</p>
+          <p class="side-install">npm i -g lugent</p>
+        </div>
+        <div class="side-group">
+          <p class="side-label">GETTING STARTED</p>
+          <a href="../getting-started/">Overview</a>
+          <a href="../config/">Configuration</a>
+          <a href="../usage/">Usage & commands</a>
+        </div>
+        <div class="side-group">
+          <p class="side-label">SUBSYSTEMS</p>
+          <a href="../agents/">Agents</a>
+          <a href="../subagents/" aria-current="page">Subagents</a>
+          <a href="../skills/">Skills</a>
+          <a href="../mcp/">MCP servers</a>
+          <a href="../permissions/">Permissions</a>
+        </div>
+        <div class="side-group">
+          <p class="side-label">SESSIONS</p>
+          <a href="../sessions/">Managing sessions</a>
+          <a href="../history/">Resume & history</a>
+          <a href="../data/">Data & storage</a>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="../getting-started/">docs</a><span aria-hidden="true">/</span><span aria-current="page">subagents</span>
+      </nav>
+
+      <div class="doc-head">
+        <h1 class="doc">Subagents</h1>
+        <p>A subagent is not a persona you switch into. It is a worker the model launches.</p>
+      </div>
+
+<section class="sec">
+  <h2>How a child runs</h2>
+  <p>During a turn the model calls the <code>subagent</code> tool with <code>{ agent, prompt }</code>. lugent starts a <strong>child session</strong>, in the same store and process, with the subagent's own prompt, model and tools. The child's final message comes back as the tool result.</p>
+  <pre><span class="m">---</span>
+<span class="k">description</span>: Probes one file and summarizes it
+<span class="k">mode</span>: subagent
+<span class="k">tools</span>: [read]
+<span class="m">---</span>
+You are a probe. Read exactly one file and summarize it in three lines.</pre>
+</section>
+
+<section class="sec">
+  <h2>Rules</h2>
+  <dl class="table">
+    <div class="row"><dt>Discovery</dt><dd>A <code># Subagents</code> section of the prompt lists id and description, and only when at least one is launchable.</dd></div>
+    <div class="row"><dt>Fresh context</dt><dd>The child shares no history, so the prompt must be self-contained.</dd></div>
+    <div class="row"><dt>Parallel</dt><dd>Several <code>subagent</code> calls in one tool round run at the same time.</dd></div>
+    <div class="row"><dt>Depth 1</dt><dd>A child never gets the <code>subagent</code> tool or the catalog, so it cannot launch a grandchild.</dd></div>
+    <div class="row"><dt>Hidden</dt><dd>Children are persisted with a <code>parent</code> link but stay out of <code>/resume</code> and the picker.</dd></div>
+    <div class="row"><dt>Not in /agent</dt><dd>Subagents are launch targets, not session personas.</dd></div>
+  </dl>
+  <p>The tool defaults to <code>ask</code>, and an agent's <code>tools</code> or <code>permissions</code> can allow, ask or deny <code>subagent</code> by name like any other tool.</p>
+</section>
+
+      <nav class="pager" aria-label="Pagination">
+        <a class="prev" href="../agents/"><span>PREVIOUS</span><strong>← Agents</strong></a>
+        <a class="next" href="../skills/"><span>NEXT</span><strong>Skills →</strong></a>
+      </nav>
+    </main>
+</div>
+
+<footer class="ftr">
+  <span>lugent 0.1.3 · MIT</span>
+  <span class="ftr-links">
+    <a href="https://github.com/luizrgf2/lugent">GitHub</a>
+    <a href="https://www.npmjs.com/package/lugent">npm</a>
+    <a href="https://github.com/luizrgf2/lugent/blob/main/docs/decisions.md">Decisions</a>
+  </span>
+</footer>
+
+<script>
+var menu = document.querySelector(".menu-btn");
+var nav = document.getElementById("nav");
+if (menu && nav) menu.addEventListener("click", function () {
+  var open = nav.dataset.open === "true";
+  nav.dataset.open = String(!open);
+  menu.setAttribute("aria-expanded", String(!open));
+});
+
+var side = document.querySelector(".side");
+var toggle = document.querySelector(".side-toggle");
+if (side && toggle) {
+  side.dataset.open = matchMedia("(min-width: 901px)").matches ? "true" : "false";
+  toggle.setAttribute("aria-expanded", side.dataset.open);
+  toggle.addEventListener("click", function () {
+    var open = side.dataset.open === "true";
+    side.dataset.open = String(!open);
+    toggle.setAttribute("aria-expanded", String(!open));
+  });
+}
+</script>
+
+</body>
+</html>
