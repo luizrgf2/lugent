@@ -914,6 +914,50 @@ test("/agent picker: pick switches the profile, status and toolset line follow",
   expect(f).toContain("reviewer")
 })
 
+test("agent picker pick: agent whose declared provider is missing renders a fatal error and the app stays alive", async () => {
+  const env = fakeEnv({
+    agents: [{ id: "badmodel", prompt: "b", model: { provider: "ghost", model: "m" } }],
+  })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("/agent\r")
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).toContain("choose agent")
+  type("\r")                                  // pick the fatal-model agent
+  await new Promise(r => setTimeout(r, 80))
+  const f = lastFrame()
+  // fail-soft: the fatal message is rendered, the process did not exit
+  expect(f).toContain("agent badmodel: model ghost/m not found (provider not configured)")
+  // and the agent was NOT activated: the context line still shows the base model
+  expect(f).not.toContain("ghost · m")
+  // the app is still interactive: reopening the picker works
+  type("/agent\r")
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).toContain("choose agent")
+})
+
+test("resume pick: session whose agent declared a missing provider renders a fatal error and the app stays alive", async () => {
+  const env = fakeEnv({
+    agents: [{ id: "badmodel", prompt: "b", model: { provider: "ghost", model: "m" } }],
+  })
+  const old = env.store.createSession("9router", "glm/glm-5.2", env.projectRoot, "badmodel")
+  env.store.appendMessage({ id: "u1", sessionId: old.id, role: "user", content: "past question", createdAt: new Date(0).toISOString() })
+
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("/resume\r")
+  const wait = async (want: string) => {
+    const t0 = Date.now()
+    while (!lastFrame().includes(want) && Date.now() - t0 < 3000) await new Promise(r => setTimeout(r, 20))
+    expect(lastFrame()).toContain(want)
+  }
+  await wait("past question")
+  type("\r")                                  // pick the session pinned to badmodel
+  await wait("agent badmodel: model ghost/m not found (provider not configured)")
+  // fail-soft: the fatal message is rendered; the model was not switched to the ghost provider
+  expect(lastFrame()).not.toContain("ghost · m")
+})
+
 test("defaultAgent at startup applies the agent's model", async () => {
   const env = fakeEnv({
     config: {

@@ -99,6 +99,9 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
   // default); picking in /permissions re-persists it to the global config.
   const [yolo, setYolo] = useState(env.config.permissionMode === "yolo")
   const [retry, setRetry] = useState("")
+  // Mid-turn spawn-side fatal (onFatal): turn-external message, rendered in the
+  // chrome (an empty live transcript would otherwise hide the items copy).
+  const [fatalMsg, setFatalMsg] = useState("")
   // Ref mirrors state: submit reads it — ink batching can make state stale.
   const yoloRef = useRef(yolo)
   const { stdout } = useStdout()
@@ -235,6 +238,8 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
       onSubagentEnd: sid => {
         setKidsSync(ks => ks.map(k => k.sessionId === sid ? { ...k, status: "done", activity: undefined } : k))
       },
+      // Spawn-side fatals must not kill the session: render and continue (issue #27).
+      onFatal: m => { setItems(is => [...is, { kind: "error", text: m }]); setFatalMsg(m) },
       onAsk: (tool, resource) => new Promise(resolve => {
         askChainRef.current = askChainRef.current.then(() => new Promise<void>(release => {
           if (abortRef.current?.signal.aborted) { resolve("n"); release(); return }
@@ -362,6 +367,10 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
           be the one squeezed when the content is taller than the viewport). */}
       <Box flexDirection="column" flexShrink={0}>
       {retry && <Text color="yellow">{retry}</Text>}
+      {/* Idle-time fatal refusals (agent/resume pickers) live in items; fatal
+          messages arriving mid-turn (spawn-side, via onFatal) are turn-external
+          — surface them here so they render even when live is empty. */}
+      {fatalMsg && <Text color="red">error: {fatalMsg}</Text>}
       <ContextLine agent={agent} agentsMd={agentsMd} yolo={yolo} off={env.offProviders.includes(provider)} model={`${provider} · ${model}`} busy={busy && !ask} />
       {overlay === "agent"        ? <AgentPicker
             agents={primaryAgents(env.agents)}
