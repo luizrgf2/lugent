@@ -18,6 +18,8 @@ import { SkillList } from "./skill-list"
 import { PermissionMode } from "./permission-mode"
 import { SessionPicker } from "./session-picker"
 import { McpList } from "./mcp-list"
+import { ChildViewer, ChildPicker, decorateSubagents, type ChildInfo } from "./child-viewer"
+import { truncate } from "../ui"
 import type { McpServerState } from "../../core/mcp/manager"
 
 export type TuiEnv = ReplEnv & {
@@ -66,9 +68,26 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
   // A defaultAgent's model (when its provider is configured) wins over the config default at startup.
   const [provider, setProvider] = useState(() => agentModelTarget(agent, env.config.providers)?.provider ?? env.config.defaultProvider)
   const [model, setModel] = useState(() => agentModelTarget(agent, env.config.providers)?.model ?? env.config.defaultModel)
-  const [overlay, setOverlay] = useState<null | "model" | "skills" | "resume" | "permissions" | "agent" | "mcp">(null)
-  const overlayRef = useRef<null | "model" | "skills" | "resume" | "permissions" | "agent" | "mcp">(null)
+  const [overlay, setOverlay] = useState<null | "model" | "skills" | "resume" | "permissions" | "agent" | "mcp" | "child" | "childpick">(null)
+  const overlayRef = useRef<null | "model" | "skills" | "resume" | "permissions" | "agent" | "mcp" | "child" | "childpick">(null)
   const [mcpStates, setMcpStates] = useState<McpServerState[]>([])
+  // Subagent children of the current turn (or of the resumed session), in
+  // launch order: index 0 = ctrl+1. childTrans holds each child's transcript
+  // keyed by session id — it survives the turn (ctrl+N works after commit)
+  // and is rehydrated from the store on /resume. kidsRef mirrors kids for the
+  // useInput closure (ink batching stale-state hazard, same as sigintRef).
+  const [kids, setKids] = useState<ChildInfo[]>([])
+  const kidsRef = useRef<ChildInfo[]>([])
+  const setKidsSync = (fn: (cur: ChildInfo[]) => ChildInfo[]) => { kidsRef.current = fn(kidsRef.current); setKids(kidsRef.current) }
+  const [childTrans, setChildTrans] = useState<Map<string, TItem[]>>(new Map())
+  const [childIdx, setChildIdx] = useState<number | null>(null)
+  // Each live subagent tool item is linked to its child session id when
+  // onSubagentStart arrives (the start precedes the child's first event, and
+  // tool starts/child starts interleave in the same order — FIFO pair).
+  const pendingSubRef = useRef<number[]>([])
+  // Ticks once a second while a child runs so the live status line's elapsed
+  // time moves; no timer while idle or when every child is done.
+  const [now, setNow] = useState(() => Date.now())
   /** Set while /mcp authenticate waits for the browser, so ctrl+c can cancel that, not the session. */
   const authAbortRef = useRef<AbortController | null>(null)
   // Startup mode comes from the config (project file overrides the global
@@ -79,9 +98,19 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
   const yoloRef = useRef(yolo)
   const { stdout } = useStdout()
 
-  const closeOverlay = () => { overlayRef.current = null; setOverlay(null) }
+  const closeOverlay = () => { overlayRef.current = null; setOverlay(null); setChildIdx(null) }
 
   const rows = (stdout as any)?.rows ?? 24
+
+  // Elapsed-time ticker for live subagent lines: runs only while a child is
+  // actually running (busy guards the turn, the some() guards done children).
+  const kidsRunning = busy && kids.some(k => k.status === "running")
+  useEffect(() => {
+    if (!kidsRunning) return
+    setNow(Date.now())
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [kidsRunning])
 
   // Live items stream through this one ref so callbacks don't clobber each
   // other mid-turn (each setLive closure would see a different prev): the ref
@@ -142,6 +171,13 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
     abortRef.current = ac
     setAbort(ac)
     setBusy(true)
+    // New turn: the children list restarts (ctrl+1..9 number the current
+    // turn's children, in launch order).
+    kidsRef.current = []
+    setKids([])
+    pendingSubRef.current = []
+    setChildTrans(new Map())
+    setNow(Date.now())
     let reasoning = ""
     let answer = ""
     const chatProvider = env.makeProvider?.(cfg, model) ?? new Provider(cfg, model)
@@ -163,7 +199,37 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
       onReasoning: t => { reasoning += t; pushLive(cur => patchTail(cur, { kind: "reasoning", text: reasoning })) },
       onToken: t => { answer += t; setRetry(""); pushLive(cur => patchTail(cur, { kind: "assistant", text: answer })) },
       onRetry: i => setRetry(`attempt ${i.attempt} failed — ${i.error} · retrying in ${Math.round(i.delayMs / 1000)}s`),
-      onToolStart: (name, resource) => pushLive(cur => [...cur, { kind: "tool", tool: name, text: resource }]),
+      onToolStart: (name, resource) => {
+        pushLive(cur => [...cur, { kind: "tool", tool: name, text: resource }])
+        if (name === "subagent") pendingSubRef.current.push(liveRef.current.length - 1)
+      },
+      onSubagentStart: (sid, aid) => {
+        // Link the just-pushed live `subagent` tool item to its child so the
+        // line can render live status (see decorateSubagents).
+        const idx = pendingSubRef.current.shift()
+        if (idx !== undefined) pushLive(cur => cur.map((it, i) => i === idx && it.kind === "tool" && it.tool === "subagent" ? { ...it, sub: sid } : it))
+        setKidsSync(ks => [...ks, { sessionId: sid, agent: aid, status: "running", startedAt: Date.now(), activity: "starting" }])
+      },
+      onSubagentEvent: (sid, item) => {
+        setKidsSync(ks => ks.map(k => k.sessionId === sid
+          ? { ...k, activity: item.kind === "tool" ? `${item.tool} ${truncate(item.text, 32)}` : item.kind === "assistant" ? "writing" : "thinking" }
+          : k))
+        setChildTrans(m => {
+          const next = new Map(m)
+          const cur = next.get(sid) ?? []
+          const last = cur[cur.length - 1]
+          // Core accumulates child text per round, so same-kind deltas replace
+          // the tail (the parent stream's patchTail behavior, per child).
+          const merged = item.kind !== "tool" && last && last.kind === item.kind
+            ? [...cur.slice(0, -1), item]
+            : [...cur, item]
+          next.set(sid, merged)
+          return next
+        })
+      },
+      onSubagentEnd: sid => {
+        setKidsSync(ks => ks.map(k => k.sessionId === sid ? { ...k, status: "done", activity: undefined } : k))
+      },
       onAsk: (tool, resource) => new Promise(resolve => {
         askChainRef.current = askChainRef.current.then(() => new Promise<void>(release => {
           if (abortRef.current?.signal.aborted) { resolve("n"); release(); return }
@@ -207,6 +273,17 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
       }
       return
     }
+    // ctrl+1..9: inspect child N of the turn (or of the resumed session).
+    // Works while a child overlay is open too (switch directly). ctrl+9 past
+    // 8 children opens the windowed picker instead — direct map for 1..8.
+    // Only when no other overlay owns the keys and no dialog is pending.
+    if (key.ctrl && /^[1-9]$/.test(input) && !ask && (!overlayRef.current || overlayRef.current === "child" || overlayRef.current === "childpick")) {
+      const n = Number(input)
+      if (n === 9 && kidsRef.current.length > 8) { overlayRef.current = "childpick"; setOverlay("childpick"); return }
+      const kid = kidsRef.current[n - 1]
+      if (kid) { setChildIdx(n - 1); overlayRef.current = "child"; setOverlay("child") }
+      return
+    }
     if (overlayRef.current || ask) return   // overlays/dialogs own the keys
     // page size = the live window (same value the region gets below)
     const budget = transcriptWindow(rows)
@@ -223,7 +300,10 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
   const said = items.length > 1 || live.length > 0   // items[0] is the logo
   const pad = !said ? logoTopPad(rows) : 0
   const window = said ? transcriptWindow(rows) : splashWindow(rows)
-  const visible = clampItems(live, window, scroll)
+  // Live subagent tool lines get their real-time status text at render time —
+  // the stored items stay plain, so the scrollback commit prints the normal
+  // completed line.
+  const visible = decorateSubagents(clampItems(live, window, scroll), kids, now)
   // Frame height: capped at the viewport while a turn runs, an overlay/dialog
   // is open or the splash is up, but only as tall as the chrome when idle with
   // an empty live transcript — the conversation lives in the terminal's own
@@ -261,7 +341,16 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
           the history and every new turn, forever. */}
       {!said && <LogoMark topPad={pad} />}
       <Box flexDirection="column" flexGrow={1} flexShrink={1} minHeight={0} justifyContent="flex-end" overflowY="hidden">
-        <Transcript items={visible} />
+        {/* Child viewer (ctrl+N) replaces the live transcript while open: same
+            windowing budget, read-only, the composer below stays in place. */}
+        {overlay === "child" && childIdx !== null && kids[childIdx]
+          ? <ChildViewer
+              index={childIdx}
+              total={kids.length}
+              info={kids[childIdx]}
+              items={childTrans.get(kids[childIdx].sessionId) ?? []}
+              onClose={closeOverlay} />
+          : <Transcript items={visible} />}
       </Box>
       {/* Chrome: everything below the transcript in one flexShrink={0} block, so
           the transcript is what absorbs the slack (last child would otherwise
@@ -343,6 +432,13 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
               // replayed ones again on top.
               setItems(is => [...is, ...itemsFromHistory(env.store.getMessages(id)).map(it =>
                 it.kind === "assistant" ? { ...it, kind: "system" } : it)])
+              // Rehydrate this session's children from the store: ctrl+N works
+              // after the turn commits and after /resume (reasoning was never
+              // persisted — replay shows what the store has).
+              const kidRows = env.store.children(id)
+              kidsRef.current = kidRows.map(k => ({ sessionId: k.id, agent: k.agent ?? "subagent", status: "done", startedAt: 0 }))
+              setKids(kidsRef.current)
+              setChildTrans(new Map(kidRows.map(k => [k.id, itemsFromHistory(env.store.getMessages(k.id))])))
             }} />
           : overlay === "permissions"
             ? <PermissionMode
@@ -356,10 +452,15 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
                   setItems(is => [...is, { kind: "system", text: saved ? note : `${note} — save failed, session only` }])
                 }}
                 onClose={closeOverlay} />
+          : overlay === "childpick"
+            ? <ChildPicker
+                kids={kids}
+                onPick={i => { setChildIdx(i); overlayRef.current = "child"; setOverlay("child") }}
+                onClose={closeOverlay} />
           : ask
             ? <Permissions tool={ask.tool} resource={ask.resource} onAnswer={a => { askRef.current = null; ask.resolve(a); setAsk(null) }} />
             : <Input
-                disabled={busy}
+                disabled={busy || overlay === "child"}
                 onSubmit={submit}
                 completions={[
                   { cmd: "exit", desc: "quit lugent" },
@@ -384,8 +485,16 @@ export function runTui(env: TuiEnv, io: { stdin?: NodeJS.ReadStream; stdout?: No
   const stdin = io.stdin ?? process.stdin
   const stdout = io.stdout ?? process.stdout
   stdout.write("\x1b[H\x1b[J")
+  // Enable the kitty keyboard protocol (flag 1: disambiguate escape codes) so
+  // ctrl+1..9 reaches the app as a distinct key — the legacy encoding sends a
+  // plain digit with no modifier, and the composer owns those. Terminals
+  // without the protocol ignore this CSI and keep legacy behavior (the viewer
+  // keys stay dead there); the flags are popped on exit so the shell keeps
+  // its own key bindings.
+  stdout.write("\x1b[>1u")
   const inst = render(<App env={env} />, { exitOnCtrlC: false, stdin, stdout })
   return inst.waitUntilExit().finally(() => {
+    stdout.write("\x1b[<u")
     inst.unmount()
   })
 }

@@ -199,6 +199,9 @@ export async function runRepl(env: ReplEnv): Promise<void> {
         clearSpin()
         process.stdout.write(`\n${glyph(name)} ${dim(name)} ${cyan(truncate(resource, 64))}\n`)
       },
+      // Plain REPL: no live view — one dim line when a child starts and when it ends.
+      onSubagentStart: (sid, aid) => { clearSpin(); process.stdout.write(`${dim(`↳ subagent ${aid} (${sid.slice(0, 8)}…) started`)}\n`) },
+      onSubagentEnd: sid => { clearSpin(); process.stdout.write(`${dim(`↳ subagent (${sid.slice(0, 8)}…) finished`)}\n`) },
       onAsk: async (tool, resource) => { clearSpin(); return ask(tool, resource) },
     }, session.id, input, env.projectRoot)
       .catch((e: any) => ({ aborted: false, error: `internal error: ${e?.message ?? e}` }))

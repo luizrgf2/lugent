@@ -140,7 +140,7 @@ LUGENT
 | `write` | ask | Create/replace file, creates parent dirs |
 | `shell` | ask | `bash -c` (`cmd /c` on Windows), timeout default 2min, `background: true` |
 | `skill` | allow | Load a skill body by id |
-| `subagent` | ask | Launch a subagent in a child session (id from the `# Subagents` list, fresh context); returns the child's final message |
+| `subagent` | ask | Launch a subagent in a child session (id from the `# Subagents` list, fresh context); returns the child's final message. While it runs, the TUI tool line shows the child's live status (`agent · activity · elapsed`) |
 
 **Extra guard:** any resource outside the project root (absolute path, `..`, `~`) forces an `ask` even for `allow` tools, unless already granted for the session.
 
@@ -270,6 +270,7 @@ A `mode: subagent` (or `all`) agent is not a session you switch into — it is a
 - The model discovers subagents from a `# Subagents` section of the prompt (id + description), rendered only when at least one is launchable — same mechanism as `# Skills`.
 - The child starts with **no** shared history: the prompt must be self-contained.
 - Several `subagent` calls in one tool round run in parallel.
+- **Live view (TUI)**: while a child runs, its `subagent` tool line shows `agent · activity · elapsed` in real time (`ctrl+c` behavior unchanged). **`ctrl+1`..`ctrl+9`** open child N of the current turn — a read-only live transcript of that child (tokens, reasoning, tool lines, same windowing as the frame); `esc` or Ctrl+C closes. Past 8 children `ctrl+9` opens a windowed picker instead of a direct map. Children keep working after the turn commits and after `/resume` (rehydrated from the store; reasoning was never persisted). The keys need a terminal with the [kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/) (lugent enables its disambiguate flag and pops it on exit) — without it, ctrl+digit is indistinguishable from a plain digit and the viewer stays unreachable. `--plain` prints a dim `↳ subagent … started/finished` line pair instead.
 - **Depth 1**: a child never gets the `subagent` tool or the catalog, so it cannot launch a grandchild.
 - Children are persisted (with a `parent` link) but **hidden** from `/resume` and the TUI picker; only the child's final message returns to the parent.
 - `mode: subagent` agents are not offered in `/agent` — they are launch targets, not session personas.

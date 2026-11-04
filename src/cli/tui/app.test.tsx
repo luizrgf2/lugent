@@ -5,6 +5,7 @@ import { EventEmitter } from "node:events"
 import { App, runTui } from "./app"
 import { renderTui } from "./harness"
 import { Store } from "../../core/store"
+import { makeSubagentTool } from "../../core/tools/subagent"
 
 
 /** stdout double: collects frames, reports TTY + rows. */
@@ -1100,3 +1101,165 @@ test("long wrapped lines cannot push the composer out of the frame", async () =>
   expect(lines.findIndex(l => l.includes("╭"))).toBeLessThan(29)
 })
 
+
+// ---- subagent live viewer (ctrl+N) ----
+
+const CTRL1 = "\x1b[49;5u"   // kitty CSI-u ctrl+1
+const CTRL8 = "\x1b[56;5u"   // ctrl+8
+const CTRL9 = "\x1b[57;5u"   // ctrl+9
+const ESC = "\x1b"
+
+const yoloEnv = (over: Record<string, unknown> = {}) =>
+  fakeEnv({ config: { ...fakeEnv().config, permissionMode: "yolo" }, ...over })
+
+const reviewerAgent = (tools: string[] = ["read"]) => ({ id: "reviewer", mode: "subagent", prompt: "You are REVIEWER.", tools })
+
+const readTool = {
+  name: "read", description: "read", schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+  permission: "allow" as const, execute: async () => ({ output: "file" }),
+}
+
+/** Parent round 1 spawns the reviewer; the child reads a.txt, pauses, then streams its answer. */
+function reviewerProvider() {
+  let parentRounds = 0
+  let childRounds = 0
+  return {
+    chat: async (a: any) => {
+      const sys: string = a.messages[0].content
+      if (sys.includes("You are REVIEWER.")) {
+        childRounds++
+        if (childRounds === 1) return { content: "", toolCalls: [{ id: "c1", name: "read", args: { path: "a.txt" } }] }
+        await new Promise(r => setTimeout(r, 250))   // hold the child open so the live line is observable
+        a.onToken?.("child answer")
+        return { content: "child answer", toolCalls: [] }
+      }
+      parentRounds++
+      if (parentRounds === 1) return { content: "", toolCalls: [{ id: "t1", name: "subagent", args: { agent: "reviewer", prompt: "review a.txt" } }] }
+      return { content: "parent done", toolCalls: [] }
+    },
+  }
+}
+
+test("subagent tool line shows live child status while the child runs", async () => {
+  const env = yoloEnv({ tools: [readTool, makeSubagentTool()], agents: [reviewerAgent()], makeProvider: () => reviewerProvider() })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  // while the child runs: agent id · current activity · elapsed seconds
+  await waitFor(() => /subagent reviewer · read a\.txt · \d+s/.test(lastFrame()))
+  expect(lastFrame()).not.toContain("child answer")   // the child stream stays off the parent frame
+  await waitFor(() => lastFrame().includes(CARET))    // turn done
+  const f = lastFrame()
+  expect(f).toContain("subagent reviewer")            // completed: the normal tool line
+  expect(f).not.toContain("reviewer · read a.txt")    // live status is gone
+})
+
+test("ctrl+1 opens the running child's live transcript; esc closes", async () => {
+  const env = yoloEnv({ tools: [readTool, makeSubagentTool()], agents: [reviewerAgent()], makeProvider: () => reviewerProvider() })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  await waitFor(() => /subagent reviewer ·/.test(lastFrame()))   // child is up
+  type(CTRL1)
+  await waitFor(() => lastFrame().includes("esc close"))         // overlay hint
+  expect(lastFrame()).toContain("reviewer")
+  expect(lastFrame()).toContain("a.txt")                         // child's own tool line inside the overlay
+  await waitFor(() => lastFrame().includes("child answer"))      // streams live while the child runs
+  type(ESC)
+  await waitFor(() => !lastFrame().includes("esc close"))
+  await waitFor(() => lastFrame().includes(CARET))               // turn finished normally
+})
+
+test("children are numbered by launch order; ctrl+9 opens the picker past 8", async () => {
+  const agents = Array.from({ length: 9 }, (_, i) => ({ id: `s${i + 1}`, mode: "subagent", prompt: `You are S${i + 1}.` }))
+  let parentRounds = 0
+  const provider = {
+    chat: async (a: any) => {
+      const sys: string = a.messages[0].content
+      const m = sys.match(/You are S(\d)\./)
+      if (m) { a.onToken?.(`done from s${m[1]}`); return { content: `done from s${m[1]}`, toolCalls: [] } }
+      parentRounds++
+      if (parentRounds === 1) return {
+        content: "",
+        toolCalls: agents.map((ag, i) => ({ id: `t${i}`, name: "subagent", args: { agent: ag.id, prompt: `task ${i}` } })),
+      }
+      return { content: "parent done", toolCalls: [] }
+    },
+  }
+  const env = yoloEnv({ tools: [makeSubagentTool()], agents, makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  await waitFor(() => lastFrame().includes(CARET))
+  type(CTRL1)
+  await waitFor(() => lastFrame().includes("done from s1"))
+  expect(lastFrame()).toContain("subagent 1/9 · s1")
+  type(ESC)
+  await waitFor(() => !lastFrame().includes("esc close"))
+  type(CTRL8)
+  await waitFor(() => lastFrame().includes("done from s8"))
+  expect(lastFrame()).toContain("subagent 8/9 · s8")
+  type(ESC)
+  await waitFor(() => !lastFrame().includes("esc close"))
+  type(CTRL9)                                                     // 9th child: picker instead of a direct map
+  await waitFor(() => lastFrame().includes("choose child"))
+  const pf = lastFrame()
+  expect(pf).toContain("8 · s8")                                   // windowed like the agent picker…
+  expect(pf).not.toContain("9 · s9")                               // …child 9 is past the window
+  for (let i = 0; i < 8; i++) type("\x1b[B")                      // down to child 9
+  await waitFor(() => lastFrame().includes("9 · s9"))
+  type("\r")                                                      // pick it
+  await waitFor(() => lastFrame().includes("done from s9"))
+  expect(lastFrame()).toContain("subagent 9/9 · s9")
+  type(ESC)
+  await waitFor(() => !lastFrame().includes("esc close"))
+})
+
+test("ctrl+N still works after the turn; /resume rehydrates children from the store", async () => {
+  const env = yoloEnv({ agents: [reviewerAgent()] })
+  const parent = env.store.createSession("9router", "glm/glm-5.2", env.projectRoot, "build")
+  env.store.appendMessage({ id: "u1", sessionId: parent.id, role: "user", content: "earlier question", createdAt: new Date(0).toISOString() })
+  const kid = env.store.createSession("9router", "glm/glm-5.2", env.projectRoot, "reviewer", parent.id)
+  env.store.appendMessage({ id: "k1", sessionId: kid.id, role: "user", content: "review a.txt", createdAt: new Date(0).toISOString() })
+  env.store.appendMessage({ id: "k2", sessionId: kid.id, role: "assistant", content: "child answer from history", createdAt: new Date(0).toISOString() })
+
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("/resume\r")
+  await waitFor(() => lastFrame().includes("earlier question"))
+  type("\r")                                    // pick the parent session
+  await waitFor(() => lastFrame().includes(CARET))
+  type(CTRL1)                                   // rehydrated from the store, not from live state
+  await waitFor(() => lastFrame().includes("child answer from history"))
+  expect(lastFrame()).toContain("subagent 1/1 · reviewer")
+  type(ESC)
+  await waitFor(() => !lastFrame().includes("esc close"))
+})
+
+test("ctrl+9 with at most 8 children does not open the picker", async () => {
+  const agents = Array.from({ length: 8 }, (_, i) => ({ id: `s${i + 1}`, mode: "subagent", prompt: `You are S${i + 1}.` }))
+  let parentRounds = 0
+  const provider = {
+    chat: async (a: any) => {
+      const sys: string = a.messages[0].content
+      if (sys.includes("You are S")) return { content: "done", toolCalls: [] }
+      parentRounds++
+      if (parentRounds === 1) return {
+        content: "",
+        toolCalls: agents.map((ag, i) => ({ id: `t${i}`, name: "subagent", args: { agent: ag.id, prompt: `task ${i}` } })),
+      }
+      return { content: "parent done", toolCalls: [] }
+    },
+  }
+  const env = yoloEnv({ tools: [makeSubagentTool()], agents, makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 30))
+  type("go\r")
+  await waitFor(() => lastFrame().includes(CARET))
+  type(CTRL8)                                                   // 8 or fewer: direct map, no picker
+  await waitFor(() => lastFrame().includes("done"))
+  expect(lastFrame()).toContain("subagent 8/8 · s8")
+  type(CTRL9)
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).not.toContain("choose child")
+})

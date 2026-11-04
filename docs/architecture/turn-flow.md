@@ -18,6 +18,9 @@ user input
           → toolsForAgent(...) minus subagent   # depth 1
           → createSession(..., parent=sessionId)
           → runTurn(childDeps, childId, prompt)  # same loop, same process
+              childDeps forwards the parent's onSubagentStart/Event/End hooks
+              (keyed by childSessionId) instead of dropping them — the TUI
+              renders the child live (docs/architecture/tui.md § Subagent viewer)
           → return the child's last assistant message
         append tool result (truncated at 10k chars)
 ```

@@ -12,6 +12,12 @@ import { expandImages } from "./images"
 const TRUNCATE = 10_000
 const MAX_TOOL_ROUNDS = 50
 
+export interface SubagentStreamItem {
+  kind: "assistant" | "reasoning" | "tool"
+  text: string
+  tool?: string
+}
+
 export interface LoopDeps {
   store: Store
   provider: { chat(args: any): Promise<ChatResponse> }
@@ -29,6 +35,11 @@ export interface LoopDeps {
   config?: AppConfig
   /** Builds the provider for a child whose agent pins a model; the child inherits the parent's otherwise. */
   providerFor?: (provider: string, model: string) => { chat(args: any): Promise<ChatResponse> }
+  /** Child-aware stream hooks (TUI): every child is keyed by its session id,
+   *  so parallel children never cross-talk. Only the CLI layer consumes them. */
+  onSubagentStart?: (childSessionId: string, agentId: string) => void
+  onSubagentEvent?: (childSessionId: string, item: SubagentStreamItem) => void
+  onSubagentEnd?: (childSessionId: string) => void
 }
 
 function msg(partial: Partial<Message> & { sessionId: string; role: Message["role"] }): Message {
@@ -91,15 +102,29 @@ function buildSpawn(deps: LoopDeps, parentId: string): NonNullable<ToolContext["
       target?.model ?? parent?.model ?? "",
       deps.promptInput.cwd, child.id, parentId).id
 
-    const r = await runTurn({
-      ...deps, provider, tools: childTools, promptInput: childInput, agent: child,
-      onToken: undefined, onReasoning: undefined, onToolStart: undefined,
-    }, childId, prompt, deps.promptInput.cwd)
+    deps.onSubagentStart?.(childId, agentId)
+    // The child streams into the parent's subagent hooks (keyed by childId, so
+    // parallel children are independent). Text accumulates per round — reset
+    // when the child's next provider round starts — mirroring what the parent
+    // transcript shows for its own turn (one assistant item per round).
+    let answer = ""
+    let reasoning = ""
+    const childChat = (args: any) => { answer = ""; reasoning = ""; return provider.chat(args) }
+    try {
+      const r = await runTurn({
+        ...deps, provider: { chat: childChat }, tools: childTools, promptInput: childInput, agent: child,
+        onToken: t => { answer += t; deps.onSubagentEvent?.(childId, { kind: "assistant", text: answer }) },
+        onReasoning: t => { reasoning += t; deps.onSubagentEvent?.(childId, { kind: "reasoning", text: reasoning }) },
+        onToolStart: (name, resource) => deps.onSubagentEvent?.(childId, { kind: "tool", tool: name, text: resource }),
+      }, childId, prompt, deps.promptInput.cwd)
 
-    if (r.aborted) return { output: `subagent ${agentId} aborted`, error: true } satisfies ToolResult
-    const last = [...deps.store.getMessages(childId)].reverse().find(m => m.role === "assistant" && m.content)
-    if (!last?.content) return { output: `subagent ${agentId} produced no answer${r.error ? `: ${r.error}` : ""}`, error: true } satisfies ToolResult
-    return { output: last.content } satisfies ToolResult
+      if (r.aborted) return { output: `subagent ${agentId} aborted`, error: true } satisfies ToolResult
+      const last = [...deps.store.getMessages(childId)].reverse().find(m => m.role === "assistant" && m.content)
+      if (!last?.content) return { output: `subagent ${agentId} produced no answer${r.error ? `: ${r.error}` : ""}`, error: true } satisfies ToolResult
+      return { output: last.content } satisfies ToolResult
+    } finally {
+      deps.onSubagentEnd?.(childId)
+    }
   }
 }
 
