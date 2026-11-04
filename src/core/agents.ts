@@ -200,9 +200,47 @@ function loadAgentFile(dir: string, rel: string, knownTools: string[]): Agent | 
   return agent
 }
 
-/** The agent's model when its provider is configured; undefined means "inherit the session's". */
-export function agentModelTarget(agent: Agent | undefined, providers: Record<string, unknown>): AgentModelRef | undefined {
-  return agent?.model && providers[agent.model.provider] ? agent.model : undefined
+export type ResolvedChildModel =
+  | { provider: string; model: string; source: "agent" | "default" | "session" }
+  | { fatal: string }
+
+/**
+ * The model a spawned subagent runs on, per the explicit hierarchy: the
+ * agent's declared `model`, else the config's `defaultSubagentModel`, else
+ * the chat's current model. A declared model that cannot be honored offline
+ * (no slash, or provider not configured) is `fatal` — the caller must stop,
+ * not silently inherit.
+ */
+export function resolveChildModel(
+  child: Agent,
+  providers: Record<string, unknown>,
+  defaultSubagentModel: AgentModelRef | undefined,
+  parent: { provider?: string; model?: string } | undefined,
+): ResolvedChildModel {
+  if (child.model) {
+    if (providers[child.model.provider])
+      return { provider: child.model.provider, model: child.model.model, source: "agent" }
+    return { fatal: `agent ${child.id}: model ${child.model.provider}/${child.model.model} not found (provider not configured)` }
+  }
+  if (defaultSubagentModel) {
+    if (providers[defaultSubagentModel.provider])
+      return { provider: defaultSubagentModel.provider, model: defaultSubagentModel.model, source: "default" }
+    return { fatal: `agent ${child.id}: defaultSubagentModel ${defaultSubagentModel.provider}/${defaultSubagentModel.model} not found (provider not configured)` }
+  }
+  return { provider: parent?.provider ?? "", model: parent?.model ?? "", source: "session" }
+}
+
+export type ActivationModel = { model?: AgentModelRef } | { fatal: string }
+
+/**
+ * A switchable agent's model at activation time: resolved, or `fatal` when
+ * the agent declares a model the config cannot honor (no silent inherit —
+ * an agent that declares a model must run on it or not run at all).
+ */
+export function agentActivationModel(agent: Agent | undefined, providers: Record<string, unknown>): ActivationModel {
+  if (!agent?.model) return {}
+  if (providers[agent.model.provider]) return { model: agent.model }
+  return { fatal: `agent ${agent.id}: model ${agent.model.provider}/${agent.model.model} not found (provider not configured)` }
 }
 
 /** Toolset sent to the provider: agent list (when present) minus denied tools. */

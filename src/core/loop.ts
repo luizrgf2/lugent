@@ -5,7 +5,7 @@ import type { ToolDef } from "./tools/registry"
 import { validateArgs } from "./tools/registry"
 import { buildPrefix, buildMessages, type PromptInput } from "./prompt"
 import { checkPermission, resourceFor } from "./permissions"
-import { toolsForAgent, canBeSubagent, agentModelTarget } from "./agents"
+import { toolsForAgent, canBeSubagent, resolveChildModel } from "./agents"
 import type { AppConfig } from "./config"
 import { expandImages } from "./images"
 
@@ -35,6 +35,10 @@ export interface LoopDeps {
   config?: AppConfig
   /** Builds the provider for a child whose agent pins a model; the child inherits the parent's otherwise. */
   providerFor?: (provider: string, model: string) => { chat(args: any): Promise<ChatResponse> }
+  /** An unresolved declared model is fatal: the CLI default prints and exits;
+   *  tests inject a recorder instead. When provided, spawn returns an error
+   *  result after calling it (no child session is created). */
+  onFatal?: (message: string) => void
   /** Child-aware stream hooks (TUI): every child is keyed by its session id,
    *  so parallel children never cross-talk. Only the CLI layer consumes them. */
   onSubagentStart?: (childSessionId: string, agentId: string) => void
@@ -73,6 +77,12 @@ function isOutsideProject(resource: string, cwd: string): boolean {
   return !rel
 }
 
+function fatal(deps: LoopDeps, message: string): ToolResult {
+  if (deps.onFatal) deps.onFatal(message)
+  else { console.error(message); process.exit(1) }
+  return { output: message, error: true }
+}
+
 function buildSpawn(deps: LoopDeps, parentId: string): NonNullable<ToolContext["spawn"]> {
   return async (agentId, prompt) => {
     const child = (deps.agents ?? []).find(a => a.id === agentId)
@@ -80,9 +90,13 @@ function buildSpawn(deps: LoopDeps, parentId: string): NonNullable<ToolContext["
     if (!canBeSubagent(child)) return { output: `agent ${agentId} is not a subagent (mode: primary)`, error: true } satisfies ToolResult
 
     const parent = deps.store.loadSession(parentId)
-    const target = agentModelTarget(child, deps.config?.providers ?? {})
+    // Explicit hierarchy: the agent's model, else the config default, else the
+    // chat's current model. A declared model that cannot be honored is fatal.
+    const resolved = resolveChildModel(child, deps.config?.providers ?? {}, deps.config?.defaultSubagentModel, parent ?? undefined)
+    if ("fatal" in resolved) return fatal(deps, resolved.fatal)
+    const target = { provider: resolved.provider, model: resolved.model }
     let provider = deps.provider
-    if (target) {
+    if (resolved.source !== "session") {
       const built = deps.providerFor?.(target.provider, target.model)
       if (!built) return { output: `no provider configured for ${target.provider}/${target.model}`, error: true } satisfies ToolResult
       provider = built
@@ -97,10 +111,7 @@ function buildSpawn(deps: LoopDeps, parentId: string): NonNullable<ToolContext["
       skills: childTools.some(t => t.name === "skill") ? deps.promptInput.skills : [],
       subagents: [],
     }
-    const childId = deps.store.createSession(
-      target?.provider ?? parent?.provider ?? "",
-      target?.model ?? parent?.model ?? "",
-      deps.promptInput.cwd, child.id, parentId).id
+    const childId = deps.store.createSession(target.provider, target.model, deps.promptInput.cwd, child.id, parentId).id
 
     deps.onSubagentStart?.(childId, agentId)
     // The child streams into the parent's subagent hooks (keyed by childId, so

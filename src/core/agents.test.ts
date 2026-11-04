@@ -1,8 +1,8 @@
-import { test, expect, beforeEach, afterAll } from "bun:test"
+import { test, expect, describe, beforeEach, afterAll } from "bun:test"
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
-import { loadAgents, resolveAgent, BUILTIN_AGENTS, parseList, parsePermMap, parseModelRef, toolsForAgent, effectivePermission, agentModelTarget } from "./agents"
-import { canBeSubagent, canBePrimary, subagentsFor, primaryAgents } from "./agents"
+import { loadAgents, resolveAgent, BUILTIN_AGENTS, parseList, parsePermMap, parseModelRef, toolsForAgent, effectivePermission } from "./agents"
+import { canBeSubagent, canBePrimary, subagentsFor, primaryAgents, resolveChildModel, agentActivationModel } from "./agents"
 import type { Agent } from "./types"
 import { SYSTEM_PROMPT } from "./prompt"
 import type { ToolDef } from "./tools/registry"
@@ -110,13 +110,6 @@ test("block-style tools (unparsable) fails closed and still credentials nothing"
 test("block-style permissions stays absent instead of becoming an empty override map", () => {
   write(join(PROJ, ".agents", "agents"), "reviewer.md", "---\npermissions:\n  shell: deny\n---\nReview.")
   expect(byId("reviewer").permissions).toBeUndefined()
-})
-
-test("agentModelTarget resolves only against a configured provider", () => {
-  const agent = { id: "r", prompt: "p", model: { provider: "9router", model: "glm/5.2" } }
-  expect(agentModelTarget(agent, { "9router": {} })).toEqual({ provider: "9router", model: "glm/5.2" })
-  expect(agentModelTarget(agent, {})).toBeUndefined()
-  expect(agentModelTarget(undefined, {})).toBeUndefined()
 })
 
 test("effectivePermission: override wins over registry default", () => {
@@ -270,4 +263,64 @@ test("description strips surrounding quotes", () => {
     "---\ndescription: 'single quoted'\n---\nSQ.")
   expect(byId("q").description).toBe("Second opinion, adversarial")
   expect(byId("sq").description).toBe("single quoted")
+})
+
+describe("resolveChildModel — subagent model hierarchy", () => {
+  const providers = { alt: { baseUrl: "http://x" }, zai: { baseUrl: "http://z" } }
+  const parent = { provider: "alt", model: "m-parent" }
+
+  test("declared model with a configured provider wins (source: agent)", () => {
+    const child: Agent = { id: "s", prompt: "p", model: { provider: "zai", model: "flash" } }
+    expect(resolveChildModel(child, providers, undefined, parent))
+      .toEqual({ provider: "zai", model: "flash", source: "agent" })
+  })
+
+  test("declared model whose provider is missing is fatal — never inherit", () => {
+    const child: Agent = { id: "s", prompt: "p", model: { provider: "nope", model: "m" } }
+    expect(resolveChildModel(child, providers, { provider: "zai", model: "flash" }, parent))
+      .toEqual({ fatal: `agent s: model nope/m not found (provider not configured)` })
+  })
+
+  test("no declared model falls back to defaultSubagentModel", () => {
+    const child: Agent = { id: "s", prompt: "p" }
+    expect(resolveChildModel(child, providers, { provider: "zai", model: "flash" }, parent))
+      .toEqual({ provider: "zai", model: "flash", source: "default" })
+  })
+
+  test("defaultSubagentModel whose provider is missing is fatal", () => {
+    const child: Agent = { id: "s", prompt: "p" }
+    expect(resolveChildModel(child, providers, { provider: "nope", model: "m" }, parent))
+      .toEqual({ fatal: `agent s: defaultSubagentModel nope/m not found (provider not configured)` })
+  })
+
+  test("nothing declared anywhere inherits the chat's current model", () => {
+    const child: Agent = { id: "s", prompt: "p" }
+    expect(resolveChildModel(child, providers, undefined, parent))
+      .toEqual({ provider: "alt", model: "m-parent", source: "session" })
+  })
+
+  test("a parent without a provider degrades to empty strings (existing behavior)", () => {
+    const child: Agent = { id: "s", prompt: "p" }
+    expect(resolveChildModel(child, {}, undefined, undefined))
+      .toEqual({ provider: "", model: "", source: "session" })
+  })
+})
+
+describe("agentActivationModel — primary activation fail-fast", () => {
+  const providers = { alt: { baseUrl: "http://x" } }
+
+  test("no model resolves to nothing", () => {
+    expect(agentActivationModel({ id: "a", prompt: "p" }, providers)).toEqual({})
+  })
+
+  test("configured provider resolves the model", () => {
+    const a: Agent = { id: "a", prompt: "p", model: { provider: "alt", model: "m" } }
+    expect(agentActivationModel(a, providers)).toEqual({ model: { provider: "alt", model: "m" } })
+  })
+
+  test("declared model with a missing provider is fatal", () => {
+    const a: Agent = { id: "a", prompt: "p", model: { provider: "nope", model: "m" } }
+    expect(agentActivationModel(a, providers))
+      .toEqual({ fatal: `agent a: model nope/m not found (provider not configured)` })
+  })
 })
