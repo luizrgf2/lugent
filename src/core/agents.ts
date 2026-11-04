@@ -132,19 +132,31 @@ export function loadAgents(projectRoot: string, homeDir: string = homedir(), kno
 }
 
 function loadAgentFile(dir: string, rel: string, knownTools: string[]): Agent | undefined {
-  const id = rel.replace(/\.md$/, "")
+  const pathId = rel.replace(/\.md$/, "")
   const { data, body } = parseFrontmatter(readFileSync(join(dir, rel), "utf8"))
   const prompt = body.trim()
-  if (!prompt) { console.warn(`agent ${id}: empty body, dropped`); return undefined }
+  if (!prompt) { console.warn(`agent ${pathId}: empty body, dropped`); return undefined }
+  // `name` is the explicit identity; the path is only the fallback (a nested
+  // `reviewer/agent.md` with `name: reviewer-2` loads as `reviewer-2`).
+  const id = data.name?.trim() || pathId
 
   const known = (t: string) => knownTools.length === 0 || knownTools.includes(t)
   const agent: Agent = { id, prompt }
-  if (data.description) agent.description = data.description
+  if (data.description) agent.description = data.description.replace(/^["']|["']$/g, "")
   if (data.mode !== undefined) {
     const m = data.mode.trim()
+    // `agent` is accepted as a first-class spelling of `primary`.
     if (m === "primary" || m === "subagent" || m === "all") agent.mode = m
+    else if (m === "agent") agent.mode = "primary"
     else console.warn(`agent ${id}: bad mode "${data.mode}" — using primary`)
+  } else if (data.subagent !== undefined) {
+    // Legacy Claude Code-style field: subagent: true meant "launchable child".
+    if (data.subagent.trim() === "true") {
+      agent.mode = "subagent"
+      console.warn(`agent ${id}: "subagent: true" is deprecated — use "mode: subagent"`)
+    } else console.warn(`agent ${id}: legacy "subagent: ${data.subagent}" ignored`)
   }
+
   if (data.color !== undefined) {
     const c = parseColor(data.color)
     if (c) agent.color = c
@@ -174,6 +186,16 @@ function loadAgentFile(dir: string, rel: string, knownTools: string[]): Agent | 
       if (!known(name)) { console.warn(`agent ${id}: unknown tool "${name}" in permissions, dropped`); delete perms[name] }
     }
     if (Object.keys(perms).length) agent.permissions = perms
+  }
+  // Legacy Claude Code-style field: "off" meant no command execution. An
+  // explicit permissions.shell (declared by the same file) wins over it.
+  if (data.commandExecutionPolicy !== undefined) {
+    if (data.commandExecutionPolicy.trim() === "off") {
+      if (agent.permissions?.shell === undefined) {
+        agent.permissions = { ...agent.permissions, shell: "deny" }
+        console.warn(`agent ${id}: legacy "commandExecutionPolicy: off" — shell: deny`)
+      } else console.warn(`agent ${id}: legacy "commandExecutionPolicy" ignored — permissions.shell is explicit`)
+    } else console.warn(`agent ${id}: bad commandExecutionPolicy "${data.commandExecutionPolicy}" — ignored`)
   }
   return agent
 }

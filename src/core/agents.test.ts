@@ -211,3 +211,63 @@ test("out of the box, `general` is the only launchable subagent", () => {
   expect(subs.map(a => a.id)).toEqual(["general"])
   expect(loadAgents(PROJ, HOME, KNOWN).filter(canBePrimary).map(a => a.id).sort()).toEqual(["build", "plan"])
 })
+
+test("frontmatter name becomes the id; the path is only the fallback", () => {
+  write(join(PROJ, ".agents", "agents"), "reviewer/agent.md",
+    "---\nname: reviewer-2\ndescription: d\n---\nBody.")
+  write(join(PROJ, ".agents", "agents"), "plain.md", "---\ndescription: d\n---\nBody.")
+  const agents = loadAgents(PROJ, HOME, KNOWN)
+  expect(agents.some(a => a.id === "reviewer-2")).toBe(true)
+  expect(agents.some(a => a.id === "reviewer/agent")).toBe(false)
+  expect(byId("plain")).toBeDefined()
+})
+
+test("name participates in precedence: project wins by the final id", () => {
+  write(join(HOME, ".agents", "agents"), "team/x.md", "---\nname: shared\n---\nUser.")
+  write(join(PROJ, ".agents", "agents"), "other.md", "---\nname: shared\n---\nProject.")
+  expect(byId("shared").prompt).toBe("Project.")
+})
+
+test("mode: agent is accepted as a synonym of primary", () => {
+  write(join(PROJ, ".agents", "agents"), "a.md", "---\nmode: agent\n---\nA.")
+  const a = byId("a")
+  expect(a.mode).toBe("primary")
+  expect(canBePrimary(a)).toBe(true)
+  expect(canBeSubagent(a)).toBe(false)
+})
+
+test("legacy subagent: true acts as mode: subagent and warns", () => {
+  write(join(PROJ, ".agents", "agents"), "old.md", "---\nsubagent: true\n---\nOld.")
+  const a = byId("old")
+  expect(a.mode).toBe("subagent")
+  expect(canBeSubagent(a)).toBe(true)
+})
+
+test("explicit mode wins over legacy subagent: true (warned, not dropped)", () => {
+  write(join(PROJ, ".agents", "agents"), "both.md", "---\nmode: all\nsubagent: true\n---\nBoth.")
+  expect(byId("both").mode).toBe("all")
+})
+
+test("legacy subagent: false is ignored with a warning", () => {
+  write(join(PROJ, ".agents", "agents"), "off.md", "---\nsubagent: false\n---\nOff.")
+  expect(byId("off").mode).toBeUndefined()
+})
+
+test("commandExecutionPolicy: off denies shell unless permissions declare it", () => {
+  write(join(PROJ, ".agents", "agents"), "ro.md",
+    "---\ncommandExecutionPolicy: off\n---\nRO.")
+  expect(byId("ro").permissions).toEqual({ shell: "deny" })
+
+  write(join(PROJ, ".agents", "agents"), "ask.md",
+    "---\ncommandExecutionPolicy: off\npermissions: {shell: ask}\n---\nAsk.")
+  expect(byId("ask").permissions).toEqual({ shell: "ask" })
+})
+
+test("description strips surrounding quotes", () => {
+  write(join(PROJ, ".agents", "agents"), "q.md",
+    '---\ndescription: "Second opinion, adversarial"\n---\nQ.')
+  write(join(PROJ, ".agents", "agents"), "sq.md",
+    "---\ndescription: 'single quoted'\n---\nSQ.")
+  expect(byId("q").description).toBe("Second opinion, adversarial")
+  expect(byId("sq").description).toBe("single quoted")
+})
