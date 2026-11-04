@@ -36,3 +36,12 @@ Decision: every doc that outgrows ~150 lines is split into a folder of one-topic
 Why: the single files had outgrown anything a reader can hold in one pass (architecture 155 lines and rising; the decision log 233 and rising, with the two MCP features alone adding 17 entries), and an append-only log grows by construction. Splitting by topic makes the file you must read the file you were going to change anyway. Keeping the canonical path as the index is what makes the split safe: `src/core/prompt.ts`, the historical specs under `docs/specs/`, and every old commit already point at `docs/decisions.md`. A stub would give a reader a second place to land and go stale the moment a topic file is added; an index cannot, because adding a topic file forces an edit to it.
 
 Cost if wrong: one more level to navigate, and a small topic file now lives in `docs/architecture/foo.md` while its index sits at `docs/architecture.md` — mildly surprising the first time. If the split ever becomes noise, the same rule permits merging the folder back into its index.
+
+## 2026-11-04 — pipeline tasks run in server-created worktrees
+
+Decision: dispatch protocol spawns every pipeline conversation with `worktree: true` — the agent server cuts a dedicated git worktree + branch per conversation under `/tmp/conversation-worktrees/<conversation_id>/`. `worktree: false` only for tasks that explicitly need the main checkout (local-only docs, uncommitted work), and never two of those in parallel.
+
+Why: parallel tasks in the shared `/projects/lugent` checkout clobber each other (index races, one task's branch switch breaks another's build). A worktree per task also contains pipeline git operations — an uncommitted AGENTS.md edit can no longer be wiped by another conversation, because no two conversations share a directory.
+
+Cost if wrong: the child sees only committed `main` at spawn time, so anything uncommitted or gitignored (`docs/specs/`, `docs/plans/`) is invisible to it — briefings must carry what the task needs inline; parallel PRs touching the same files still conflict at merge time (resolved then, not during execution); worktrees accumulate under `/tmp` (ephemeral — fine).
+
