@@ -1,6 +1,6 @@
 {
   "name": "lugent",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "A minimal OpenCode-style coding agent for the terminal. TypeScript + Bun, zero runtime dependencies.",
   "homepage": "https://luizrgf2.github.io/lugent/",
   "repository": {

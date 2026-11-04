@@ -55,3 +55,11 @@ Why: the code is Bun-native end to end (`bun:sqlite`, `Bun.spawn`, `Bun.Glob`), 
 Cost if wrong: `npm i -g lugent` is useless without Bun installed (`engines` only warns); a forgotten version bump silently ships nothing — the release is a deliberate act, never a side effect of merging. Rotating the token is manual (revoke on npmjs.com, update the secret).
 
 README images are absolute `raw.githubusercontent.com` URLs inside the tarball-less `docs/` tree: npm cannot resolve relative paths, and shipping the PNGs inside the package just to satisfy the GitHub README would inflate the tarball.
+
+## 2026-11-04 — landing page documents each subsystem in a tab, not one long page
+
+Decision: `docs/index.html` gained a `Features` section built as an ARIA tab set — Agents, Subagents, Skills, MCP, Permissions — with one panel per subsystem, plus a real TUI screenshot. The panels are plain HTML in the markup (no JS templating); the tablist is `display:none` until `document.documentElement.classList.add("js")` runs in `<head>`, and every panel starts **visible** so the no-JS view is the full document with headings, not one panel with four missing.
+
+Why: the page is the public face of the repo and only described a pre-agents lugent (72 tests, seven tools, no MCP/agents/skills/subagents). Tabs keep the man-page layout short while letting each subsystem carry its real detail: file layout, frontmatter, field table, built-ins, the depth-1 and parallel rules, the five OAuth steps. Progressive enhancement is what keeps it honest: a crawler, a reader with JS disabled, or a failed script still gets every panel and every screenshot caption.
+
+Cost if wrong: tab state is `history.replaceState`, so a deep link (`#tab-mcp`) works but there is no per-tab history entry to go back through; if the JS bundle ever fails, readers see all five panels stacked — verbose, never wrong. The screenshot is a captured terminal (fixed width, light-on-dark) and will drift as the chrome line changes; it must be re-captured by hand.

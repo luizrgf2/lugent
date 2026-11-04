@@ -144,6 +144,59 @@
   .files td{padding:.35rem 2.2rem .35rem 0;vertical-align:top}
   .files td:first-child{color:var(--amber);white-space:nowrap}
 
+  /* screenshot */
+  .shot{display:block;width:100%;height:auto;border:1px solid var(--rule);background:var(--bg-raise)}
+  .shot-cap{font-size:.78rem;color:var(--dim);margin:.6rem 0 0}
+
+  /* tabs — feature docs */
+  .tabs{margin-top:1.2rem}
+  .tablist{
+    display:none;gap:.3rem;flex-wrap:wrap;
+    border-bottom:1px solid var(--rule);
+    margin-bottom:1.8rem;
+  }
+  .tablist button{
+    font:inherit;font-size:.78rem;font-weight:700;
+    letter-spacing:.12em;text-transform:uppercase;
+    background:none;color:var(--dim);cursor:pointer;
+    border:1px solid transparent;border-bottom:none;
+    border-radius:2px 2px 0 0;
+    padding:.62rem 1.05rem;margin-bottom:-1px;
+  }
+  .js .tablist{display:flex}
+  .tablist button:hover{color:var(--ink);background:var(--bg-raise)}
+  .tablist button[aria-selected="true"]{
+    color:var(--green);background:var(--bg-raise);
+    border-color:var(--rule);border-bottom:1px solid var(--bg-raise);
+  }
+  .tabpanel[hidden]{display:none}
+  .tabpanel:focus-visible{outline:2px solid var(--amber);outline-offset:4px}
+  .tabpanel table.tools,.tabpanel table.files{width:100%}
+  .tabpanel .lead{color:var(--dim)}
+  /* the tab already names the panel; the heading only exists for the no-JS view */
+  .js .tabpanel .panel-title{display:none}
+  .panel-title{
+    font-size:.85rem;font-weight:700;color:var(--green);
+    text-transform:uppercase;letter-spacing:.12em;
+    margin:0 0 .9rem;
+  }
+
+  /* code block inside a panel */
+  pre.snip{
+    background:var(--bg-raise);border:1px solid var(--rule);
+    padding:1rem 1.2rem;font-size:.82rem;line-height:1.7;
+    overflow-x:auto;margin:1rem 0;
+  }
+  pre.snip b{color:var(--green);font-weight:700}
+  pre.snip i{color:var(--amber);font-style:normal}
+  pre.snip s{color:var(--dim);text-decoration:none}
+  .note{
+    border-left:2px solid var(--amber);
+    padding:.2rem 0 .2rem 1rem;
+    font-size:.88rem;color:var(--dim);
+    margin:1.2rem 0;
+  }
+
   footer{
     margin-top:5rem;
     padding-top:1.6rem;
@@ -164,6 +217,7 @@
     html{scroll-behavior:auto}
   }
 </style>
+<script>document.documentElement.classList.add("js")</script>
 </head>
 <body>
 <main class="man">
@@ -192,15 +246,145 @@
   <section id="description">
     <h2>Description</h2>
     <p><b>lugent</b> is an OpenCode-style coding agent that runs in your terminal: a full-screen TUI with live model reasoning, markdown answers and inline permission dialogs, plus a plain ANSI REPL when stdout isn't a TTY.</p>
-    <p>The core is a <b>pure TypeScript library with zero runtime dependencies</b>, built on <b>Bun</b> and developed entirely test-first: 72 tests, including a golden snapshot that pins the system prompt byte-for-byte. It talks to <b>any OpenAI-compatible endpoint</b> (Ollama, LM Studio, OpenRouter, local routers). Seven tools, y/n/a permission prompts, sessions in one SQLite file, markdown skills dropped in a folder.</p>
+    <p>The core is a <b>pure TypeScript library with zero runtime dependencies</b>, built on <b>Bun</b> and developed entirely test-first: 486 tests, including a golden snapshot that pins the system prompt byte-for-byte. It talks to <b>any OpenAI-compatible endpoint</b> (Ollama, LM Studio, OpenRouter, local routers). Eight tools, y/n/a permission prompts, sessions in one SQLite file, markdown skills and agents dropped in a folder, MCP servers over stdio or streamable HTTP.</p>
     <p class="dim">No platform lock-in, no vendored runtime, no magic. Clone it, read it, change it.</p>
     <a class="cta" href="https://github.com/luizrgf2/lugent">github.com/luizrgf2/lugent →</a>
   </section>
 
+  <section id="screenshot">
+    <h2>Screenshot</h2>
+    <img class="shot" src="screenshot.png" width="1552" height="723"
+         alt="lugent TUI: LUGENT splash in block letters, chrome line reading agent build, YOLO and 9router · glm/glm-5.2, the boxed prompt and the slash-command menu" loading="lazy">
+    <p class="shot-cap">A real session: splash, the chrome line (<code>agent build │ YOLO │ provider · model</code>), the boxed prompt and the <code>/</code> command menu. Terminal scrollback is the transcript — the frame below it holds only the live turn.</p>
+  </section>
+
   <section id="synopsis">
     <h2>Synopsis</h2>
-    <div class="synopsis"><span class="bin">bun src/main.ts</span> [<span class="flag">--plain</span>] [<span class="flag">--db</span> <i>path</i>]</div>
-    <p class="dim">Requires Bun 1.3+ and any OpenAI-compatible chat endpoint (<code>/v1</code>). Each provider gets a health check at startup; unreachable ones report <code>OFF</code> and lugent still starts.</p>
+    <div class="synopsis"><span class="bin">npm i -g lugent</span>   # or: bunx lugent   (requires Bun)</div>
+    <div class="synopsis"><span class="bin">lugent</span> [<span class="flag">--plain</span>] [<span class="flag">--db</span> <i>path</i>]</div>
+    <p class="dim">Ships unbuilt TypeScript under a <code>#!/usr/bin/env bun</code> shebang — the package is the same bytes the tests ran against. Requires Bun 1.4+ and any OpenAI-compatible chat endpoint (<code>/v1</code>). Each provider gets a health check at startup; unreachable ones report <code>OFF</code> and lugent still starts.</p>
+  </section>
+
+  <section id="features">
+    <h2>Features</h2>
+    <div class="tabs">
+      <div class="tablist" role="tablist" aria-label="lugent features">
+        <button role="tab" id="tab-agents"     aria-controls="panel-agents"     aria-selected="true"  tabindex="0">Agents</button>
+        <button role="tab" id="tab-subagents"  aria-controls="panel-subagents"  aria-selected="false" tabindex="-1">Subagents</button>
+        <button role="tab" id="tab-skills"     aria-controls="panel-skills"     aria-selected="false" tabindex="-1">Skills</button>
+        <button role="tab" id="tab-mcp"        aria-controls="panel-mcp"        aria-selected="false" tabindex="-1">MCP</button>
+        <button role="tab" id="tab-permissions" aria-controls="panel-permissions" aria-selected="false" tabindex="-1">Permissions</button>
+      </div>
+
+      <div class="tabpanel" role="tabpanel" id="panel-agents" aria-labelledby="tab-agents" tabindex="0">
+        <h3 class="panel-title">Agents</h3>
+        <p class="lead">An agent is a named profile — system prompt, model, tool allowlist, permission overrides — written in markdown. Same file shape as a skill.</p>
+<pre class="snip">.agents/agents/reviewer.md       <s>→</s> id <b>reviewer</b>
+.agents/agents/team/audit.md     <s>→</s> id <b>team/audit</b> (<s>nested path is the id</s>)
+~/.agents/agents/reviewer.md     <s>→</s> user scope; project wins on the same id</pre>
+<pre class="snip"><s>---</s>
+<i>description</i>: Reviews changes read-only
+<i>color</i>: cyan
+<i>model</i>: 9router/glm-5.2
+<i>tools</i>: [read, glob, grep]
+<i>permissions</i>: {shell: ask}
+<s>---</s>
+You are a code reviewer. Report findings with file and line references.</pre>
+        <h3>Fields</h3>
+        <table class="files">
+          <tr><td>description</td><td>Shown by <code>/agent</code>. Absent → none.</td></tr>
+          <tr><td>model</td><td><code>provider/model</code>, both required — the provider must exist in the config. Absent → inherit the session's.</td></tr>
+          <tr><td>tools</td><td>Ids sent to the model; anything else is invisible to it. A <code>tools</code> key that parses to nothing fails closed to <b>no</b> tools, with a warning. Absent → all tools.</td></tr>
+          <tr><td>permissions</td><td>Per-tool <code>allow</code> / <code>ask</code> / <code>deny</code>; <code>deny</code> also removes the tool. Absent → tool default.</td></tr>
+          <tr><td>mode</td><td><code>primary</code> │ <code>subagent</code> │ <code>all</code> — who may launch this agent. Absent → <code>primary</code>.</td></tr>
+          <tr><td>color</td><td>TUI display color (ink name or <code>#rrggbb</code>). Display-only.</td></tr>
+        </table>
+        <h3>Built-ins, always present</h3>
+        <table class="tools">
+          <tr><td>build</td><td class="allow">primary</td><td>The base system prompt. The startup default — always a way back (<code>/agent build</code>).</td></tr>
+          <tr><td>plan</td><td class="allow">primary</td><td>Explore and design; <code>edit</code>/<code>write</code> denied, shell still permission-gated.</td></tr>
+          <tr><td>general</td><td class="ask">subagent</td><td>General-purpose worker with a fresh context. Delegation works with zero files.</td></tr>
+        </table>
+        <p class="note">Built-ins load <b>first</b>, so a file with the same id overrides one without removing it — drop <code>.agents/agents/plan.md</code> to write your own. A file agent's body <b>replaces</b> the base prompt; <code>AGENTS.md</code> and the skills advertisement are still added on top. Switching mid-session keeps history and applies the new prompt, model and toolset from the next turn.</p>
+        <p><code>/agent</code> lists and switches. <code>defaultAgent</code> picks the startup agent (<code>build</code> by default; an unknown id warns and falls back).</p>
+      </div>
+
+      <div class="tabpanel" role="tabpanel" id="panel-subagents" aria-labelledby="tab-subagents" tabindex="0">
+        <h3 class="panel-title">Subagents</h3>
+        <p class="lead">A <code>mode: subagent</code> agent is not a persona you switch into — it is a worker the model launches. During a turn the model calls the <code>subagent</code> tool with <code>{ agent, prompt }</code>; lugent starts a <b>child session</b> (same store, same process) that runs with the subagent's own prompt, model and tools, and the child's final message returns as the tool result.</p>
+<pre class="snip"><s>---</s>
+<i>description</i>: Probes one file and summarizes it
+<i>mode</i>: subagent
+<i>tools</i>: [read]
+<s>---</s>
+You are a probe. Read exactly one file and summarize it in three lines.</pre>
+        <table class="files">
+          <tr><td>Discovery</td><td>The model sees a <code># Subagents</code> section of the prompt (id + description), rendered only when at least one is launchable — same mechanism as <code># Skills</code>.</td></tr>
+          <tr><td>Fresh context</td><td>The child shares <b>no</b> history: the prompt must be self-contained.</td></tr>
+          <tr><td>Parallel</td><td>Several <code>subagent</code> calls in one tool round run at the same time.</td></tr>
+          <tr><td>Depth 1</td><td>A child never gets the <code>subagent</code> tool or the catalog, so it cannot launch a grandchild.</td></tr>
+          <tr><td>Hidden</td><td>Children are persisted with a <code>parent</code> link but stay out of <code>/resume</code> and the TUI picker; only the final message returns.</td></tr>
+          <tr><td>Not in /agent</td><td><code>mode: subagent</code> agents are launch targets, not session personas.</td></tr>
+        </table>
+        <p class="note">The tool defaults to <code>ask</code>, and an agent's <code>tools</code>/<code>permissions</code> can allow, ask or deny <code>subagent</code> by name like any other tool.</p>
+      </div>
+
+      <div class="tabpanel" role="tabpanel" id="panel-skills" aria-labelledby="tab-skills" tabindex="0">
+        <h3 class="panel-title">Skills</h3>
+        <p class="lead">Drop markdown files in <code>.agents/skills/</code> — nested dir or flat. Both scopes load (user <code>~/.agents/skills/</code> + project <code>.agents/skills/</code>); on the same id the project wins.</p>
+<pre class="snip">.agents/skills/git-release/SKILL.md   <s>→</s> id <b>git-release</b>
+.agents/skills/review.md              <s>→</s> id <b>review</b></pre>
+<pre class="snip"><s>---</s>
+<i>name</i>: Git Release
+<i>description</i>: Prepare and publish releases
+<s>---</s>
+Step 1: ...</pre>
+        <p>A skill with a <code>description</code> in its frontmatter is <b>advertised</b> in the system prompt (id, name, description only). The model loads the full body on demand through the <code>skill</code> tool — skill content never bloats the prompt upfront.</p>
+        <table class="files">
+          <tr><td>Let the model pick</td><td>When your request matches an advertised description ("prepare a release"), it calls <code>skill git-release</code> itself — you see the <code>▸ skill</code> line.</td></tr>
+          <tr><td>Force one</td><td>Mention the id in your message ("use skill git-release to …").</td></tr>
+          <tr><td>Browse</td><td>TUI <code>/skills</code> lists what is loaded (read-only); <code>/skills</code> in the plain REPL lists ids.</td></tr>
+        </table>
+        <p class="note">Toggling skills on/off is not implemented — every loaded skill is active in every session (selector design deferred).</p>
+      </div>
+
+      <div class="tabpanel" role="tabpanel" id="panel-mcp" aria-labelledby="tab-mcp" tabindex="0">
+        <h3 class="panel-title">MCP servers</h3>
+        <p class="lead">lugent speaks the Model Context Protocol over two transports, declared in the <code>mcp</code> map of <code>lugent.json</code>.</p>
+<pre class="snip">"mcp": {
+  "local-one":  { "command": ["npx", "-y", "some-mcp@latest"] },
+  "remote-one": { "url": "https://host/mcp",
+                  "headers": { "X-Tenant": "{env:TENANT}" } }
+}</pre>
+        <table class="tools">
+          <tr><td>local</td><td class="allow">stdio</td><td>Spawns a child process, newline-delimited JSON-RPC over stdio (chrome-devtools, browsermcp).</td></tr>
+          <tr><td>remote</td><td class="allow">http</td><td>Streamable HTTP: one POST per JSON-RPC message, <code>Mcp-Session-Id</code>, SSE responses, <code>202</code> notifications. <code>http</code> is an alias.</td></tr>
+        </table>
+        <p>At startup every enabled server connects in parallel and its tools are bridged as <code>&lt;server&gt;_&lt;tool&gt;</code>. A server that fails is reported (<code>mcp: name: reason</code>) and <b>never stops lugent</b>. A local child that dies later flips to <code>failed</code> on its own.</p>
+        <h3>OAuth for remote servers</h3>
+        <p>A remote server refusing the configured headers answers <code>401</code> with a discovery hint. lugent does not fail it — it reports <b><code>auth_required</code></b>, because the fix is interactive. Pick <code>authenticate</code> (<code>/mcp auth &lt;name&gt;</code> in the plain REPL):</p>
+        <table class="files">
+          <tr><td>1. discover</td><td>Protected-resource + authorization-server metadata (RFC 9728 / RFC 8414), <b>https only</b>.</td></tr>
+          <tr><td>2. register</td><td>Dynamic client registration (RFC 7591), once per server; the <code>client_id</code> is reused.</td></tr>
+          <tr><td>3. consent</td><td>Loopback listener on <code>127.0.0.1:48762/oauth/callback</code>, PKCE S256, URL printed as fallback and opened in the browser.</td></tr>
+          <tr><td>4. exchange</td><td>Waits up to 5 min, always sends <code>resource</code> so the token is bound to that endpoint, verifies <code>iss</code>.</td></tr>
+          <tr><td>5. store</td><td><code>~/.local/share/lugent/mcp-oauth.json</code>, mode <code>0600</code>, then reconnects.</td></tr>
+        </table>
+        <p>Tokens are bound to the URL that issued them, so a project <code>lugent.json</code> shadowing a global server name never inherits the global credential. Refresh is proactive (60 s before expiry) and forced once on a mid-session <code>401</code>; a rejected refresh drops the tokens back to <code>auth_required</code>. <code>logout</code> revokes at the server when it offers revocation, then deletes the local copy.</p>
+        <p><code>/mcp</code> lists every server with its status — <code>connected</code> (tool count), <code>connecting</code>, <code>failed</code> (error), <code>auth_required</code>, <code>disabled</code> — and lets you act on one: reconnect, disable, enable, authenticate, logout. Enabling and disabling is <b>session-scoped</b>: lugent never rewrites <code>lugent.json</code>, because a turn must not silently edit a file that can hold secrets.</p>
+        <p class="note"><b>Trust note:</b> a project <code>lugent.json</code> can declare local servers, whose <code>command</code> is spawned at startup with no prompt — the same trust channel as a project <code>AGENTS.md</code>, skills or agents. Read a repo's <code>mcp</code> block before running lugent in it. Put tokens in <code>{env:VAR}</code>, never inline. MCP tools are untrusted third parties, so they default to <code>ask</code>.</p>
+      </div>
+
+      <div class="tabpanel" role="tabpanel" id="panel-permissions" aria-labelledby="tab-permissions" tabindex="0">
+        <h3 class="panel-title">Permissions</h3>
+        <p class="lead">Every tool has a default. During a turn the model may trigger an inline dialog: answer <code>y</code> (once), <code>n</code> (deny — the model sees the refusal), or <code>a</code> (always, this session, for that tool + resource). Anything else — <b>including Enter</b> — denies.</p>
+        <h3>Extra guard</h3>
+        <p>Any resource outside the project root (absolute path, <code>..</code>, <code>~</code>) forces an <code>ask</code> even for <code>allow</code> tools, unless already granted for the session.</p>
+        <h3>Yolo mode</h3>
+        <p>TUI only — the plain REPL has no equivalent. <code>/permissions</code> → <code>yolo</code> auto-approves <b>every</b> tool call, no dialogs, including outside-project paths. The chrome line shows a red <code>YOLO</code>. The choice persists to the global config (<code>permissionMode</code>) and a project <code>lugent.json</code> overrides it while present. Yolo never modifies the per-session <code>a</code> grants; <code>/permissions</code> → <code>normal</code> turns it off.</p>
+        <p class="note">An agent's <code>permissions</code> override replaces the tool default — but a session <code>always</code> grant still wins, and the outside-project guard still forces an ask.</p>
+      </div>
+    </div>
   </section>
 
   <section id="options">
@@ -211,27 +395,31 @@
     </table>
     <h3>Slash commands</h3>
     <table class="files">
-      <tr><td>/model [provider] [model]</td><td>Switch provider and model; lists live models when called bare.</td></tr>
-      <tr><td>/skills</td><td>Browse loaded skills.</td></tr>
-      <tr><td>/resume</td><td>Pick a past session of this directory and continue it.</td></tr>
+      <tr><td>/model [provider] [model]</td><td>Two-level picker (provider → live model list). Bare call lists models; the choice is pinned to the session, so <code>/resume</code> brings it back.</td></tr>
+      <tr><td>/agent [id]</td><td>Agent picker; the chosen profile's prompt, model and toolset apply from the next turn.</td></tr>
+      <tr><td>/skills</td><td>Browse loaded skills (read-only).</td></tr>
+      <tr><td>/mcp</td><td>MCP servers with status; reconnect, disable, enable, <code>authenticate</code>, <code>logout</code>.</td></tr>
+      <tr><td>/resume</td><td>Pick a past session of this directory and continue it — not a fork.</td></tr>
       <tr><td>/permissions</td><td>Toggle normal/yolo (auto-approve every tool call).</td></tr>
       <tr><td>/clear</td><td>Start a fresh session.</td></tr>
       <tr><td>/exit</td><td>Quit.</td></tr>
     </table>
+    <p class="dim">Typing <code>/</code> in the composer opens an autocomplete box — it filters as you type, ↑/↓ move, Enter or Tab completes. In <code>--plain</code> mode the same actions take arguments: <code>/mcp disable echo</code>, <code>/mcp auth takeflow</code>, <code>/model ollama qwen3.5:14b</code>.</p>
   </section>
 
   <section id="tools">
     <h2>Tools</h2>
     <table class="tools">
-      <tr><td>read</td><td class="allow">allow</td><td>File with numbered lines or directory listing</td></tr>
-      <tr><td>glob</td><td class="allow">allow</td><td>Glob file search, limit 100</td></tr>
-      <tr><td>grep</td><td class="allow">allow</td><td>Content search, regex or literal</td></tr>
-      <tr><td>edit</td><td class="ask">ask</td><td>Unique-match string replace, returns diff</td></tr>
-      <tr><td>write</td><td class="ask">ask</td><td>Create or replace a file</td></tr>
-      <tr><td>shell</td><td class="ask">ask</td><td>bash (cmd on Windows), 2min default timeout</td></tr>
+      <tr><td>read</td><td class="allow">allow</td><td>File with numbered lines (offset/limit) or directory listing; rejects binary</td></tr>
+      <tr><td>glob</td><td class="allow">allow</td><td>Glob file search (<code>**/*.ts</code>), limit 100</td></tr>
+      <tr><td>grep</td><td class="allow">allow</td><td>Content search, <code>path:line:preview</code>, regex or literal, skips binary</td></tr>
+      <tr><td>edit</td><td class="ask">ask</td><td>Unique-match string replace (<code>replaceAll</code> opt-in), returns diff</td></tr>
+      <tr><td>write</td><td class="ask">ask</td><td>Create or replace a file, creates parent dirs</td></tr>
+      <tr><td>shell</td><td class="ask">ask</td><td><code>bash -c</code> (<code>cmd /c</code> on Windows), 2min default timeout, <code>background: true</code></td></tr>
       <tr><td>skill</td><td class="allow">allow</td><td>Load a skill body by id</td></tr>
+      <tr><td>subagent</td><td class="ask">ask</td><td>Launch a subagent in a child session (fresh context); returns the child's final message</td></tr>
     </table>
-    <p class="dim" style="margin-top:1rem">Any resource outside the project root forces an <span class="ask">ask</span> even for allow tools.</p>
+    <p class="dim" style="margin-top:1rem">Any resource outside the project root forces an <span class="ask">ask</span> even for allow tools. MCP tools are added on top as <code>&lt;server&gt;_&lt;tool&gt;</code> and always default to <span class="ask">ask</span>.</p>
   </section>
 
   <section id="examples">
@@ -242,27 +430,32 @@
   <section id="files">
     <h2>Files</h2>
     <table class="files">
-      <tr><td>lugent.json</td><td>Project config (wins when present).</td></tr>
-      <tr><td>~/.config/lugent/config.json</td><td>Global config fallback. Providers, default model, <code>{env:VAR}</code> key substitution.</td></tr>
+      <tr><td>lugent.json</td><td>Project config (wins for <code>providers</code>; merges for <code>mcp</code>, agents, skills).</td></tr>
+      <tr><td>~/.config/lugent/config.json</td><td>Global config fallback. Providers, default model/agent, <code>permissionMode</code>, <code>{env:VAR}</code> key substitution.</td></tr>
       <tr><td>~/.local/share/lugent/db.sqlite</td><td>Sessions, messages, permission grants in one SQLite file. <span class="dim">(Windows: %APPDATA%\lugent\db.sqlite)</span></td></tr>
+      <tr><td>~/.local/share/lugent/mcp-oauth.json</td><td>MCP OAuth tokens, mode <code>0600</code>, keyed by the URL that issued them.</td></tr>
       <tr><td>.agents/skills/</td><td>Markdown skills, project and user scope; same id → project wins.</td></tr>
+      <tr><td>.agents/agents/</td><td>Markdown agents; nested path is the id; same id → project wins, built-ins load first.</td></tr>
+      <tr><td>AGENTS.md</td><td>Project instructions injected into the system prompt; the chrome line shows <code>§ AGENTS.md loaded</code>.</td></tr>
     </table>
   </section>
 
   <section id="diagnostics">
     <h2>Diagnostics</h2>
     <p><span class="flag">Ctrl+C</span> once aborts the running turn (and denies a pending permission); twice exits. Provider reported <code>OFF</code> means the health check (<code>GET /models</code>, 8s timeout) failed: check that <code>baseUrl</code> includes <code>/v1</code>.</p>
+    <p>Runaway guards: a model stream ends after 10 min even with keep-alive bytes; an MCP server that never stops paginating fails to connect instead of hanging startup. Provider failures (429/5xx, stalled streams, 15s connect cap) retry with backoff (10 s, doubling, 60 s cap) and surface in the UI — <span class="flag">Esc</span> stops the loop. Client errors (401, 400) fail immediately.</p>
+    <p><span class="flag">PageUp/PageDown</span> (or Shift+↑/↓) page the live frame; <span class="flag">Home/End</span> jump to its top/tail; scrolling up while the answer streams pins the view. Finished turns live in the terminal's own scrollback, so the mouse wheel and click-drag selection work natively.</p>
   </section>
 
   <section id="see-also">
     <h2>See Also</h2>
-    <p><a href="https://github.com/luizrgf2/lugent">github.com/luizrgf2/lugent</a> — source, README, architecture docs. <span class="dim">That's the whole manual.</span></p>
-    <a class="cta" href="https://github.com/luizrgf2/lugent">Clone it →</a>
+    <p><a href="https://github.com/luizrgf2/lugent">github.com/luizrgf2/lugent</a> — source, README, architecture docs. <a href="https://www.npmjs.com/package/lugent">npmjs.com/package/lugent</a> — <code>npm i -g lugent</code>. <span class="dim">That's the whole manual.</span></p>
+    <a class="cta" href="https://www.npmjs.com/package/lugent">Install →</a>
   </section>
 
   <footer>
-    <span>lugent 0.1.0</span>
-    <span><a href="https://github.com/luizrgf2/lugent">source</a> · terminal-native, by design</span>
+    <span>lugent 0.1.2</span>
+    <span><a href="https://github.com/luizrgf2/lugent">source</a> · <a href="https://www.npmjs.com/package/lugent">npm</a> · terminal-native, by design</span>
   </footer>
 
 </main>
@@ -275,17 +468,23 @@
   // one authored moment: the session types itself, then loops
   var script = [
     {c:'p', t:'$ '},
-    {c:'u', t:'bun src/main.ts', type:true},
+    {c:'u', t:'lugent', type:true},
     {c:'g', t:''},
-    {c:'g', t:'┌─ lugent ─────────────────┐'},
-    {c:'g', t:'│ session ses_676f…        │'},
-    {c:'g', t:'│ 9router · glm/glm-5.2    │'},
-    {c:'g', t:'└──────────────────────────┘'},
+    {c:'g', t:'                                          ██▄'},
+    {c:'g', t:'                                           ▀██▄'},
+    {c:'g', t:'                                             ▄███▀ ●'},
+    {c:'g', t:'                                          ▄███▀'},
+    {c:'g', t:'                                       ▄▄▄▄▄▄▄▄▄▄▄▄'},
+    {c:'g', t:'                                          LUGENT'},
     {c:'g', t:''},
     {c:'u', t:'> read src/core/loop.ts', type:true},
     {c:'g', t:'  ▸ read  src/core/loop.ts'},
-    {c:'g', t:'  ⠙ thinking…'},
+    {c:'g', t:'  ⠙ working…          build │ 9router · glm/glm-5.2'},
     {c:'g', t:'  done — 41 lines, 0 dependencies'},
+
+    {c:'g', t:''},
+    {c:'u', t:'> /agent plan', type:true},
+    {c:'g', t:'  agent plan · edit,write denied · next turn uses it'},
 
     {c:'g', t:''},
     {c:'u', t:'> /exit', type:true}
@@ -301,50 +500,96 @@
     script.forEach(function(l){ term.appendChild(span(l.c, l.t)); });
   }
 
-  if(reduce){ renderAll(); return; }
+  if(reduce){ renderAll(); } else { animate(); }
 
-  var cursor = document.createElement('span');
-  cursor.className = 'tcar';
-  cursor.setAttribute('aria-hidden','true');
+  function animate(){
+    var cursor = document.createElement('span');
+    cursor.className = 'tcar';
+    cursor.setAttribute('aria-hidden','true');
 
-  var started = false;
-  function play(){
-    term.textContent = '';
-    term.appendChild(cursor);
-    var li = 0;
-    function nextLine(){
-      if(li >= script.length){
-        setTimeout(play, 6000);
-        return;
+    var started = false;
+    function play(){
+      term.textContent = '';
+      term.appendChild(cursor);
+      var li = 0;
+      function nextLine(){
+        if(li >= script.length){
+          setTimeout(play, 6000);
+          return;
+        }
+        var l = script[li++];
+        if(l.type){
+          var s = span(l.c, '');
+          term.insertBefore(s, cursor);
+          var i = 0;
+          (function typeChar(){
+            if(i < l.t.length){
+              s.textContent = l.t.charAt(i++);
+              setTimeout(typeChar, 34 + Math.random()*46);
+            } else {
+              s.textContent = l.t + '\n';
+              setTimeout(nextLine, l.t.indexOf('/exit') === 0 ? 800 : 420);
+            }
+          })();
+        } else {
+          term.insertBefore(span(l.c, l.t), cursor);
+          setTimeout(nextLine, 160);
+        }
       }
-      var l = script[li++];
-      if(l.type){
-        var s = span(l.c, '');
-        term.insertBefore(s, cursor);
-        var i = 0;
-        (function typeChar(){
-          if(i < l.t.length){
-            s.textContent = l.t.charAt(i++);
-            setTimeout(typeChar, 34 + Math.random()*46);
-          } else {
-            s.textContent = l.t + '\n';
-            setTimeout(nextLine, l.t.indexOf('/exit') === 0 ? 800 : 420);
-          }
-        })();
-      } else {
-        term.insertBefore(span(l.c, l.t), cursor);
-        setTimeout(nextLine, 160);
-      }
+      nextLine();
     }
-    nextLine();
+
+    if('IntersectionObserver' in window){
+      var io = new IntersectionObserver(function(es){
+        if(es[0].isIntersecting && !started){ started = true; io.disconnect(); play(); }
+      },{threshold:.2});
+      io.observe(term);
+    } else { play(); }
+  }
+})();
+
+/* tabs — documented features, keyboard and ARIA complete */
+(function(){
+  var list = document.querySelector('.tablist');
+  if(!list) return;
+  var tabs = Array.prototype.slice.call(list.querySelectorAll('[role="tab"]'));
+
+  function panelOf(tab){ return document.getElementById(tab.getAttribute('aria-controls')); }
+
+  function select(tab, focus){
+    tabs.forEach(function(t){
+      var on = t === tab;
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      t.tabIndex = on ? 0 : -1;
+      var p = panelOf(t);
+      if(p) p.hidden = !on;
+    });
+    try {
+      // replaceState, not location.hash — a hash assignment scrolls the page
+      // to the element with that id, which would yank the viewport to the tabs
+      history.replaceState(null, '', '#tab-' + tab.id.replace(/^tab-/, ''));
+    } catch(e){}
+    if(focus) tab.focus();
   }
 
-  if('IntersectionObserver' in window){
-    var io = new IntersectionObserver(function(es){
-      if(es[0].isIntersecting && !started){ started = true; io.disconnect(); play(); }
-    },{threshold:.2});
-    io.observe(term);
-  } else { play(); }
+  tabs.forEach(function(tab){
+    tab.addEventListener('click', function(){ select(tab, false); });
+    tab.addEventListener('keydown', function(ev){
+      var i = tabs.indexOf(tab), next = null;
+      if(ev.key === 'ArrowRight') next = tabs[(i + 1) % tabs.length];
+      else if(ev.key === 'ArrowLeft') next = tabs[(i - 1 + tabs.length) % tabs.length];
+      else if(ev.key === 'Home') next = tabs[0];
+      else if(ev.key === 'End') next = tabs[tabs.length - 1];
+      if(next){ ev.preventDefault(); select(next, true); }
+    });
+  });
+
+  // deep link: #tab-mcp opens that panel; otherwise the first tab wins.
+  // Every panel starts visible in the markup (no-JS), so this init is what
+  // collapses them down to one.
+  var m = /^#tab-([a-z]+)$/.exec(location.hash || '');
+  var wanted = m && document.getElementById('tab-' + m[1]);
+  select(wanted || tabs[0], false);
 })();
 </script>
 </body>
