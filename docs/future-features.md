@@ -56,11 +56,14 @@ Loader: `src/core/agents.ts`; usage and fields: `README.md` § "Agents".
 and the `subagent` tool (`{agent, prompt}`, depth 1, parallel launches, children hidden
 from `/resume`). Implementation: `src/core/loop.ts` (spawn = another `runTurn`) +
 `src/core/tools/subagent.ts`; usage: `README.md` § "Agents" → Subagents.
+**Shipped 2026-11-03: live view** — `ctrl+1..9` child viewer in the TUI (live status
+on the tool line, read-only child transcript, rehydrated after `/resume`);
+`src/cli/tui/child-viewer.tsx`; `docs/architecture/tui.md` § Subagent viewer.
 
 | Feature | Why deferred | Add when |
 | --- | --- | --- |
 | Background subagents (fire-and-forget, no awaiting the child) | The `subagent` tool call awaits its child; a background mode needs a lifecycle outside a single tool call | Users want to keep working while a review runs |
-| Child browser (inspect a past child session's transcript from the parent) | Children are persisted but hidden; no UI lists them | Debugging "what did the subagent actually do" becomes common |
+| `/subagents` browser (list and open **any** session's children across turns) | The ctrl+N viewer covers only the current turn's children (plus the resumed session's); no UI lists children of arbitrary past sessions | Debugging old subagent runs becomes common enough to deserve a command |
 | Subagent depth > 1 (a child launching a child) | Depth 1 closes the recursion/cost loop; hierarchical tasks flatten fine | A real task cannot be expressed without grandchildren |
 | Hidden maintenance agents (title, summary generation) | Cosmetic | Session lists get unwieldy |
 | Steps limit (remove tools on final step, force text answer) | Loop discipline not yet a problem | Agents loop excessively on hard tasks |

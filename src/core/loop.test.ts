@@ -452,6 +452,140 @@ test("subagent: unknown or primary agent is an error result, never a throw", asy
   expect(results.some(c => c.includes("is not a subagent"))).toBe(true)
 })
 
+test("subagent: stream hooks forward child activity keyed by child session", async () => {
+  const reviewer: Agent = { id: "reviewer", mode: "subagent", prompt: "You are REVIEWER.", tools: ["echo"] }
+  const starts: Array<[string, string]> = []
+  const events: Array<{ sid: string; item: { kind: string; text: string; tool?: string } }> = []
+  const ends: string[] = []
+  let parentRounds = 0
+  let childRounds = 0
+  const provider = {
+    chat: async (a: any) => {
+      const sys: string = a.messages[0].content
+      if (sys.includes("You are REVIEWER.")) {
+        childRounds++
+        if (childRounds > 1) return { content: "child final", toolCalls: [] }
+        a.onReasoning?.("looking…")
+        a.onToken?.("child ")
+        a.onToken?.("answer")
+        return { content: "", toolCalls: [{ id: "c1", name: "echo", args: { path: "b.txt" } }] }
+      }
+      parentRounds++
+      if (parentRounds === 1) return { content: "", toolCalls: [{ id: "t1", name: "subagent", args: { agent: "reviewer", prompt: "review a.txt" } }] }
+      return { content: "parent done", toolCalls: [] }
+    },
+  }
+  await runTurn(deps(provider, {
+    tools: [...tools, subagentTool], agents: [reviewer],
+    onSubagentStart: (sid, aid) => starts.push([sid, aid]),
+    onSubagentEvent: (sid, item) => events.push({ sid, item }),
+    onSubagentEnd: sid => ends.push(sid),
+  }), sessionId, "go")
+  expect(starts.length).toBe(1)
+  expect(starts[0][1]).toBe("reviewer")
+  const sid = starts[0][0]
+  expect(sid).toMatch(/^ses_/)
+  expect(store.children(sessionId).some(k => k.id === sid)).toBe(true)   // sid is the real child session
+  const kinds = events.map(e => e.item.kind)
+  expect(kinds).toContain("reasoning")
+  expect(kinds).toContain("assistant")
+  expect(events.every(e => e.sid === sid)).toBe(true)                    // every event carries the child key
+  const toolEvent = events.find(e => e.item.kind === "tool")
+  expect(toolEvent?.item).toEqual({ kind: "tool", text: "b.txt", tool: "echo" })
+  expect(ends).toEqual([sid])                                            // exactly one end, after everything
+})
+
+test("subagent: child assistant text accumulates within a round and resets on the next", async () => {
+  const reviewer: Agent = { id: "reviewer", mode: "subagent", prompt: "You are REVIEWER.", tools: ["echo"] }
+  const texts: string[] = []
+  let childRounds = 0
+  let parentRounds = 0
+  const provider = {
+    chat: async (a: any) => {
+      const sys: string = a.messages[0].content
+      if (sys.includes("You are REVIEWER.")) {
+        childRounds++
+        a.onToken?.(`round${childRounds} `)
+        a.onToken?.("text")
+        if (childRounds === 1) return { content: "", toolCalls: [{ id: "c1", name: "echo", args: { path: "b.txt" } }] }
+        return { content: "round2 text", toolCalls: [] }
+      }
+      parentRounds++
+      if (parentRounds === 1) return { content: "", toolCalls: [{ id: "t1", name: "subagent", args: { agent: "reviewer", prompt: "x" } }] }
+      return { content: "parent done", toolCalls: [] }
+    },
+  }
+  await runTurn(deps(provider, {
+    tools: [...tools, subagentTool], agents: [reviewer],
+    onSubagentEvent: (sid, item) => { if (item.kind === "assistant") texts.push(item.text) },
+  }), sessionId, "go")
+  // With per-round reset the round-2 stream restarts from empty: its first
+  // delta is "round2 ", never "round1 text" + "round2 " concatenated.
+  expect(texts).toEqual(["round1 ", "round1 text", "round2 ", "round2 text"])
+})
+
+test("subagent: concurrent children interleave events without cross-talk", async () => {
+  const reviewer: Agent = { id: "reviewer", mode: "subagent", prompt: "You are REVIEWER." }
+  const auditor: Agent = { id: "auditor", mode: "subagent", prompt: "You are AUDITOR." }
+  const byAgent = new Map<string, string[]>()
+  const starts: Array<[string, string]> = []
+  const ends: string[] = []
+  let parentRounds = 0
+  const provider = {
+    chat: async (a: any) => {
+      const sys: string = a.messages[0].content
+      const which = sys.includes("REVIEWER") ? "reviewer" : sys.includes("AUDITOR") ? "auditor" : ""
+      if (which) {
+        await new Promise(r => setTimeout(r, 20))
+        a.onToken?.(`text-from-${which}`)
+        return { content: `done:${which}`, toolCalls: [] }
+      }
+      parentRounds++
+      if (parentRounds === 1) return { content: "", toolCalls: [
+        { id: "t1", name: "subagent", args: { agent: "reviewer", prompt: "a" } },
+        { id: "t2", name: "subagent", args: { agent: "auditor", prompt: "b" } },
+      ] }
+      return { content: "parent done", toolCalls: [] }
+    },
+  }
+  await runTurn(deps(provider, {
+    tools: [...tools, subagentTool], agents: [reviewer, auditor],
+    onSubagentStart: (sid, aid) => starts.push([sid, aid]),
+    onSubagentEvent: (sid, item) => { if (item.kind === "assistant") byAgent.set(sid, [...(byAgent.get(sid) ?? []), item.text]) },
+    onSubagentEnd: sid => ends.push(sid),
+  }), sessionId, "go")
+  expect(starts.map(s => s[1]).sort()).toEqual(["auditor", "reviewer"])
+  expect(new Set(starts.map(s => s[0])).size).toBe(2)      // two distinct child keys
+  expect(ends.sort()).toEqual(starts.map(s => s[0]).sort()) // both ended, keyed by their own sid
+  const collected = [...byAgent.entries()].map(([sid, texts]) => ({ sid, texts }))
+  expect(collected.length).toBe(2)
+  for (const c of collected) expect(c.texts.join("")).toMatch(/^text-from-(reviewer|auditor)$/)
+})
+
+test("subagent: onSubagentEnd fires even when the child aborts", async () => {
+  const reviewer: Agent = { id: "reviewer", mode: "subagent", prompt: "You are REVIEWER." }
+  const ac = new AbortController()
+  const ends: string[] = []
+  let parentRounds = 0
+  const provider = {
+    chat: async (a: any) => {
+      const sys: string = a.messages[0].content
+      if (sys.includes("REVIEWER")) {
+        ac.abort()   // abort mid-child
+        return { content: "half", toolCalls: [] }
+      }
+      parentRounds++
+      if (parentRounds === 1) return { content: "", toolCalls: [{ id: "t1", name: "subagent", args: { agent: "reviewer", prompt: "x" } }] }
+      return { content: "parent done", toolCalls: [] }
+    },
+  }
+  await runTurn(deps(provider, {
+    tools: [...tools, subagentTool], agents: [reviewer], signal: ac.signal,
+    onSubagentEnd: sid => ends.push(sid),
+  }), sessionId, "go")
+  expect(ends.length).toBe(1)
+})
+
 test("subagent: an agent with a configured model runs on providerFor, not the parent", async () => {
   const pinned: Agent = { id: "pinned", mode: "subagent", model: { provider: "alt", model: "m2" }, prompt: "You are PINNED." }
   const built: Array<[string, string]> = []

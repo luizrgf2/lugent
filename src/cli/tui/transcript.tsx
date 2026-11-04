@@ -5,7 +5,7 @@ import { glyph } from "../ui"
 import { LOGO_ROWS, WORDMARK_ROWS, WORDMARK_SPLIT, logoHex } from "../logo"
 import type { Message } from "../../core/types"
 
-export type TItem = { kind: "user" | "reasoning" | "tool" | "assistant" | "error" | "system" | "logo"; text: string; tool?: string }
+export type TItem = { kind: "user" | "reasoning" | "tool" | "assistant" | "error" | "system" | "logo"; text: string; tool?: string; sub?: string }
 
 /** Map stored history to transcript items on resume (reasoning is never persisted). */
 export function itemsFromHistory(messages: Message[]): TItem[] {
