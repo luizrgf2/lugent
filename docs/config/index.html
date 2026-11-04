@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Providers, defaults and keys. The project file wins for providers; mcp, agents and skills merge both.">
+<meta name="theme-color" content="#101010">
+<title>Configuration — lugent</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+
+<header class="hdr">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">
+      <svg viewBox="0 0 120 120" role="img">
+        <path d="M30 26 L66 60 L30 94" fill="none" stroke="#00f5a0" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M30 106 L92 106" fill="none" stroke="#00f5a0" stroke-width="13" stroke-linecap="round"/>
+      </svg>
+    </span>
+    <a class="wordmark" href="../">lugent</a>
+    <span class="chip">v0.1.3</span>
+  </div>
+
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="nav" aria-label="Menu">≡</button>
+
+  <nav class="nav" id="nav" aria-label="Main">
+    <a href="../getting-started/" aria-current="page">Documentation</a>
+    <a href="https://github.com/luizrgf2/lugent">GitHub</a>
+    <a href="https://www.npmjs.com/package/lugent">npm</a>
+  </nav>
+</header>
+
+<div class="docs">
+    <aside class="side" data-open="false">
+      <button class="side-toggle" type="button" aria-expanded="false">Documentation contents</button>
+      <div class="side-body">
+        <div class="side-group">
+          <p class="side-label">INSTALL</p>
+          <p class="side-install">npm i -g lugent</p>
+        </div>
+        <div class="side-group">
+          <p class="side-label">GETTING STARTED</p>
+          <a href="../getting-started/">Overview</a>
+          <a href="../config/" aria-current="page">Configuration</a>
+          <a href="../usage/">Usage & commands</a>
+        </div>
+        <div class="side-group">
+          <p class="side-label">SUBSYSTEMS</p>
+          <a href="../agents/">Agents</a>
+          <a href="../subagents/">Subagents</a>
+          <a href="../skills/">Skills</a>
+          <a href="../mcp/">MCP servers</a>
+          <a href="../permissions/">Permissions</a>
+        </div>
+        <div class="side-group">
+          <p class="side-label">SESSIONS</p>
+          <a href="../sessions/">Managing sessions</a>
+          <a href="../history/">Resume & history</a>
+          <a href="../data/">Data & storage</a>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="../getting-started/">docs</a><span aria-hidden="true">/</span><span aria-current="page">config</span>
+      </nav>
+
+      <div class="doc-head">
+        <h1 class="doc">Configuration</h1>
+        <p>Providers, defaults and keys. The project file wins for providers; mcp, agents and skills merge both.</p>
+      </div>
+
+<section class="sec">
+  <h2>Where it reads from</h2>
+  <p>For <code>providers</code>, <code>defaultProvider</code>, <code>defaultModel</code> and <code>defaultAgent</code> lugent reads the <strong>first file found</strong>: no merging.</p>
+  <dl class="table">
+    <div class="row"><dt>lugent.json</dt><dd>Project root. Wins when present.</dd></div>
+    <div class="row"><dt>~/.config/lugent/config.json</dt><dd>Global fallback, works on Windows too.</dd></div>
+  </dl>
+  <p><code>mcp</code>, agents and skills merge both files instead, the project winning per server or id.</p>
+</section>
+
+<section class="sec">
+  <h2>Keys</h2>
+  <p>Never inline a secret. Use <code>{env:VAR}</code> and lugent substitutes it at load time:</p>
+  <pre>{ <span class="k">"apiKey"</span>: <span class="c">"{env:OPENROUTER_KEY}"</span> }</pre>
+</section>
+
+<section class="sec">
+  <h2>Defaults</h2>
+  <dl class="table">
+    <div class="row"><dt>defaultProvider</dt><dd>Provider a new session starts on.</dd></div>
+    <div class="row"><dt>defaultModel</dt><dd>Model for that provider.</dd></div>
+    <div class="row"><dt>defaultAgent</dt><dd>Startup agent. <code>build</code> when absent; an unknown id warns and falls back.</dd></div>
+    <div class="row"><dt>permissionMode</dt><dd><code>normal</code> or <code>yolo</code>. A project value overrides the global one.</dd></div>
+  </dl>
+</section>
+
+      <nav class="pager" aria-label="Pagination">
+        <a class="prev" href="../getting-started/"><span>PREVIOUS</span><strong>← Overview</strong></a>
+        <a class="next" href="../usage/"><span>NEXT</span><strong>Usage & commands →</strong></a>
+      </nav>
+    </main>
+</div>
+
+<footer class="ftr">
+  <span>lugent 0.1.3 · MIT</span>
+  <span class="ftr-links">
+    <a href="https://github.com/luizrgf2/lugent">GitHub</a>
+    <a href="https://www.npmjs.com/package/lugent">npm</a>
+    <a href="https://github.com/luizrgf2/lugent/blob/main/docs/decisions.md">Decisions</a>
+  </span>
+</footer>
+
+<script>
+var menu = document.querySelector(".menu-btn");
+var nav = document.getElementById("nav");
+if (menu && nav) menu.addEventListener("click", function () {
+  var open = nav.dataset.open === "true";
+  nav.dataset.open = String(!open);
+  menu.setAttribute("aria-expanded", String(!open));
+});
+
+var side = document.querySelector(".side");
+var toggle = document.querySelector(".side-toggle");
+if (side && toggle) {
+  side.dataset.open = matchMedia("(min-width: 901px)").matches ? "true" : "false";
+  toggle.setAttribute("aria-expanded", side.dataset.open);
+  toggle.addEventListener("click", function () {
+    var open = side.dataset.open === "true";
+    side.dataset.open = String(!open);
+    toggle.setAttribute("aria-expanded", String(!open));
+  });
+}
+</script>
+
+</body>
+</html>

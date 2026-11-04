@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="A named profile: system prompt, model, tool allowlist and permission overrides, declared in markdown.">
+<meta name="theme-color" content="#101010">
+<title>Agents — lugent</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+
+<header class="hdr">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">
+      <svg viewBox="0 0 120 120" role="img">
+        <path d="M30 26 L66 60 L30 94" fill="none" stroke="#00f5a0" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M30 106 L92 106" fill="none" stroke="#00f5a0" stroke-width="13" stroke-linecap="round"/>
+      </svg>
+    </span>
+    <a class="wordmark" href="../">lugent</a>
+    <span class="chip">v0.1.3</span>
+  </div>
+
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="nav" aria-label="Menu">≡</button>
+
+  <nav class="nav" id="nav" aria-label="Main">
+    <a href="../getting-started/" aria-current="page">Documentation</a>
+    <a href="https://github.com/luizrgf2/lugent">GitHub</a>
+    <a href="https://www.npmjs.com/package/lugent">npm</a>
+  </nav>
+</header>
+
+<div class="docs">
+    <aside class="side" data-open="false">
+      <button class="side-toggle" type="button" aria-expanded="false">Documentation contents</button>
+      <div class="side-body">
+        <div class="side-group">
+          <p class="side-label">INSTALL</p>
+          <p class="side-install">npm i -g lugent</p>
+        </div>
+        <div class="side-group">
+          <p class="side-label">GETTING STARTED</p>
+          <a href="../getting-started/">Overview</a>
+          <a href="../config/">Configuration</a>
+          <a href="../usage/">Usage & commands</a>
+        </div>
+        <div class="side-group">
+          <p class="side-label">SUBSYSTEMS</p>
+          <a href="../agents/" aria-current="page">Agents</a>
+          <a href="../subagents/">Subagents</a>
+          <a href="../skills/">Skills</a>
+          <a href="../mcp/">MCP servers</a>
+          <a href="../permissions/">Permissions</a>
+        </div>
+        <div class="side-group">
+          <p class="side-label">SESSIONS</p>
+          <a href="../sessions/">Managing sessions</a>
+          <a href="../history/">Resume & history</a>
+          <a href="../data/">Data & storage</a>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="../getting-started/">docs</a><span aria-hidden="true">/</span><span aria-current="page">agents</span>
+      </nav>
+
+      <div class="doc-head">
+        <h1 class="doc">Agents</h1>
+        <p>A named profile: system prompt, model, tool allowlist and permission overrides, declared in markdown.</p>
+      </div>
+
+<section class="sec">
+  <h2>Where they live</h2>
+  <p>The nested path is the id. Both scopes load; on the same id the project wins.</p>
+  <pre>.agents/agents/reviewer.md      <span class="m">→ id</span> <span class="c">reviewer</span>
+.agents/agents/team/audit.md    <span class="m">→ id</span> <span class="c">team/audit</span>
+~/.agents/agents/*.md           <span class="m">→ user scope</span></pre>
+</section>
+
+<section class="sec">
+  <h2>Frontmatter</h2>
+  <pre><span class="m">---</span>
+<span class="k">description</span>: Reviews changes read-only
+<span class="k">color</span>: cyan
+<span class="k">model</span>: 9router/glm-5.2
+<span class="k">tools</span>: [read, glob, grep]
+<span class="k">permissions</span>: {shell: ask}
+<span class="m">---</span>
+You are a code reviewer. Report findings with file and line references.</pre>
+  <dl class="table">
+    <div class="row"><dt>description</dt><dd>Shown by the agent picker. Absent, none.</dd></div>
+    <div class="row"><dt>model</dt><dd><code>provider/model</code>, both required. Absent, inherit the session's.</dd></div>
+    <div class="row"><dt>tools</dt><dd>Ids the model can see. A <code>tools</code> key that parses to nothing fails closed to none, with a warning.</dd></div>
+    <div class="row"><dt>permissions</dt><dd><code>allow</code>, <code>ask</code> or <code>deny</code> per tool. <code>deny</code> also removes the tool.</dd></div>
+    <div class="row"><dt>mode</dt><dd><code>primary</code>, <code>subagent</code> or <code>all</code>: who may launch it.</dd></div>
+    <div class="row"><dt>color</dt><dd>TUI display color, an ink name or <code>#rrggbb</code>. Display only.</dd></div>
+  </dl>
+</section>
+
+<section class="sec">
+  <h2>Built in</h2>
+  <dl class="table">
+    <div class="row"><dt>build</dt><dd>The base system prompt. The startup default, always a way back.</dd></div>
+    <div class="row"><dt>plan</dt><dd>Explore and design. <code>edit</code> and <code>write</code> denied, shell still permission-gated.</dd></div>
+    <div class="row"><dt>general</dt><dd>A subagent with a fresh context. Delegation works with zero files.</dd></div>
+  </dl>
+</section>
+
+<div class="callout">Built-ins load first, so a file with the same id overrides one without removing it.</div>
+
+<section class="sec">
+  <h2>Switching</h2>
+  <p><code>/agent</code> lists loaded agents and switches between them. Switching works mid-session: history is kept and the next turn runs with the new prompt, model and toolset. The body of a file agent <strong>replaces</strong> the base prompt, and <code>AGENTS.md</code> plus the skills advertisement are still added on top.</p>
+</section>
+
+      <nav class="pager" aria-label="Pagination">
+        <a class="prev" href="../usage/"><span>PREVIOUS</span><strong>← Usage & commands</strong></a>
+        <a class="next" href="../subagents/"><span>NEXT</span><strong>Subagents →</strong></a>
+      </nav>
+    </main>
+</div>
+
+<footer class="ftr">
+  <span>lugent 0.1.3 · MIT</span>
+  <span class="ftr-links">
+    <a href="https://github.com/luizrgf2/lugent">GitHub</a>
+    <a href="https://www.npmjs.com/package/lugent">npm</a>
+    <a href="https://github.com/luizrgf2/lugent/blob/main/docs/decisions.md">Decisions</a>
+  </span>
+</footer>
+
+<script>
+var menu = document.querySelector(".menu-btn");
+var nav = document.getElementById("nav");
+if (menu && nav) menu.addEventListener("click", function () {
+  var open = nav.dataset.open === "true";
+  nav.dataset.open = String(!open);
+  menu.setAttribute("aria-expanded", String(!open));
+});
+
+var side = document.querySelector(".side");
+var toggle = document.querySelector(".side-toggle");
+if (side && toggle) {
+  side.dataset.open = matchMedia("(min-width: 901px)").matches ? "true" : "false";
+  toggle.setAttribute("aria-expanded", side.dataset.open);
+  toggle.addEventListener("click", function () {
+    var open = side.dataset.open === "true";
+    side.dataset.open = String(!open);
+    toggle.setAttribute("aria-expanded", String(!open));
+  });
+}
+</script>
+
+</body>
+</html>

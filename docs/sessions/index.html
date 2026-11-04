@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Every conversation is a row in one SQLite file. Start one, resume one, clear one.">
+<meta name="theme-color" content="#101010">
+<title>Managing sessions — lugent</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+
+<header class="hdr">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">
+      <svg viewBox="0 0 120 120" role="img">
+        <path d="M30 26 L66 60 L30 94" fill="none" stroke="#00f5a0" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M30 106 L92 106" fill="none" stroke="#00f5a0" stroke-width="13" stroke-linecap="round"/>
+      </svg>
+    </span>
+    <a class="wordmark" href="../">lugent</a>
+    <span class="chip">v0.1.3</span>
+  </div>
+
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="nav" aria-label="Menu">≡</button>
+
+  <nav class="nav" id="nav" aria-label="Main">
+    <a href="../getting-started/" aria-current="page">Documentation</a>
+    <a href="https://github.com/luizrgf2/lugent">GitHub</a>
+    <a href="https://www.npmjs.com/package/lugent">npm</a>
+  </nav>
+</header>
+
+<div class="docs">
+    <aside class="side" data-open="false">
+      <button class="side-toggle" type="button" aria-expanded="false">Documentation contents</button>
+      <div class="side-body">
+        <div class="side-group">
+          <p class="side-label">INSTALL</p>
+          <p class="side-install">npm i -g lugent</p>
+        </div>
+        <div class="side-group">
+          <p class="side-label">GETTING STARTED</p>
+          <a href="../getting-started/">Overview</a>
+          <a href="../config/">Configuration</a>
+          <a href="../usage/">Usage & commands</a>
+        </div>
+        <div class="side-group">
+          <p class="side-label">SUBSYSTEMS</p>
+          <a href="../agents/">Agents</a>
+          <a href="../subagents/">Subagents</a>
+          <a href="../skills/">Skills</a>
+          <a href="../mcp/">MCP servers</a>
+          <a href="../permissions/">Permissions</a>
+        </div>
+        <div class="side-group">
+          <p class="side-label">SESSIONS</p>
+          <a href="../sessions/" aria-current="page">Managing sessions</a>
+          <a href="../history/">Resume & history</a>
+          <a href="../data/">Data & storage</a>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="../getting-started/">docs</a><span aria-hidden="true">/</span><span aria-current="page">sessions</span>
+      </nav>
+
+      <div class="doc-head">
+        <h1 class="doc">Managing sessions</h1>
+        <p>Every conversation is a row in one SQLite file. Start one, resume one, clear one.</p>
+      </div>
+
+<section class="sec">
+  <h2>Commands</h2>
+  <dl class="table">
+    <div class="row"><dt>/clear</dt><dd>Start a fresh session. The old one stays on disk.</dd></div>
+    <div class="row"><dt>/resume</dt><dd>Pick a past session of this directory and continue it.</dd></div>
+    <div class="row"><dt>Ctrl+C ×2</dt><dd>Exit. Once aborts the running turn instead.</dd></div>
+    <div class="row"><dt>--db &lt;path&gt;</dt><dd>Point the whole session store somewhere else.</dd></div>
+  </dl>
+</section>
+
+<section class="sec">
+  <h2>What a session carries</h2>
+  <p>A session is not just messages. It keeps the provider and model pinned by <code>/model</code>, the agent chosen by <code>/agent</code>, and the permission grants answered with <code>a</code>. <code>/resume</code> restores all of it, so a resumed turn runs exactly like the one before it. It continues the session; it does not fork it.</p>
+</section>
+
+<section class="sec">
+  <h2>Subagents are sessions too</h2>
+  <p>A child launched by the <code>subagent</code> tool is a second session in the same store, linked to its parent. Children are hidden from <code>/resume</code> and the picker: only the child's final message returns to the parent.</p>
+</section>
+
+      <nav class="pager" aria-label="Pagination">
+        <a class="prev" href="../permissions/"><span>PREVIOUS</span><strong>← Permissions</strong></a>
+        <a class="next" href="../history/"><span>NEXT</span><strong>Resume & history →</strong></a>
+      </nav>
+    </main>
+</div>
+
+<footer class="ftr">
+  <span>lugent 0.1.3 · MIT</span>
+  <span class="ftr-links">
+    <a href="https://github.com/luizrgf2/lugent">GitHub</a>
+    <a href="https://www.npmjs.com/package/lugent">npm</a>
+    <a href="https://github.com/luizrgf2/lugent/blob/main/docs/decisions.md">Decisions</a>
+  </span>
+</footer>
+
+<script>
+var menu = document.querySelector(".menu-btn");
+var nav = document.getElementById("nav");
+if (menu && nav) menu.addEventListener("click", function () {
+  var open = nav.dataset.open === "true";
+  nav.dataset.open = String(!open);
+  menu.setAttribute("aria-expanded", String(!open));
+});
+
+var side = document.querySelector(".side");
+var toggle = document.querySelector(".side-toggle");
+if (side && toggle) {
+  side.dataset.open = matchMedia("(min-width: 901px)").matches ? "true" : "false";
+  toggle.setAttribute("aria-expanded", side.dataset.open);
+  toggle.addEventListener("click", function () {
+    var open = side.dataset.open === "true";
+    side.dataset.open = String(!open);
+    toggle.setAttribute("aria-expanded", String(!open));
+  });
+}
+</script>
+
+</body>
+</html>

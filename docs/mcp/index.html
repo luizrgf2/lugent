@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="The Model Context Protocol over stdio or streamable HTTP. Their tools join yours, permission-gated.">
+<meta name="theme-color" content="#101010">
+<title>MCP servers — lugent</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+
+<header class="hdr">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">
+      <svg viewBox="0 0 120 120" role="img">
+        <path d="M30 26 L66 60 L30 94" fill="none" stroke="#00f5a0" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M30 106 L92 106" fill="none" stroke="#00f5a0" stroke-width="13" stroke-linecap="round"/>
+      </svg>
+    </span>
+    <a class="wordmark" href="../">lugent</a>
+    <span class="chip">v0.1.3</span>
+  </div>
+
+  <button class="menu-btn" type="button" aria-expanded="false" aria-controls="nav" aria-label="Menu">≡</button>
+
+  <nav class="nav" id="nav" aria-label="Main">
+    <a href="../getting-started/" aria-current="page">Documentation</a>
+    <a href="https://github.com/luizrgf2/lugent">GitHub</a>
+    <a href="https://www.npmjs.com/package/lugent">npm</a>
+  </nav>
+</header>
+
+<div class="docs">
+    <aside class="side" data-open="false">
+      <button class="side-toggle" type="button" aria-expanded="false">Documentation contents</button>
+      <div class="side-body">
+        <div class="side-group">
+          <p class="side-label">INSTALL</p>
+          <p class="side-install">npm i -g lugent</p>
+        </div>
+        <div class="side-group">
+          <p class="side-label">GETTING STARTED</p>
+          <a href="../getting-started/">Overview</a>
+          <a href="../config/">Configuration</a>
+          <a href="../usage/">Usage & commands</a>
+        </div>
+        <div class="side-group">
+          <p class="side-label">SUBSYSTEMS</p>
+          <a href="../agents/">Agents</a>
+          <a href="../subagents/">Subagents</a>
+          <a href="../skills/">Skills</a>
+          <a href="../mcp/" aria-current="page">MCP servers</a>
+          <a href="../permissions/">Permissions</a>
+        </div>
+        <div class="side-group">
+          <p class="side-label">SESSIONS</p>
+          <a href="../sessions/">Managing sessions</a>
+          <a href="../history/">Resume & history</a>
+          <a href="../data/">Data & storage</a>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="../getting-started/">docs</a><span aria-hidden="true">/</span><span aria-current="page">mcp</span>
+      </nav>
+
+      <div class="doc-head">
+        <h1 class="doc">MCP servers</h1>
+        <p>The Model Context Protocol over stdio or streamable HTTP. Their tools join yours, permission-gated.</p>
+      </div>
+
+<section class="sec">
+  <h2>Config</h2>
+  <p>Declared in the <code>mcp</code> map of <code>lugent.json</code> or the global config. The type is inferred from <code>command</code> or <code>url</code>.</p>
+  <pre>{
+  <span class="k">"mcp"</span>: {
+    <span class="k">"local-one"</span>:  { <span class="k">"command"</span>: [<span class="c">"npx"</span>, <span class="c">"-y"</span>, <span class="c">"some-mcp@latest"</span>] },
+    <span class="k">"remote-one"</span>: { <span class="k">"url"</span>: <span class="c">"https://host/mcp"</span>,
+                    <span class="k">"headers"</span>: { <span class="k">"X-Tenant"</span>: <span class="c">"{env:TENANT}"</span> } }
+  }
+}</pre>
+</section>
+
+<section class="sec">
+  <h2>Transports</h2>
+  <dl class="table">
+    <div class="row"><dt>local</dt><dd>Spawns a child process and speaks newline-delimited JSON-RPC over stdio.</dd></div>
+    <div class="row"><dt>remote</dt><dd>Streamable HTTP: one POST per message, <code>Mcp-Session-Id</code>, SSE responses. <code>http</code> is an alias.</dd></div>
+  </dl>
+  <p>At startup every enabled server connects in parallel and its tools are bridged as <code>&lt;server&gt;_&lt;tool&gt;</code>. A server that fails is reported and never stops lugent.</p>
+</section>
+
+<section class="sec">
+  <h2>Signing in</h2>
+  <p>A remote server that refuses the configured headers answers <code>401</code>. lugent reports it as <code>auth_required</code> instead of failing, because the fix is interactive. Choose <code>authenticate</code> in <code>/mcp</code> and lugent:</p>
+  <ul>
+    <li>discovers the protected-resource and authorization-server metadata (RFC 9728 and 8414), https only</li>
+    <li>registers itself as a public client, once per server (RFC 7591)</li>
+    <li>starts a loopback listener on <code>127.0.0.1:48762/oauth/callback</code> with PKCE S256, and opens your browser</li>
+    <li>waits up to five minutes, always sending <code>resource</code> so the token is bound to that endpoint</li>
+    <li>stores the tokens in <code>~/.local/share/lugent/mcp-oauth.json</code>, mode <code>0600</code></li>
+  </ul>
+  <p>Access tokens refresh 60 seconds before expiry, and once more, forcibly, on a mid-session <code>401</code>. A rejected refresh drops the tokens back to <code>auth_required</code>.</p>
+</section>
+
+<section class="sec">
+  <h2>Status and actions</h2>
+  <dl class="table">
+    <div class="row"><dt>connected</dt><dd>With a tool count. Remote servers can log out or be disabled, local ones disabled.</dd></div>
+    <div class="row"><dt>connecting</dt><dd>A handshake is still in flight.</dd></div>
+    <div class="row"><dt>failed</dt><dd>With the error. Reconnect or disable.</dd></div>
+    <div class="row"><dt>auth_required</dt><dd>Needs a sign-in. Authenticate or disable.</dd></div>
+    <div class="row"><dt>disabled</dt><dd>Out of the session. Enable reconnects.</dd></div>
+  </dl>
+  <p>Enabling and disabling is session-scoped: lugent never rewrites <code>lugent.json</code>, because a turn must not silently edit a file that can hold secrets.</p>
+</section>
+
+<div class="callout"><strong>Trust note:</strong> a project lugent.json can declare local servers, whose command is spawned at startup with no prompt. That is the same trust channel as a project AGENTS.md, so read a repo's mcp block before running lugent in it.</div>
+
+      <nav class="pager" aria-label="Pagination">
+        <a class="prev" href="../skills/"><span>PREVIOUS</span><strong>← Skills</strong></a>
+        <a class="next" href="../permissions/"><span>NEXT</span><strong>Permissions →</strong></a>
+      </nav>
+    </main>
+</div>
+
+<footer class="ftr">
+  <span>lugent 0.1.3 · MIT</span>
+  <span class="ftr-links">
+    <a href="https://github.com/luizrgf2/lugent">GitHub</a>
+    <a href="https://www.npmjs.com/package/lugent">npm</a>
+    <a href="https://github.com/luizrgf2/lugent/blob/main/docs/decisions.md">Decisions</a>
+  </span>
+</footer>
+
+<script>
+var menu = document.querySelector(".menu-btn");
+var nav = document.getElementById("nav");
+if (menu && nav) menu.addEventListener("click", function () {
+  var open = nav.dataset.open === "true";
+  nav.dataset.open = String(!open);
+  menu.setAttribute("aria-expanded", String(!open));
+});
+
+var side = document.querySelector(".side");
+var toggle = document.querySelector(".side-toggle");
+if (side && toggle) {
+  side.dataset.open = matchMedia("(min-width: 901px)").matches ? "true" : "false";
+  toggle.setAttribute("aria-expanded", side.dataset.open);
+  toggle.addEventListener("click", function () {
+    var open = side.dataset.open === "true";
+    side.dataset.open = String(!open);
+    toggle.setAttribute("aria-expanded", String(!open));
+  });
+}
+</script>
+
+</body>
+</html>
