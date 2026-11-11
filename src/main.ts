@@ -14,8 +14,15 @@ import { defaultDbPath, defaultMcpOAuthPath } from "./core/platform"
 import { runRepl } from "./cli/repl"
 
 const args = process.argv.slice(2)
+const USAGE = "usage: lugent [--plain] [--db <path>] [--version]"
 const dbFlag = args.indexOf("--db")
-const dbPath = dbFlag !== -1 ? args[dbFlag + 1] : defaultDbPath(process.env, homedir(), process.platform)
+const dbValue = dbFlag === -1 ? undefined : args[dbFlag + 1]
+if (dbFlag !== -1 && (dbValue === undefined || dbValue === "" || dbValue.startsWith("-"))) {
+  console.error("lugent: --db needs a path")
+  console.error(USAGE)
+  process.exit(2)
+}
+const dbPath = dbValue ?? defaultDbPath(process.env, homedir(), process.platform)
 const projectRoot = process.cwd()
 
 mkdirSync(dirname(dbPath), { recursive: true })
