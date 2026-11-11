@@ -137,10 +137,6 @@ Why: a child can run for minutes and the parent showed only a static tool line t
 
 Cost if wrong: **the viewer keys are dead on terminals without the kitty keyboard protocol** (macOS Terminal.app, older setups) — they ignore the CSI enable, ctrl+digit stays a plain digit, and there is no fallback binding (plain digits are the composer's). Enabling disambiguate app-wide also changes what ink parses for *every* key while lugent runs (verified ink v8 parses kitty CSI-u; ctrl+c still arrives as legacy `\x03` because disambiguate only escapes what legacy cannot express); a crash between enable and pop leaves the flags set in the terminal — same class of risk the removed mouse tracking had, minus the selection damage. `ctrl+9` with ≤8 children doing nothing is deliberate (no 9th child to pick); if children someday need >9 shortcuts, that is a new decision, not a tweak. State resets per turn: after 9+ turns you cannot reach an older turn's children without `/resume` (accepted; a `/subagents` browser stays deferred in `docs/future-features.md`).
 
----
-
-Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.
-
 ## 2026-11-11 — The `--plain` key prompt is masked, because readline echoes
 
 Context: the README said the api key "is never printed back". True in the TUI (a fixed run of dots), false in the `--plain` REPL, where the key went through `readline`'s ordinary `question()` and was echoed as typed into terminal scrollback. The plan prescribed plain `rl.question`, so this was not a plan violation — it was the claim outrunning the code.
@@ -149,4 +145,18 @@ Decision: `src/cli/secret-prompt.ts` — `readSecret()` reads one line with the 
 
 Why a mute, and why unconditional `setRawMode(true)`: both were found on a real pty, not in a unit test. Bun's `readline` keeps redrawing its line buffer while **paused** — a capture showed the key printed middle-truncated (`sk-TYP…RKER`) with `rl.pause()` in effect — and `rl`'s `isRaw` stays `true` across that pause while the tty underneath is already canonical, so a "only set raw when it says it is not raw" guard left the kernel echoing every keystroke. Each bug reproduces if you revert its one line; neither is visible from a fake stream.
 
-Cost if wrong: the key prompt no longer offers readline's line editing (arrow keys, paste-as-text, history) — only typing and backspace, which for a key is all anyone uses. A caller that forgets to mute its own line reader still leaks, while `readSecret` alone looks correct; that is why the doc comment and the `--plain` wiring point at each other, and why the pty probe (not the unit tests) is the check that matters here. `--plain` in a non-TTY never reaches this path — `/add-provider` prints usage instead.
+Cost if wrong: the key prompt no longer offers readline's line editing (arrow keys, paste-as-text, history) — only typing and backspace, which for a key is all anyone uses. A caller that forgets to mute its own line reader still leaks, while `readSecret` alone looks correct; that is why the doc comment and the `--plain` wiring point at each other, and why the pty probe (not the unit tests) is the check that matters here. `--plain` in a non-TTY never reaches this path — `/add-provider` prints usage instead. Follow-up (same day): the sentence above is no longer literal — see the next entry, which consumes escape sequences instead of eating only the ESC byte.
+
+## 2026-11-11 — The masked reader eats whole escape sequences, and Ctrl+C cancels instead of crashing
+
+Context: the masked reader above shipped two defects, both invisible to its unit tests and both reproduced on a real pty. (1) `onData` skipped only the ESC **byte**, so the rest of the sequence was appended to the secret: typing `sk-ab`, ←, `cd` saved `sk-ab[Dcd`, and the field — one dot per character — looked identical, so a corrupted credential was saved and sent with no way to notice. Every multi-byte sequence (←/→/↑/↓/Home/End/Delete) and every unhandled control byte (^D/^A/^U/^W) did the same. (2) `^C` rejects with `Error("cancelled")` and nothing caught it: the rejection escaped `repl.ts` into top level, Bun printed a stack and exited 1, so a user who changed their mind at the key prompt lost the whole `--plain` session — the documented abort key, killing the process.
+
+Decision: a small state machine (`esc: none | start | csi | ss3`) consumes a complete escape sequence, carried across `data` chunk boundaries — a read can deliver `\x1b` and `[D` separately, and ESC alone is indistinguishable from an Alt prefix. CSI ends at the first final byte (0x40–0x7E per ECMA-48), SS3 after one character, `ESC x` as a unit. Every remaining C0 control is ignored: a single-line masked field has no line editing, so the only correct thing they can do is nothing. Bracketed-paste markers fall out for free, so a pasted key types in. Cancelling is a **typed** signal (`ReadCancelled` + `isCancellation`) that `runAddProviderForm` turns into a `cancelled` result at every prompt, and `repl.ts` still wraps the call so nothing else can take the session down either.
+
+Why: the field does not need cursor movement to be correct — it needs to not corrupt the secret, and it needs the abort key to abort *the form*, not the process. A typed cancellation (rather than a message match) is what lets the form own the semantics while the caller only prints the line; the `try` in `repl.ts` is belt-and-braces for any other escape.
+
+Cost if wrong: arrow keys do not move a cursor in the key field (they never did — they only corrupted it); a user expecting readline-style editing there gets none. A future front end that signals cancellation with a different error type must go through `isCancellation`, or its cancel will surface as a red failure line instead of `cancelled — nothing written`.
+
+---
+
+Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.
