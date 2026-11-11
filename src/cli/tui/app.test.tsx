@@ -1406,3 +1406,27 @@ test("/add-provider warns when a project config shadows it", async () => {
   expect(allOutput()).toContain("shadowed")
   rmSync(dir, { recursive: true, force: true })
 })
+
+test("/add-provider re-run with an empty key keeps the stored key in the live config too", async () => {
+  const global = `/tmp/opencode/tui-addprov-key-${Date.now()}.json`
+  writeFileSync(global, JSON.stringify({ providers: { r: { baseUrl: "http://r/v1", apiKey: "sk-old" } } }))
+  const env = fakeEnv({
+    config: { defaultProvider: "r", defaultModel: "m1", permissionMode: "normal", providers: { r: { baseUrl: "http://r/v1", apiKey: "sk-old" } } },
+    discoverModels: fakeDiscover,
+  })
+  const { type } = renderTui(<App env={env} globalConfigPath={global} />)
+  type("/add-provider\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("r\rhttp://r/v1\r\r")                   // empty key field
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // test
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // import
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // overwrite confirm
+  await new Promise(r => setTimeout(r, 60))
+  expect(JSON.parse(readFileSync(global, "utf8")).providers.r.apiKey).toBe("sk-old")
+  // The disk kept the key — the live session must not silently run unauthenticated.
+  expect(env.config.providers.r.apiKey).toBe("sk-old")
+  rmSync(global, { force: true })
+})

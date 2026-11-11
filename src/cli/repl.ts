@@ -222,12 +222,17 @@ export async function runRepl(env: ReplEnv): Promise<void> {
         found.models.forEach((m, i) => console.log(`  ${dim(`${i + 1}.`)} ${m}`))
         const yes = await rl.question(`import these ${found.models.length} models? [Y/n] `)
         if (yes.trim().toLowerCase() === "n") { console.log("cancelled — nothing written"); continue }
+        // An empty key field keeps whatever the global config already holds — on
+        // disk AND in the live session (a session-only entry that dropped it
+        // would run unauthenticated until the next restart).
+        const priorKey = env.config.providers[name]?.apiKey
         const cfg: { baseUrl: string; apiKey?: string; models?: string[] } = { baseUrl, models: found.models }
         if (apiKey) cfg.apiKey = apiKey
         const saved = saveProvider(name, cfg, globalConfigPath())
         if (!saved.ok) { console.log(red(`save failed, session only: ${saved.error}`)); continue }
         const normalized: any = { baseUrl: baseUrl.replace(/\/+$/, ""), models: found.models }
-        if (apiKey) normalized.apiKey = apiKey
+        const effectiveKey = apiKey || priorKey
+        if (effectiveKey) normalized.apiKey = effectiveKey
         env.config.providers[name] = normalized
         console.log(`saved ${name} · ${found.models.length} models${projectHasProviders(env.projectRoot) ? yellow(" — shadowed by this directory's lugent.json") : ""}`)
         continue
