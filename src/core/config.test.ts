@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test"
-import { subEnv, loadConfig, parseMcpServer, loadMcpConfig, savePermissionMode } from "./config"
-import { rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs"
+import { subEnv, loadConfig, parseMcpServer, loadMcpConfig, savePermissionMode, saveProvider, providerNamesInFile, providerEntryInFile } from "./config"
+import { rmSync, writeFileSync, mkdirSync, readFileSync, statSync } from "node:fs"
 
 describe("subEnv", () => {
   test("substitutes {env:VAR}", () => {
@@ -303,5 +303,155 @@ describe("defaultSubagentModel", () => {
     writeFileSync(`${dir}/lugent.json`, JSON.stringify({ providers: {}, defaultProvider: "", defaultModel: "" }))
     expect(loadConfig(dir).defaultSubagentModel).toBeUndefined()
     rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe("saveProvider", () => {
+  test("loader keeps a provider's cached models list", () => {
+    const dir = `/tmp/opencode/cfg-models-${Date.now()}`
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(`${dir}/lugent.json`, JSON.stringify({
+      providers: { r: { baseUrl: "http://r/v1", models: ["a", "b", "", 7] } },
+      defaultProvider: "r", defaultModel: "a",
+    }))
+    expect(loadConfig(dir).providers.r.models).toEqual(["a", "b"])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("loader leaves an absent or non-array models alone", () => {
+    const dir = `/tmp/opencode/cfg-nomodels-${Date.now()}`
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(`${dir}/lugent.json`, JSON.stringify({
+      providers: { r: { baseUrl: "http://r/v1", models: "nope" } },
+      defaultProvider: "r", defaultModel: "a",
+    }))
+    expect(loadConfig(dir).providers.r.models).toBeUndefined()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("saveProvider writes the global file and keeps every other key", () => {
+    const p = `/tmp/opencode/save-prov-${Date.now()}.json`
+    writeFileSync(p, JSON.stringify({ permissionMode: "yolo", defaultProvider: "x", mcp: { a: { type: "remote", url: "https://a/mcp" } } }))
+    const r = saveProvider("router", { baseUrl: "http://r/v1", apiKey: "sk-1", models: ["m1"] }, p)
+    expect(r.ok).toBe(true)
+    const raw = JSON.parse(readFileSync(p, "utf8"))
+    expect(raw.providers.router).toEqual({ baseUrl: "http://r/v1", apiKey: "sk-1", models: ["m1"] })
+    expect(raw.permissionMode).toBe("yolo")
+    expect(raw.defaultProvider).toBe("x")
+    expect(raw.mcp.a.url).toBe("https://a/mcp")
+    rmSync(p, { force: true })
+  })
+
+  test("saveProvider strips trailing slashes from baseUrl", () => {
+    const p = `/tmp/opencode/save-slash-${Date.now()}.json`
+    expect(saveProvider("r", { baseUrl: "http://r/v1///" }, p).ok).toBe(true)
+    expect(JSON.parse(readFileSync(p, "utf8")).providers.r.baseUrl).toBe("http://r/v1")
+    rmSync(p, { force: true })
+  })
+
+  test("saveProvider keeps an existing apiKey when the new one is empty", () => {
+    const p = `/tmp/opencode/save-keep-${Date.now()}.json`
+    saveProvider("r", { baseUrl: "http://r/v1", apiKey: "old" }, p)
+    saveProvider("r", { baseUrl: "http://r/v1", apiKey: "", models: ["x"] }, p)
+    const raw = JSON.parse(readFileSync(p, "utf8"))
+    expect(raw.providers.r.apiKey).toBe("old")
+    expect(raw.providers.r.models).toEqual(["x"])
+    rmSync(p, { force: true })
+  })
+
+  test("saveProvider mode is 0600 when an inline key is written", () => {
+    const p = `/tmp/opencode/save-mode-${Date.now()}.json`
+    saveProvider("r", { baseUrl: "http://r/v1", apiKey: "sk-secret" }, p)
+    expect(statSync(p).mode & 0o777).toBe(0o600)
+    rmSync(p, { force: true })
+  })
+
+  test("saveProvider returns a live entry with the {env:VAR} reference resolved", () => {
+    process.env.LUGENT_LIVE_KEY = "sekret"
+    const p = `/tmp/opencode/save-live-env-${Date.now()}.json`
+    const r = saveProvider("r", { baseUrl: "http://r/v1/", apiKey: "{env:LUGENT_LIVE_KEY}", models: ["m"] }, p)
+    // The session gets the secret — `Provider.headers()` sends its apiKey verbatim,
+    // so an unresolved reference there is a literal `Bearer {env:VAR}` and a 401.
+    expect(r.live).toEqual({ baseUrl: "http://r/v1", apiKey: "sekret", models: ["m"] })
+    // The file keeps the reference: the format is unchanged, `loadConfig` resolves it.
+    expect(JSON.parse(readFileSync(p, "utf8")).providers.r.apiKey).toBe("{env:LUGENT_LIVE_KEY}")
+    rmSync(p, { force: true })
+  })
+
+  test("saveProvider's live entry keeps the stored key when the field is empty", () => {
+    const p = `/tmp/opencode/save-live-keep-${Date.now()}.json`
+    writeFileSync(p, JSON.stringify({ providers: { r: { baseUrl: "http://r/v1", apiKey: "sk-old" } } }))
+    const r = saveProvider("r", { baseUrl: "http://r/v1", models: ["x"] }, p)
+    expect(r.live.apiKey).toBe("sk-old")
+    expect(r.live.models).toEqual(["x"])
+    rmSync(p, { force: true })
+  })
+
+  test("saveProvider omits a reference that resolves to nothing from the live entry", () => {
+    const p = `/tmp/opencode/save-live-unset-${Date.now()}.json`
+    const r = saveProvider("r", { baseUrl: "http://r/v1", apiKey: "{env:LUGENT_LIVE_UNSET}" }, p)
+    // No key on the session entry at all — `Bearer ` with an empty token is worse
+    // than an unauthenticated request, whose 401 at least names the real problem.
+    expect(r.live.apiKey).toBeUndefined()
+    expect(JSON.parse(readFileSync(p, "utf8")).providers.r.apiKey).toBe("{env:LUGENT_LIVE_UNSET}")
+    rmSync(p, { force: true })
+  })
+
+  test("saveProvider mirrors the file's models into the live entry", () => {
+    const p = `/tmp/opencode/save-live-models-${Date.now()}.json`
+    saveProvider("r", { baseUrl: "http://r/v1", models: ["a"] }, p)
+    // A models-less save keeps the previous list on disk, so the session must see it too.
+    const r = saveProvider("r", { baseUrl: "http://r/v1" }, p)
+    expect(r.live.models).toEqual(["a"])
+    rmSync(p, { force: true })
+  })
+
+  test("saveProvider replaces an unparseable file and reports a failed write", () => {
+    const p = `/tmp/opencode/save-corrupt-${Date.now()}.json`
+    writeFileSync(p, "not json")
+    expect(saveProvider("r", { baseUrl: "http://r/v1" }, p).ok).toBe(true)
+    expect(JSON.parse(readFileSync(p, "utf8")).providers.r.baseUrl).toBe("http://r/v1")
+    const bad = saveProvider("r", { baseUrl: "http://r/v1" }, "/proc/nope/config.json")
+    expect(bad.ok).toBe(false)
+    expect(bad.error).toBeTruthy()
+    rmSync(p, { force: true })
+  })
+
+  test("providerNamesInFile reports what the save would overwrite, shadowed entries included", () => {
+    // The overwrite gate has to be computed from the file being written, not from
+    // the live config: `loadConfig` is first-file-wins, so in a repo whose
+    // `lugent.json` declares providers the live map cannot see the global
+    // entries — and those are exactly the ones a save would destroy.
+    const p = `/tmp/opencode/names-${Date.now()}.json`
+    writeFileSync(p, JSON.stringify({ providers: { globalA: { baseUrl: "http://a/v1" }, globalB: { baseUrl: "http://b/v1" } } }))
+    expect(providerNamesInFile(p).sort()).toEqual(["globalA", "globalB"])
+    // Missing, unparseable or shape-less files simply declare nothing.
+    expect(providerNamesInFile(`/tmp/opencode/names-missing-${Date.now()}.json`)).toEqual([])
+    writeFileSync(p, "not json")
+    expect(providerNamesInFile(p)).toEqual([])
+    writeFileSync(p, JSON.stringify({ providers: { bad: "nope", ok: { baseUrl: "http://o/v1" } } }))
+    expect(providerNamesInFile(p)).toEqual(["ok"])
+    rmSync(p, { force: true })
+  })
+
+  test("providerEntryInFile returns the stored entry raw, {env:VAR} unresolved", () => {
+    // Re-running `/add-provider` with a blank key field must Test with the key
+    // the save will keep. The Test is built before `loadConfig` runs, so the only
+    // honest source is the file `saveProvider` reads — and it has to stay raw:
+    // a `{env:VAR}` is resolved by `discoverModels`, an unset one reported there.
+    process.env.LUGENT_STORED_KEY = "sekret"
+    const p = `/tmp/opencode/entry-${Date.now()}.json`
+    writeFileSync(p, JSON.stringify({
+      providers: { r: { baseUrl: "http://r/v1", apiKey: "{env:LUGENT_STORED_KEY}", models: ["a"] } },
+    }))
+    expect(providerEntryInFile("r", p)).toEqual({ baseUrl: "http://r/v1", apiKey: "{env:LUGENT_STORED_KEY}", models: ["a"] })
+    expect(providerEntryInFile("nope", p)).toBeUndefined()
+    // Same tolerance as `providerNamesInFile`: a broken shape declares nothing.
+    expect(providerEntryInFile("r", `/tmp/opencode/entry-missing-${Date.now()}.json`)).toBeUndefined()
+    writeFileSync(p, "not json")
+    expect(providerEntryInFile("r", p)).toBeUndefined()
+    writeFileSync(p, JSON.stringify({ providers: { r: "nope" } }))
+    expect(providerEntryInFile("r", p)).toBeUndefined()
+    rmSync(p, { force: true })
   })
 })
