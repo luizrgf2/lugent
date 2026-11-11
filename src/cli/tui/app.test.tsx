@@ -1513,11 +1513,13 @@ test("/add-provider saves to the global config and the provider is usable at onc
   await new Promise(r => setTimeout(r, 40))
   type("\r")                                   // test — injected discover lists m1, m2
   await new Promise(r => setTimeout(r, 60))
+  type("a")                                    // check both rows
+  await new Promise(r => setTimeout(r, 40))
   type("\r")                                   // import
   await new Promise(r => setTimeout(r, 60))
   expect(JSON.parse(readFileSync(global, "utf8")).providers.r.models).toEqual(["m1", "m2"])
   expect(env.config.providers.r.baseUrl).toBe("http://r/v1")   // live push, no restart
-  expect(allOutput()).toContain("models imported")
+  expect(allOutput()).toContain("2 models imported")
   rmSync(global, { force: true })
 })
 
@@ -1552,6 +1554,8 @@ test("/add-provider warns when a project config shadows it", async () => {
   await new Promise(r => setTimeout(r, 40))
   type("\r")                                   // test
   await new Promise(r => setTimeout(r, 60))
+  type("a")                                    // check both rows
+  await new Promise(r => setTimeout(r, 40))
   type("\r")                                   // import
   await new Promise(r => setTimeout(r, 60))
   // The result line is a system item: it prints to the scrollback (<Static>), not the frame.
@@ -1570,6 +1574,8 @@ test("/add-provider pushes a {env:VAR} key into the live session resolved, not l
   await new Promise(r => setTimeout(r, 40))
   type("\r")                                   // test
   await new Promise(r => setTimeout(r, 60))
+  type("a")                                    // check both rows
+  await new Promise(r => setTimeout(r, 40))
   type("\r")                                   // import
   await new Promise(r => setTimeout(r, 60))
   // The file keeps the reference: the format is unchanged.
@@ -1585,6 +1591,30 @@ test("/add-provider pushes a {env:VAR} key into the live session resolved, not l
   await p.chat({ messages: [{ role: "user", content: "hi" }], tools: [] })
   expect(auth).toBe("Bearer sk-resolved-secret")
   delete process.env.LUGENT_ADDPROV_KEY
+  rmSync(global, { force: true })
+})
+
+test("/add-provider imports only the model the user checked", async () => {
+  // Types `down`, `space`, `enter` — never `a`. On the pre-change code, `down` and
+  // `space` are swallowed by the scroll-only import phase and `enter` writes both
+  // models, so this assertion is RED without the feature.
+  const global = `/tmp/opencode/tui-addprov-subset-${Date.now()}.json`
+  const env = fakeEnv({ projectRoot: "/tmp/opencode", discoverModels: fakeDiscover })
+  const { type, allOutput } = renderTui(<App env={env} globalConfigPath={global} />)
+  type("/add-provider\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("r\rhttp://r/v1\rsk-1\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // test — m1, m2
+  await new Promise(r => setTimeout(r, 60))
+  type("\u001b[B")                             // down to m2
+  await new Promise(r => setTimeout(r, 40))
+  type(" ")                                    // check it
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // import & save
+  await new Promise(r => setTimeout(r, 60))
+  expect(JSON.parse(readFileSync(global, "utf8")).providers.r.models).toEqual(["m2"])
+  expect(allOutput()).toContain("1 models imported")
   rmSync(global, { force: true })
 })
 
@@ -1656,6 +1686,8 @@ test("/add-provider re-run with an empty key keeps the stored key in the live co
   await new Promise(r => setTimeout(r, 40))
   type("\r")                                   // test
   await new Promise(r => setTimeout(r, 60))
+  type("a")                                    // check both rows
+  await new Promise(r => setTimeout(r, 40))
   type("\r")                                   // import
   await new Promise(r => setTimeout(r, 60))
   type("\r")                                   // overwrite confirm
@@ -1683,6 +1715,8 @@ test("/add-provider confirms before overwriting a global entry the live config c
   await new Promise(r => setTimeout(r, 40))
   type("\r")                                   // test
   await new Promise(r => setTimeout(r, 60))
+  type("a")                                    // check both rows
+  await new Promise(r => setTimeout(r, 40))
   type("\r")                                   // import → must NOT save yet
   await new Promise(r => setTimeout(r, 60))
   expect(allOutput()).toContain("overwrite shadowed?")
