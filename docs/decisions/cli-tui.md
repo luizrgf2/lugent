@@ -137,6 +137,14 @@ Why: a child can run for minutes and the parent showed only a static tool line t
 
 Cost if wrong: **the viewer keys are dead on terminals without the kitty keyboard protocol** (macOS Terminal.app, older setups) — they ignore the CSI enable, ctrl+digit stays a plain digit, and there is no fallback binding (plain digits are the composer's). Enabling disambiguate app-wide also changes what ink parses for *every* key while lugent runs (verified ink v8 parses kitty CSI-u; ctrl+c still arrives as legacy `\x03` because disambiguate only escapes what legacy cannot express); a crash between enable and pop leaves the flags set in the terminal — same class of risk the removed mouse tracking had, minus the selection damage. `ctrl+9` with ≤8 children doing nothing is deliberate (no 9th child to pick); if children someday need >9 shortcuts, that is a new decision, not a tweak. State resets per turn: after 9+ turns you cannot reach an older turn's children without `/resume` (accepted; a `/subagents` browser stays deferred in `docs/future-features.md`).
 
+## 2026-11-11 — `--db` validates its value inline in `main.ts`
+
+Decision: the two argv lines at the top of `src/main.ts` gain a guard — when `--db` is present and its value is absent, empty, or starts with `-`, the process prints `lugent: --db needs a path` plus `usage: lugent [--plain] [--db <path>] [--version]` to stderr and exits 2, before `mkdirSync`, `loadConfig`, `new Store`, `loadSkills`, `McpManager` and `mcp.connectAll()`. The `-` prefix check is what stops `lugent --db --plain` from creating a SQLite file named `--plain` and swallowing the flag. Exit 2 (usage error) rather than 1 (runtime crash) or 0. No generic argv validation: unknown flags such as `--banana` stay silently ignored, as before.
+
+Why: the previous behaviour surfaced a Node internals stack (`TypeError: The "path" property must be of type string, got undefined` at `main.ts:20`) that never named the flag the user typed. A refused `parseArgs` module (`src/cli/args.ts`) was considered and rejected as scope creep — `main.ts` already owns argv, and the previous `--version` decision deferred `--db` parsing to its own demand, which this is. Since the value is validated before any side effect, `process.exit(2)` cannot orphan an MCP child: nothing has connected yet.
+
+Cost if wrong: a legitimate path starting with `-` must be spelled `./-name` to be accepted; `-`-prefixed paths are not a case this repo supports. The guard is inline and untested as a unit — the coverage is spawn-based in `src/main.test.ts`, so it costs a process launch per case. If argv grows a third flag, extracting `src/cli/args.ts` becomes the right shape and gets its own demand.
+
 ---
 
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.
