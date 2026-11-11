@@ -50,7 +50,6 @@ export function AddProvider(p: {
   const nameRef = useRef("")
   const urlRef = useRef("")
   const keyRef = useRef("")
-  const modelsRef = useRef<string[]>([])
   const loadingRef = useRef(false)
 
   const go = (next: Phase) => { phaseRef.current = next; setPhase(next) }
@@ -99,7 +98,7 @@ export function AddProvider(p: {
       if (r.noModels) { go("nomodels"); return }
       setError(r.error ?? "test failed"); return
     }
-    modelsRef.current = r.models; setModels(r.models)
+    setModels(r.models)
     pendingModelsRef.current = r.models
     go("import")
   }
@@ -132,6 +131,16 @@ export function AddProvider(p: {
     go("key")
   }
 
+  /**
+   * Walk the fields backwards (⌫ on an empty field, or ←). A wrong host, port or
+   * `/v1` is the error class Test exists to catch, so the url above the key has
+   * to be reachable — otherwise the whole form is retyped for one bad character.
+   */
+  function backField() {
+    if (phaseRef.current === "url" && !loadingRef.current) { clearMsg(); go("name"); return }
+    if (phaseRef.current === "key" && !loadingRef.current) { clearMsg(); go("url") }
+  }
+
   useInput((input, k) => {
     if (k.escape) { p.onClose(); return }
     // Action phases: enter acts; test/import always allow a way back. Backspace
@@ -157,7 +166,12 @@ export function AddProvider(p: {
       return
     }
     if (k.return) { submitField(); return }
-    if (k.backspace || k.delete) { write(value().slice(0, -1)); return }
+    if (k.backspace || k.delete) {
+      // ⌫ on an empty field walks back to the previous one, values intact.
+      if (value() === "") { backField(); return }
+      write(value().slice(0, -1)); return
+    }
+    if (k.leftArrow) { backField(); return }
     if (k.tab) { submitField(); return }
     if (input && !k.ctrl && !k.meta) write(value() + input)
   })
@@ -190,7 +204,11 @@ export function AddProvider(p: {
       {phase === "nomodels" && (
         <Box flexDirection="column" marginTop={1}>
           <Text color="yellow">the endpoint works but lists no models</Text>
-          <Text dimColor>save {name} without a model list? /model will fetch them live</Text>
+          <Text dimColor>
+            {p.existing.includes(name)
+              ? `keep ${name}'s current model list? /model reads it, or fetches live when there is none`
+              : `save ${name} without a model list? /model will fetch them live`}
+          </Text>
         </Box>
       )}
 
@@ -205,7 +223,7 @@ export function AddProvider(p: {
         <Text color="yellow">
           overwrite {name}? {pendingModelsRef.current
             ? "its model list will be replaced"
-            : "it keeps no model list (the endpoint advertised none)"}; an empty key field keeps the current key
+            : "it keeps its current model list (the endpoint advertised none this time)"}; an empty key field keeps the current key
         </Text>
       )}
 
@@ -214,7 +232,7 @@ export function AddProvider(p: {
           : phase === "nomodels" ? "enter save without models · ⌫ back · esc cancel"
             : phase === "import" ? "enter import & save · esc cancel"
               : phase === "confirm" ? "enter overwrite · esc cancel"
-                : "tab/enter next · esc cancel"}
+                : "tab/enter next · ⌫/← back · esc cancel"}
       </Text>
       {p.shadowed && phase === "import" && (
         <Text color="yellow">note: this directory's lugent.json declares providers and will shadow the new one</Text>

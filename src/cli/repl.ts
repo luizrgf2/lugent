@@ -242,8 +242,16 @@ export async function runRepl(env: ReplEnv): Promise<void> {
         // literal `Bearer {env:VAR}` and a 401 until restart), empty key field
         // resolved to the stored one, `models` as written.
         env.config.providers[name] = saved.live
-        const savedCount = saved.live.models?.length ?? 0
-        console.log(`saved ${name} · ${savedCount ? `${savedCount} models` : "no model list"}${projectHasProviders(env.projectRoot) ? yellow(" — shadowed by this directory's lugent.json") : ""}`)
+        // `models` is omitted on a models-less save, and `saveProvider` then
+        // KEEPS whatever the file already had — so report that list as kept,
+        // never as imported.
+        const imported = models?.length ?? 0
+        const kept = saved.live.models?.length ?? 0
+        const shadow = projectHasProviders(env.projectRoot) ? yellow(" — shadowed by this directory's lugent.json") : ""
+        const summary = imported
+          ? `${imported} models`
+          : kept ? `saved, ${kept} cached models kept (the endpoint advertised none)` : "no model list"
+        console.log(`saved ${name} · ${summary}${shadow}`)
         continue
       }
       console.log("unknown command")

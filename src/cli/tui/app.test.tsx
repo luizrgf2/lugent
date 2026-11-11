@@ -1460,6 +1460,37 @@ test("/add-provider offers a models-less save when the endpoint advertises nothi
   rmSync(global, { force: true })
 })
 
+test("/add-provider reports a models-less save for an existing name as unchanged, not imported", async () => {
+  const global = `/tmp/opencode/tui-addprov-keep-${Date.now()}.json`
+  writeFileSync(global, JSON.stringify({
+    providers: { r: { baseUrl: "http://r/v1", apiKey: "sk-old", models: ["cached-a", "cached-b"] } },
+  }))
+  const env = fakeEnv({
+    config: {
+      defaultProvider: "r", defaultModel: "m1", permissionMode: "normal",
+      providers: { r: { baseUrl: "http://r/v1", apiKey: "sk-old", models: ["cached-a", "cached-b"] } },
+    },
+    discoverModels: async () => ({ ok: false, models: [], noModels: true, error: "endpoint answered but advertised no models" }),
+  })
+  const { type, allOutput } = renderTui(<App env={env} globalConfigPath={global} />)
+  type("/add-provider\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("r\rhttp://r/v1\r\r")                   // empty key keeps the stored one
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // test → no models
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // save without a list
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // overwrite confirm
+  await new Promise(r => setTimeout(r, 80))
+  // `saveProvider` retains the previous list; the transcript must not claim an import.
+  expect(JSON.parse(readFileSync(global, "utf8")).providers.r.models).toEqual(["cached-a", "cached-b"])
+  expect(env.config.providers.r.models).toEqual(["cached-a", "cached-b"])
+  expect(allOutput()).toContain("model list unchanged")
+  expect(allOutput()).not.toContain("models imported")
+  rmSync(global, { force: true })
+})
+
 test("/add-provider re-run with an empty key keeps the stored key in the live config too", async () => {
   const global = `/tmp/opencode/tui-addprov-key-${Date.now()}.json`
   writeFileSync(global, JSON.stringify({ providers: { r: { baseUrl: "http://r/v1", apiKey: "sk-old" } } }))

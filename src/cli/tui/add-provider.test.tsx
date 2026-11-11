@@ -88,6 +88,87 @@ test("a failed test can be fixed in place — backspace returns to the key, valu
   expect(seen).toEqual(["sk-wrong", "sk-wrongx"])
 })
 
+test("a wrong url can be fixed without retyping the form — ← walks back from the key", async () => {
+  const seen: string[] = []
+  const { type, lastFrame } = renderTui(
+    <AddProvider {...base} discover={async (cfg: any) => {
+      seen.push(cfg.baseUrl)
+      // First probe refuses the connection; the corrected one answers.
+      return seen.length === 1
+        ? { ok: false, models: [], error: "connect ECONNREFUSED" }
+        : { ok: true, models: ["m1"] }
+    }} />,
+  )
+  type("r\rhttp://localhost:999/v1\rsk-1\r")
+  await wait(30)
+  type("\r")                                  // Test → refused
+  await wait(40)
+  expect(lastFrame()).toContain("ECONNREFUSED")
+  type("\u007f")                              // backspace: back to the key field
+  await wait(30)
+  expect(lastFrame()).toContain("❯ api key:")
+  type("\u001b[D")                            // ← walks back to the url, key intact
+  await wait(30)
+  expect(lastFrame()).toContain("❯ base url:")
+  expect(lastFrame()).toContain("http://localhost:999/v1")
+  type("\u007f".repeat(6))                    // drop "999/v1"
+  type("8123/v1\r")                           // correct the port
+  await wait(30)
+  type("\r")                                  // key is still there → test
+  await wait(30)
+  type("\r")                                  // retest
+  await wait(40)
+  // The second probe got the corrected url — nothing was retyped from scratch.
+  expect(seen).toEqual(["http://localhost:999/v1", "http://localhost:8123/v1"])
+})
+
+test("an empty field's backspace also walks back — key → url with no key typed", async () => {
+  const seen: string[] = []
+  const { type, lastFrame } = renderTui(
+    <AddProvider {...base} discover={async (cfg: any) => {
+      seen.push(cfg.baseUrl)
+      return seen.length === 1
+        ? { ok: false, models: [], error: "connect ECONNREFUSED" }
+        : { ok: true, models: ["m1"] }
+    }} />,
+  )
+  type("r\rhttp://localhost:999/v1\r\r")      // empty key is legal
+  await wait(30)
+  type("\r")                                  // Test → refused
+  await wait(40)
+  type("\u007f")                              // ⌫ from test → key (empty)
+  await wait(30)
+  expect(lastFrame()).toContain("❯ api key:")
+  type("\u007f")                              // ⌫ on the empty key → url
+  await wait(30)
+  expect(lastFrame()).toContain("❯ base url:")
+  type("\u007f".repeat(6))                    // drop "999/v1"
+  type("8123/v1\r")                           // corrected port; url submits → key
+  await wait(30)
+  type("\r")                                  // key submits (still empty) → test
+  await wait(30)
+  type("\r")                                  // test with the corrected url
+  await wait(40)
+  expect(seen.length).toBe(2)
+  expect(seen[1]).toBe("http://localhost:8123/v1")
+})
+
+test("a models-less overwrite says the cached list is kept, not dropped", async () => {
+  const { type, lastFrame } = renderTui(
+    <AddProvider {...base} existing={["r"]} onSaved={() => {}}
+      discover={async () => ({ ok: false, models: [], noModels: true, error: "endpoint answered but advertised no models" })} />,
+  )
+  type("r\rhttp://r/v1\rsk-1\r")
+  await wait(30)
+  type("\r")                                  // Test → no models
+  await wait(40)
+  type("\r")                                  // save without a list → confirm
+  await wait(30)
+  // `saveProvider` keeps the previous list; the confirm must not claim otherwise.
+  expect(lastFrame()).toContain("keeps its current model list")
+  expect(lastFrame()).not.toContain("keeps no model list")
+})
+
 test("a 200 with no models offers a save without a model list", async () => {
   const saved: any[] = []
   const { type, lastFrame } = renderTui(

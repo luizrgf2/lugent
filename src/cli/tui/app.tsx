@@ -505,21 +505,30 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
               onClose={closeOverlay}
               onSaved={(name, cfg) => {
                 closeOverlay()
+                // The form decides which path it took; `cfg.models` is present
+                // only when this save actually imported a list. Counting
+                // `saved.live.models` would report the list `saveProvider`
+                // RETAINS for an existing name as a fresh import.
                 const saved = saveProvider(name, cfg, props.globalConfigPath ?? globalConfigPath())
+                const imported = cfg.models?.length ?? 0
                 // Push the entry `saveProvider` built for the session — normalized
                 // `baseUrl`, `models` as written, and the key resolved through
                 // `subEnv()`. Building it here instead would push the raw typed
                 // `{env:VAR}` and send a literal `Bearer {env:VAR}` until restart
                 // (`Provider` never substitutes), which is spec decision 2.
                 env.config.providers[name] = saved.live
-                const count = saved.live.models?.length ?? 0
+                // What the file now holds, stated as what it is: an import, a
+                // retained list, or no list at all.
+                const kept = saved.live.models?.length ?? 0
                 const shadow = projectShadowsProviders(env.projectRoot)
                   ? " — shadowed by this directory's lugent.json"
                   : ""
                 const note = saved.ok
-                  ? (count
-                      ? `${name} · ${count} models imported${shadow}`
-                      : `${name} · saved with no model list — /model fetches it live${shadow}`)
+                  ? (imported
+                      ? `${name} · ${imported} models imported${shadow}`
+                      : kept
+                        ? `${name} · saved · model list unchanged (${kept} kept, the endpoint advertised none)${shadow}`
+                        : `${name} · saved with no model list — /model fetches it live${shadow}`)
                   : `${name} · save failed, session only (${saved.error})`
                 setItems(is => [...is, { kind: "system", text: note }])
               }} />
