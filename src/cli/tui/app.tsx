@@ -18,6 +18,7 @@ import { AgentPicker } from "./agent-picker"
 import { SkillList } from "./skill-list"
 import { PermissionMode } from "./permission-mode"
 import { SessionPicker } from "./session-picker"
+import { existingProviderNames } from "../add-provider-repl"
 import { McpList } from "./mcp-list"
 import { AddProvider } from "./add-provider"
 import { ChildViewer, ChildPicker, decorateSubagents, type ChildInfo } from "./child-viewer"
@@ -499,7 +500,7 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
                 onClose={closeOverlay} />
         : overlay === "add-provider"
           ? <AddProvider
-              existing={Object.keys(env.config.providers)}
+              existing={existingProviderNames(Object.keys(env.config.providers), props.globalConfigPath ?? globalConfigPath())}
               shadowed={projectShadowsProviders(env.projectRoot)}
               discover={env.discoverModels ?? discoverModels}
               onClose={closeOverlay}

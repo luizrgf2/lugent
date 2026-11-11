@@ -1514,3 +1514,30 @@ test("/add-provider re-run with an empty key keeps the stored key in the live co
   expect(env.config.providers.r.apiKey).toBe("sk-old")
   rmSync(global, { force: true })
 })
+
+test("/add-provider confirms before overwriting a global entry the live config cannot see", async () => {
+  // A project `lugent.json` declaring providers wins in `loadConfig`, so the
+  // global file's entries are absent from `env.config.providers` — the live map
+  // would report no collision for a name the save is about to replace.
+  const global = `/tmp/opencode/tui-addprov-shadowed-${Date.now()}.json`
+  writeFileSync(global, JSON.stringify({ providers: { shadowed: { baseUrl: "http://old/v1", apiKey: "sk-old" } } }))
+  const env = fakeEnv({
+    config: { defaultProvider: "proj", defaultModel: "m1", permissionMode: "normal", providers: { proj: { baseUrl: "http://p/v1" } } },
+    discoverModels: fakeDiscover,
+  })
+  const { type, allOutput } = renderTui(<App env={env} globalConfigPath={global} />)
+  type("/add-provider\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("shadowed\rhttp://new/v1\rsk-new\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // test
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // import → must NOT save yet
+  await new Promise(r => setTimeout(r, 60))
+  expect(allOutput()).toContain("overwrite shadowed?")
+  expect(JSON.parse(readFileSync(global, "utf8")).providers.shadowed.apiKey).toBe("sk-old")
+  type("\r")                                   // confirm
+  await new Promise(r => setTimeout(r, 60))
+  expect(JSON.parse(readFileSync(global, "utf8")).providers.shadowed.apiKey).toBe("sk-new")
+  rmSync(global, { force: true })
+})

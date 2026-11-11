@@ -70,6 +70,26 @@ export function loadConfig(root: string, globalPath = `${homedir()}/.config/luge
 export const globalConfigPath = (): string => `${homedir()}/.config/lugent/config.json`
 
 /**
+ * The provider names a save to `path` would overwrite.
+ *
+ * Read from the *file being written*, not from the live config: `loadConfig` is
+ * first-file-wins, so a repo whose `lugent.json` declares providers hides every
+ * global entry from `env.config.providers` — and those hidden entries are exactly
+ * the ones `/add-provider` would replace. Anything unreadable declares nothing:
+ * `saveProvider` treats a missing or unparseable file as empty and starts over,
+ * so there is nothing there to destroy.
+ */
+export function providerNamesInFile(path = globalConfigPath()): string[] {
+  let raw: any
+  try { raw = JSON.parse(readFileSync(path, "utf8")) } catch { return [] }
+  const providers = raw?.providers
+  if (typeof providers !== "object" || providers === null || Array.isArray(providers)) return []
+  return Object.entries(providers)
+    .filter(([, v]) => typeof v === "object" && v !== null && !Array.isArray(v))
+    .map(([k]) => k)
+}
+
+/**
  * Persist the user's permission-mode choice to the global config (never the
  * project file — a repo must not decide trust level). Existing keys survive;
  * an unparseable file is replaced. The mode still loads from the first file

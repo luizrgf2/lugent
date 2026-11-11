@@ -12,6 +12,7 @@ import type { SkillMeta, Agent } from "../core/types"
 import { parseSlash, parseAnswer, mcpActions, formatMcpState, type McpAction } from "./commands"
 import { box, glyph, truncate, dim, cyan, red, yellow, Spinner, logo, timeAgo } from "./ui"
 import { buildPromptInput } from "./context"
+import { runAddProviderForm, existingProviderNames } from "./add-provider-repl"
 
 export interface ReplEnv {
   store: Store
@@ -207,51 +208,37 @@ export async function runRepl(env: ReplEnv): Promise<void> {
         // A piped (non-TTY) session has no one to answer the prompts: printing
         // usage and returning beats hanging on rl.question forever.
         if (!process.stdin.isTTY) { console.log(USAGE); continue }
-        const name = (slash.args[0] ?? (await rl.question("name: "))).trim()
-        if (!name) { console.log(red("name is required")); continue }
-        if (/\s/.test(name)) { console.log(red("name cannot contain spaces")); continue }
-        if (name.includes("/")) { console.log(red("name cannot contain /")); continue }
-        const baseUrl = (await rl.question("base url: ")).trim()
-        if (!/^https?:\/\/.+/.test(baseUrl)) { console.log(red("base url must start with http:// or https://")); continue }
-        if (!/\/v\d+\/?$/.test(baseUrl)) console.log(yellow("! no /v1 in the base url — most OpenAI-compatible endpoints need it"))
-        // Blank keeps whatever the global config already holds for this name.
-        const apiKey = (await rl.question("api key (blank keeps the stored one): ")).trim()
-        console.log(dim(`testing ${baseUrl.replace(/\/+$/, "")}/models…`))
-        const found = await discoverModels({ baseUrl, apiKey })
-        let models: string[] | undefined
-        if (found.ok) {
-          found.models.forEach((m, i) => console.log(`  ${dim(`${i + 1}.`)} ${m}`))
-          const yes = await rl.question(`import these ${found.models.length} models? [Y/n] `)
-          if (yes.trim().toLowerCase() === "n") { console.log("cancelled — nothing written"); continue }
-          models = found.models
-        } else if (found.noModels) {
-          // A reachable endpoint that advertises nothing: the provider is usable,
-          // it just has no cached list (`/model` falls back to a live call).
-          const yes = await rl.question(`test ok but the endpoint lists no models — save ${name} anyway? [Y/n] `)
-          if (yes.trim().toLowerCase() === "n") { console.log("cancelled — nothing written"); continue }
-        } else {
-          console.log(red(`test failed: ${found.error}`)); continue
-        }
-        const cfg: { baseUrl: string; apiKey?: string; models?: string[] } = { baseUrl }
-        if (apiKey) cfg.apiKey = apiKey
-        if (models) cfg.models = models
-        const saved = saveProvider(name, cfg, globalConfigPath())
-        if (!saved.ok) console.log(red(`save failed, session only: ${saved.error}`))
+        // The flow itself (validation, the Test, the overwrite gate) lives in
+        // `add-provider-repl.ts` so it can be tested without a terminal; this
+        // branch is only the wiring: readline for questions, console for lines.
+        const r = await runAddProviderForm({
+          name: slash.args[0],
+          ask: q => rl.question(q),
+          say: line => console.log(line),
+          onTest: url => console.log(dim(`testing ${url}/models…`)),
+          discover: discoverModels,
+          // A name already in the config means this save REPLACES that entry —
+          // the form asks before destroying a working base url and key, exactly
+          // as the TUI's confirm does (spec §"Validation, cheaply").
+          existing: existingProviderNames(Object.keys(env.config.providers), globalConfigPath()),
+          save: (n, cfg) => saveProvider(n, cfg, globalConfigPath()),
+        })
+        if (r.status === "invalid") { console.log(red(r.error)); continue }
+        if (r.status === "cancelled") { console.log("cancelled — nothing written"); continue }
+        if (!r.saveOk) console.log(red(`save failed, session only: ${r.saveError}`))
         // The entry `saveProvider` built for the session: key resolved through
         // `subEnv()` (Provider sends it verbatim — a raw `{env:VAR}` here is a
         // literal `Bearer {env:VAR}` and a 401 until restart), empty key field
         // resolved to the stored one, `models` as written.
-        env.config.providers[name] = saved.live
+        env.config.providers[r.name] = r.live
+        const shadow = projectHasProviders(env.projectRoot) ? yellow(" — shadowed by this directory's lugent.json") : ""
         // `models` is omitted on a models-less save, and `saveProvider` then
         // KEEPS whatever the file already had — so report that list as kept,
         // never as imported.
-        const imported = models?.length ?? 0
-        const kept = saved.live.models?.length ?? 0
-        const shadow = projectHasProviders(env.projectRoot) ? yellow(" — shadowed by this directory's lugent.json") : ""
-        const summary = imported
-          ? `${imported} models`
-          : kept ? `saved, ${kept} cached models kept (the endpoint advertised none)` : "no model list"
-        console.log(`saved ${name} · ${summary}${shadow}`)
+        const summary = r.imported
+          ? `${r.imported} models`
+          : r.kept ? `saved, ${r.kept} cached models kept (the endpoint advertised none)` : "no model list"
+        console.log(`saved ${r.name} · ${summary}${shadow}`)
         continue
       }
       console.log("unknown command")

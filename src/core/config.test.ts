@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test"
-import { subEnv, loadConfig, parseMcpServer, loadMcpConfig, savePermissionMode, saveProvider } from "./config"
+import { subEnv, loadConfig, parseMcpServer, loadMcpConfig, savePermissionMode, saveProvider, providerNamesInFile } from "./config"
 import { rmSync, writeFileSync, mkdirSync, readFileSync, statSync } from "node:fs"
 
 describe("subEnv", () => {
@@ -414,6 +414,23 @@ describe("saveProvider", () => {
     const bad = saveProvider("r", { baseUrl: "http://r/v1" }, "/proc/nope/config.json")
     expect(bad.ok).toBe(false)
     expect(bad.error).toBeTruthy()
+    rmSync(p, { force: true })
+  })
+
+  test("providerNamesInFile reports what the save would overwrite, shadowed entries included", () => {
+    // The overwrite gate has to be computed from the file being written, not from
+    // the live config: `loadConfig` is first-file-wins, so in a repo whose
+    // `lugent.json` declares providers the live map cannot see the global
+    // entries — and those are exactly the ones a save would destroy.
+    const p = `/tmp/opencode/names-${Date.now()}.json`
+    writeFileSync(p, JSON.stringify({ providers: { globalA: { baseUrl: "http://a/v1" }, globalB: { baseUrl: "http://b/v1" } } }))
+    expect(providerNamesInFile(p).sort()).toEqual(["globalA", "globalB"])
+    // Missing, unparseable or shape-less files simply declare nothing.
+    expect(providerNamesInFile(`/tmp/opencode/names-missing-${Date.now()}.json`)).toEqual([])
+    writeFileSync(p, "not json")
+    expect(providerNamesInFile(p)).toEqual([])
+    writeFileSync(p, JSON.stringify({ providers: { bad: "nope", ok: { baseUrl: "http://o/v1" } } }))
+    expect(providerNamesInFile(p)).toEqual(["ok"])
     rmSync(p, { force: true })
   })
 })
