@@ -102,3 +102,65 @@ test("readSecret always sets raw mode, even when stdin claims it is already raw"
   await p
   expect(t.rawCalls).toEqual([true, false])
 })
+
+// --- Escape sequences and control keys ---------------------------------------
+//
+// The first version skipped only the ESC byte and appended the rest of the
+// sequence, so pressing ← while correcting a key stored `[D` *inside* the
+// secret — invisibly, because the field renders one dot per character. Every
+// multi-byte sequence and every unhandled control byte had the same effect
+// (reproduced on a real pty: typed "sk-ab", ←, "cd" → saved `sk-ab[Dcd`).
+// The field needs no cursor movement to be correct; it needs to not corrupt
+// the secret.
+
+/** Feed keystrokes, in the exact chunks a terminal delivers them. */
+async function typedValue(chunks: string[]): Promise<string> {
+  const t = fakeTty()
+  const p = readSecret({ prompt: "key: ", input: t.input, output: t.output })
+  for (const c of chunks) t.input.emit("data", Buffer.from(c))
+  return await p
+}
+
+test("readSecret ignores an arrow key instead of typing its bytes", async () => {
+  expect(await typedValue(["sk-ab", "\u001b[D", "cd\r"])).toBe("sk-abcd")
+})
+
+test("readSecret consumes every escape-sequence class, leaving no residue", async () => {
+  const sequences: [string, string][] = [
+    ["left", "\u001b[D"], ["right", "\u001b[C"], ["up", "\u001b[A"], ["down", "\u001b[B"],
+    ["home", "\u001b[H"], ["end-F", "\u001b[F"], ["delete", "\u001b[3~"],
+    ["home-1", "\u001b[1~"], ["insert", "\u001b[2~"], ["pageup", "\u001b[5~"],
+    ["pagedown", "\u001b[6~"], ["ss3-left", "\u001bOD"], ["alt-x", "\u001bx"],
+  ]
+  for (const [label, seq] of sequences) {
+    expect([label, await typedValue(["a", seq, "b\r"])]).toEqual([label, "ab"])
+  }
+})
+
+test("readSecret consumes an escape sequence split across two chunks", async () => {
+  // A read can hand over "\u001b" and "[D" in separate chunks, and the ESC alone
+  // looks exactly like an Alt-key prefix. The sequence state has to survive the
+  // chunk boundary or the tail lands in the secret anyway.
+  expect(await typedValue(["a", "\u001b", "[D", "b\r"])).toBe("ab")
+  expect(await typedValue(["a", "\u001b[", "D", "b\r"])).toBe("ab")
+})
+
+test("readSecret ignores control keys other than backspace and Ctrl+C", async () => {
+  // ^D/^A/^U/^W at a real prompt are EOF / line-start / kill-line / kill-word;
+  // this reader has no line editing, so the only correct thing they can do is
+  // nothing. They used to be appended verbatim.
+  for (const [label, ctl] of [["^D", "\u0004"], ["^A", "\u0001"], ["^U", "\u0015"], ["^W", "\u0017"]] as [string, string][]) {
+    expect([label, await typedValue(["ab", ctl, "cd\r"])]).toEqual([label, "abcd"])
+  }
+})
+
+test("readSecret rejects a Ctrl+C with a cancellable error and restores the tty", async () => {
+  // The rejection is the contract the REPL catches: Ctrl+C is the documented way
+  // to abort, and an uncaught rejection ends the whole process.
+  const t = fakeTty()
+  const p = readSecret({ prompt: "key: ", input: t.input, output: t.output })
+  t.input.emit("data", Buffer.from("\u0003"))
+  await expect(p).rejects.toThrow("cancelled")
+  expect(t.rawCalls).toEqual([true, false])
+  expect(t.typed()).not.toContain("sk-")
+})

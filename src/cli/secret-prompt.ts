@@ -8,7 +8,11 @@
  * dependency-free (no `readline`, no `ink` — `src/cli` stays ANSI-only).
  *
  * Everything typed is echoed as a single `•` per character, so the length is
- * visible and the value is not; backspace erases one dot. The terminal goes back
+ * visible and the value is not; backspace erases one dot. Whole escape sequences
+ * (arrows, Home/End, Delete, bracketed-paste markers) and every other C0 control
+ * are consumed and never reach the value — this field has no line editing, and
+ * appending the residue of a sequence would corrupt the secret invisibly. Ctrl+C
+ * rejects with {@link ReadCancelled}. The terminal goes back
  * to canonical mode on the way out — a caller driving its own line reader
  * (`readline`, which `pause()`s here) re-enables its own raw mode when it resumes.
  * That is deliberate: `readline`'s `isRaw` stays `true` across a `pause()` while
@@ -51,6 +55,24 @@ export function muteableOutput<T extends { write(s: string): unknown }>(target: 
   }
 }
 
+/**
+ * Ctrl+C at a secret prompt. A distinct class (and not a message check alone) so
+ * the caller can tell "the user changed their mind" from "the read failed" and
+ * turn the first into a cancellation instead of a crash.
+ *
+ * This matters more than it looks: an uncaught rejection on ^C took the whole
+ * `--plain` REPL session down with exit 1 — reproduced 3/3 on a real pty — because
+ * `repl.ts` awaited the form with no handler. Ctrl+C is the documented abort key.
+ */
+export class ReadCancelled extends Error {
+  constructor() { super("cancelled"); this.name = "ReadCancelled" }
+}
+
+/** True for a user cancellation — this module's, or a front end's own equivalent. */
+export function isCancellation(e: unknown): boolean {
+  return e instanceof ReadCancelled || (e instanceof Error && e.message === "cancelled")
+}
+
 export function readSecret(opts: {
   prompt: string
   input: NodeJS.ReadStream | any
@@ -67,6 +89,11 @@ export function readSecret(opts: {
   return new Promise((resolve, reject) => {
     let value = ""
     let done = false
+    // Escape-sequence state, carried across `data` chunks. A read may deliver
+    // "\u001b" and "[D" separately, and the ESC alone is indistinguishable from
+    // an Alt-key prefix, so the state has to survive the boundary — otherwise the
+    // tail of the sequence lands inside the secret.
+    let esc: "none" | "start" | "csi" | "ss3" = "none"
 
     const cleanup = () => {
       if (done) return
@@ -83,16 +110,60 @@ export function readSecret(opts: {
     }
     const onError = (e: unknown) => { cleanup(); reject(e) }
 
+    /**
+     * True when `ch` belongs to an escape sequence and has been consumed.
+     *
+     * Skipping only the ESC byte was a silent-corruption bug: the rest of the
+     * sequence was appended to the secret, so ← while correcting a key stored
+     * `[D` inside the credential and the field — one dot per character — looked
+     * identical. The state machine below eats the whole sequence, including one
+     * split across two `data` chunks.
+     *
+     * Bracketed paste is the useful consequence: `ESC[200~ … ESC[201~` are
+     * consumed as markers and the pasted text between them types in, which is how
+     * a key usually arrives.
+     */
+    const consumeEscape = (ch: string): boolean => {
+      const code = ch.codePointAt(0) ?? 0
+      if (esc === "none") {
+        if (ch !== "\u001b") return false
+        esc = "start"
+        return true
+      }
+      if (esc === "start") {
+        if (ch === "\u001b") { esc = "start"; return true }         // ESC ESC
+        if (ch === "[") { esc = "csi"; return true }
+        if (ch === "O") { esc = "ss3"; return true }
+        // A lone ESC followed by a real key (Alt+X) is consumed as a unit — but
+        // never at the cost of Enter or Ctrl+C, which must keep working if the
+        // ESC byte was a stray keystroke rather than a prefix.
+        esc = "none"
+        return !(ch === "\r" || ch === "\n" || ch === "\u0003")
+      }
+      if (esc === "csi") {
+        // Final byte per ECMA-48: 0x40–0x7E ends the sequence; parameter and
+        // intermediate bytes (0x20–0x3F) continue it.
+        if (code >= 0x40 && code <= 0x7e) esc = "none"
+        return true
+      }
+      esc = "none"                                                  // ss3: one char
+      return true
+    }
+
     const onData = (chunk: Buffer | string) => {
       const s = typeof chunk === "string" ? chunk : chunk.toString("utf8")
       for (const ch of s) {
+        if (consumeEscape(ch)) continue
         if (ch === "\r" || ch === "\n") { finish(); return }
-        if (ch === "\u0003") { cleanup(); promptOut.write("\n"); reject(new Error("cancelled")); return }
+        if (ch === "\u0003") { cleanup(); promptOut.write("\n"); reject(new ReadCancelled()); return }
         if (ch === "\u007f" || ch === "\b") {
           if (value.length > 0) { value = value.slice(0, -1); promptOut.write("\b \b") }
           continue
         }
-        if (ch === "\u001b") continue   // ignore escape sequences (arrow keys)
+        // Every remaining C0 control (^A, ^D, ^U, ^W, …) has no meaning in a
+        // single-line masked field, so it must do nothing. Appending it put an
+        // invisible byte in the credential.
+        if ((ch.codePointAt(0) ?? 0) < 0x20) continue
         value += ch
         promptOut.write(MASK)
       }
