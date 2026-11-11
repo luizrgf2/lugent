@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 import { homedir } from "node:os"
 import { parseModelRef } from "./agents"
 import type { AgentModelRef } from "./types"
 
-export interface ProviderConfig { baseUrl: string; apiKey?: string }
+export interface ProviderConfig { baseUrl: string; apiKey?: string; models?: string[] }
 export type PermissionMode = "normal" | "yolo"
 export interface AppConfig {
   providers: Record<string, ProviderConfig>
@@ -34,7 +34,17 @@ export function loadConfig(root: string, globalPath = `${homedir()}/.config/luge
   const providers: Record<string, ProviderConfig> = {}
   for (const [name, p] of Object.entries(raw.providers ?? {})) {
     const pc = p as ProviderConfig
-    providers[name] = { baseUrl: pc.baseUrl, apiKey: pc.apiKey ? subEnv(pc.apiKey) : undefined }
+    // Model ids are literal — `{env:}` is a key-only mechanism, substituting here
+    // would silently corrupt an id that happens to look like a reference.
+    const models = Array.isArray(pc.models)
+      ? pc.models.filter((m): m is string => typeof m === "string" && m !== "")
+      : undefined
+    const key = pc.apiKey
+    providers[name] = {
+      baseUrl: pc.baseUrl,
+      apiKey: key ? subEnv(key) : undefined,
+      ...(models ? { models } : {}),
+    }
   }
   let defaultSubagentModel: AgentModelRef | undefined
   if (raw.defaultSubagentModel !== undefined) {
@@ -60,6 +70,56 @@ export function loadConfig(root: string, globalPath = `${homedir()}/.config/luge
 export const globalConfigPath = (): string => `${homedir()}/.config/lugent/config.json`
 
 /**
+ * The provider names a save to `path` would overwrite.
+ *
+ * Read from the *file being written*, not from the live config: `loadConfig` is
+ * first-file-wins, so a repo whose `lugent.json` declares providers hides every
+ * global entry from `env.config.providers` — and those hidden entries are exactly
+ * the ones `/add-provider` would replace. Anything unreadable declares nothing:
+ * `saveProvider` treats a missing or unparseable file as empty and starts over,
+ * so there is nothing there to destroy.
+ */
+export function providerNamesInFile(path = globalConfigPath()): string[] {
+  return Object.keys(readProviderEntries(path))
+}
+
+/**
+ * One provider entry as the *file* holds it — `apiKey` still a raw reference
+ * (`{env:VAR}` unresolved), no normalizing.
+ *
+ * Why it exists: re-running `/add-provider` is the refresh path, and both UIs
+ * invite a blank key field meaning "keep the stored one". The Test is built
+ * before/outside `loadConfig`, so without this it would go out with no
+ * `Authorization` header at all — a `401` the user cannot fix without retyping a
+ * key they may deliberately never read. Reads the file `saveProvider` writes, for
+ * the same reason the overwrite gate does. Raw rather than resolved: `subEnv()`
+ * belongs to `discoverModels`, which also reports a reference that resolves to
+ * nothing, and the same function must behave identically for a key the user typed.
+ */
+export function providerEntryInFile(name: string, path = globalConfigPath()): ProviderConfig | undefined {
+  const raw = readProviderEntries(path)[name] as Record<string, unknown> | undefined
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined
+  const entry: ProviderConfig = { baseUrl: typeof raw.baseUrl === "string" ? raw.baseUrl : "" }
+  if (typeof raw.apiKey === "string") entry.apiKey = raw.apiKey
+  const models = Array.isArray(raw.models) ? raw.models.filter((m): m is string => typeof m === "string") : undefined
+  if (models) entry.models = models
+  return entry
+}
+
+/** The `providers` object of `path`, or `{}` — missing, unparseable and shape-less all read as empty. */
+function readProviderEntries(path: string): Record<string, unknown> {
+  let raw: any
+  try { raw = JSON.parse(readFileSync(path, "utf8")) } catch { return {} }
+  const providers = raw?.providers
+  if (typeof providers !== "object" || providers === null || Array.isArray(providers)) return {}
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(providers)) {
+    if (typeof v === "object" && v !== null && !Array.isArray(v)) out[k] = v
+  }
+  return out
+}
+
+/**
  * Persist the user's permission-mode choice to the global config (never the
  * project file — a repo must not decide trust level). Existing keys survive;
  * an unparseable file is replaced. The mode still loads from the first file
@@ -79,6 +139,70 @@ export function savePermissionMode(mode: PermissionMode, path = globalConfigPath
     return false
   }
   return true
+}
+
+/**
+ * Persist one provider into the global config (never a project file — a repo
+ * must not carry credentials). Read-modify-write: every other key survives, and
+ * an unparseable file is replaced, exactly like `savePermissionMode`.
+ *
+ * - `baseUrl` trailing slashes are stripped *before* writing: `Provider`
+ *   concatenates raw, so a saved slash would make every later chat 404.
+ * - An empty `apiKey` keeps the key already on disk (re-running the form is the
+ *   only refresh path, and it must not destroy a working key); `models` is
+ *   replaced whenever the argument is present.
+ * - A file that now holds an inline key is `0600` — the same rule the MCP token
+ *   store applies. The key is stored exactly as typed, `{env:VAR}` included.
+ *
+ * Returns `{ ok, error?, live }`: `live` is the entry the *session* should hold —
+ * normalized `baseUrl`, `models` as written, and the key resolved through
+ * `subEnv()`. That last point is why this returns anything at all: `Provider`
+ * sends `cfg.apiKey` verbatim and never calls `subEnv`, which is safe only for
+ * entries that came from `loadConfig`. Writing the raw typed string into
+ * `env.config.providers` would send a literal `Bearer {env:VAR}` until restart —
+ * spec decision 2. The file keeps the reference; only the live entry resolves.
+ */
+export function saveProvider(
+  name: string,
+  cfg: { baseUrl: string; apiKey?: string; models?: string[] },
+  path = globalConfigPath(),
+): { ok: boolean; error?: string; live: ProviderConfig } {
+  let raw: Record<string, any> = {}
+  try { raw = JSON.parse(readFileSync(path, "utf8")) } catch { /* missing or unparseable → start over */ }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) raw = {}
+  if (typeof raw.providers !== "object" || raw.providers === null || Array.isArray(raw.providers)) raw.providers = {}
+
+  const prev = raw.providers[name]
+  const previous: Record<string, any> = typeof prev === "object" && prev !== null ? prev : {}
+  const entry: Record<string, any> = { baseUrl: cfg.baseUrl.replace(/\/+$/, "") }
+  const apiKey = cfg.apiKey === undefined || cfg.apiKey === "" ? previous.apiKey : cfg.apiKey
+  if (apiKey !== undefined && apiKey !== "") entry.apiKey = apiKey
+  if (cfg.models !== undefined) entry.models = cfg.models
+  else if (Array.isArray(previous.models)) entry.models = previous.models
+  raw.providers[name] = entry
+
+  // The session's copy of the entry. Two deliberate differences from the file:
+  // the key is resolved (`Provider` sends it verbatim) and a reference that
+  // resolves to nothing is dropped entirely — an empty `Bearer ` is a worse
+  // error than an unauthenticated request whose 401 names the real problem.
+  const live: ProviderConfig = { baseUrl: entry.baseUrl }
+  if (typeof entry.apiKey === "string" && entry.apiKey !== "") {
+    const resolved = subEnv(entry.apiKey)
+    if (resolved !== "") live.apiKey = resolved
+  }
+  if (Array.isArray(entry.models)) live.models = entry.models
+
+  try {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, JSON.stringify(raw, null, 2) + "\n")
+    // A pre-existing looser file keeps its bits on a plain overwrite — the mode
+    // has to be set explicitly, as the MCP token store does.
+    if (typeof entry.apiKey === "string" && entry.apiKey !== "") chmodSync(path, 0o600)
+  } catch (e) {
+    // The caller keeps `live` for the session only, so a failed write still works.
+    return { ok: false, error: e instanceof Error ? e.message : String(e), live }
+  }
+  return { ok: true, live }
 }
 
 function subEnvMap(m: unknown): Record<string, string> | undefined {

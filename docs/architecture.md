@@ -6,6 +6,7 @@ lugent is a thin REPL over a pure core library. Everything in `src/core/` is UI-
 src/main.ts                entry: config, store, health checks, starts REPL
 src/cli/
   repl.ts                  readline loop, slash commands, SIGINT, prompts
+  add-provider-repl.ts     /add-provider flow shared by the REPL (validation, Test, overwrite gate)
   commands.ts              parseSlash, parseAnswer
 src/core/
   config.ts                lugent.json / global config, {env:VAR}

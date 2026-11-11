@@ -5,6 +5,7 @@ import { EventEmitter } from "node:events"
 import { App, runTui } from "./app"
 import { renderTui } from "./harness"
 import { Store } from "../../core/store"
+import { Provider } from "../../core/provider"
 import { makeSubagentTool } from "../../core/tools/subagent"
 
 
@@ -1498,4 +1499,197 @@ test("/model: a slow provider's list cannot overwrite the one now on screen", as
   await new Promise(r => setTimeout(r, 500))        // the slow list settles after this one
   expect(lastFrame()).toContain("fast-A")           // still the rows we are looking at
   expect(lastFrame()).not.toContain("slow-A")
+})
+
+const fakeDiscover = async () => ({ ok: true as const, models: ["m1", "m2"] })
+
+test("/add-provider saves to the global config and the provider is usable at once", async () => {
+  const global = `/tmp/opencode/tui-addprov-${Date.now()}.json`
+  const env = fakeEnv({ projectRoot: "/tmp/opencode", discoverModels: fakeDiscover })
+  const { type, allOutput } = renderTui(<App env={env} globalConfigPath={global} />)
+  type("/add-provider\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("r\rhttp://r/v1\rsk-1\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // test — injected discover lists m1, m2
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // import
+  await new Promise(r => setTimeout(r, 60))
+  expect(JSON.parse(readFileSync(global, "utf8")).providers.r.models).toEqual(["m1", "m2"])
+  expect(env.config.providers.r.baseUrl).toBe("http://r/v1")   // live push, no restart
+  expect(allOutput()).toContain("models imported")
+  rmSync(global, { force: true })
+})
+
+test("/model lists a cached model list without calling the endpoint", async () => {
+  const env = fakeEnv({
+    config: {
+      defaultProvider: "r", defaultModel: "m1",
+      providers: { r: { baseUrl: "http://r/v1", models: ["cached-a", "cached-b"] } },
+      permissionMode: "normal",
+    },
+    makeProvider: () => ({ chat: async () => ({}), listModels: async () => { throw new Error("must not be called") } }),
+  })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // enter the provider level
+  await new Promise(r => setTimeout(r, 40))
+  expect(lastFrame()).toContain("cached-a")
+  expect(lastFrame()).toContain("cached-b")
+})
+
+test("/add-provider warns when a project config shadows it", async () => {
+  const dir = `/tmp/opencode/tui-shadow-${Date.now()}`
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(`${dir}/lugent.json`, JSON.stringify({ providers: { p: { baseUrl: "http://p/v1" } } }))
+  const global = `${dir}/global.json`
+  const env = fakeEnv({ projectRoot: dir, discoverModels: fakeDiscover })
+  const { type, allOutput } = renderTui(<App env={env} globalConfigPath={global} />)
+  type("/add-provider\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("r\rhttp://r/v1\rsk-1\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // test
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // import
+  await new Promise(r => setTimeout(r, 60))
+  // The result line is a system item: it prints to the scrollback (<Static>), not the frame.
+  expect(allOutput()).toContain("shadowed")
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test("/add-provider pushes a {env:VAR} key into the live session resolved, not literally", async () => {
+  process.env.LUGENT_ADDPROV_KEY = "sk-resolved-secret"
+  const global = `/tmp/opencode/tui-addprov-env-${Date.now()}.json`
+  const env = fakeEnv({ projectRoot: "/tmp/opencode", discoverModels: fakeDiscover })
+  const { type } = renderTui(<App env={env} globalConfigPath={global} />)
+  type("/add-provider\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("r\rhttp://r/v1\r{env:LUGENT_ADDPROV_KEY}\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // test
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // import
+  await new Promise(r => setTimeout(r, 60))
+  // The file keeps the reference: the format is unchanged.
+  expect(JSON.parse(readFileSync(global, "utf8")).providers.r.apiKey).toBe("{env:LUGENT_ADDPROV_KEY}")
+  // The live entry must carry the secret, because Provider.headers() sends it verbatim.
+  expect(env.config.providers.r.apiKey).toBe("sk-resolved-secret")
+  // And that is what actually goes on the wire — a stub fetch proves the header.
+  let auth = ""
+  const p = new Provider(env.config.providers.r, "m1", (async (_url: string, init: any) => {
+    auth = init.headers.authorization
+    return new Response("data: [DONE]\n\n", { status: 200 })
+  }) as any)
+  await p.chat({ messages: [{ role: "user", content: "hi" }], tools: [] })
+  expect(auth).toBe("Bearer sk-resolved-secret")
+  delete process.env.LUGENT_ADDPROV_KEY
+  rmSync(global, { force: true })
+})
+
+test("/add-provider offers a models-less save when the endpoint advertises nothing", async () => {
+  const global = `/tmp/opencode/tui-addprov-nomodels-${Date.now()}.json`
+  const env = fakeEnv({
+    projectRoot: "/tmp/opencode",
+    discoverModels: async () => ({ ok: false, models: [], noModels: true, error: "endpoint answered but advertised no models" }),
+  })
+  const { type, allOutput } = renderTui(<App env={env} globalConfigPath={global} />)
+  type("/add-provider\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("r\rhttp://r/v1\rsk-1\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // test
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // save without a model list
+  await new Promise(r => setTimeout(r, 80))
+  const written = JSON.parse(readFileSync(global, "utf8")).providers.r
+  expect(written.models).toBeUndefined()
+  expect(written.baseUrl).toBe("http://r/v1")
+  expect(env.config.providers.r.models).toBeUndefined()   // session mirrors the file
+  expect(allOutput()).toContain("no model list")
+  rmSync(global, { force: true })
+})
+
+test("/add-provider reports a models-less save for an existing name as unchanged, not imported", async () => {
+  const global = `/tmp/opencode/tui-addprov-keep-${Date.now()}.json`
+  writeFileSync(global, JSON.stringify({
+    providers: { r: { baseUrl: "http://r/v1", apiKey: "sk-old", models: ["cached-a", "cached-b"] } },
+  }))
+  const env = fakeEnv({
+    config: {
+      defaultProvider: "r", defaultModel: "m1", permissionMode: "normal",
+      providers: { r: { baseUrl: "http://r/v1", apiKey: "sk-old", models: ["cached-a", "cached-b"] } },
+    },
+    discoverModels: async () => ({ ok: false, models: [], noModels: true, error: "endpoint answered but advertised no models" }),
+  })
+  const { type, allOutput } = renderTui(<App env={env} globalConfigPath={global} />)
+  type("/add-provider\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("r\rhttp://r/v1\r\r")                   // empty key keeps the stored one
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // test → no models
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // save without a list
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // overwrite confirm
+  await new Promise(r => setTimeout(r, 80))
+  // `saveProvider` retains the previous list; the transcript must not claim an import.
+  expect(JSON.parse(readFileSync(global, "utf8")).providers.r.models).toEqual(["cached-a", "cached-b"])
+  expect(env.config.providers.r.models).toEqual(["cached-a", "cached-b"])
+  expect(allOutput()).toContain("model list unchanged")
+  expect(allOutput()).not.toContain("models imported")
+  rmSync(global, { force: true })
+})
+
+test("/add-provider re-run with an empty key keeps the stored key in the live config too", async () => {
+  const global = `/tmp/opencode/tui-addprov-key-${Date.now()}.json`
+  writeFileSync(global, JSON.stringify({ providers: { r: { baseUrl: "http://r/v1", apiKey: "sk-old" } } }))
+  const env = fakeEnv({
+    config: { defaultProvider: "r", defaultModel: "m1", permissionMode: "normal", providers: { r: { baseUrl: "http://r/v1", apiKey: "sk-old" } } },
+    discoverModels: fakeDiscover,
+  })
+  const { type } = renderTui(<App env={env} globalConfigPath={global} />)
+  type("/add-provider\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("r\rhttp://r/v1\r\r")                   // empty key field
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // test
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // import
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // overwrite confirm
+  await new Promise(r => setTimeout(r, 60))
+  expect(JSON.parse(readFileSync(global, "utf8")).providers.r.apiKey).toBe("sk-old")
+  // The disk kept the key — the live session must not silently run unauthenticated.
+  expect(env.config.providers.r.apiKey).toBe("sk-old")
+  rmSync(global, { force: true })
+})
+
+test("/add-provider confirms before overwriting a global entry the live config cannot see", async () => {
+  // A project `lugent.json` declaring providers wins in `loadConfig`, so the
+  // global file's entries are absent from `env.config.providers` — the live map
+  // would report no collision for a name the save is about to replace.
+  const global = `/tmp/opencode/tui-addprov-shadowed-${Date.now()}.json`
+  writeFileSync(global, JSON.stringify({ providers: { shadowed: { baseUrl: "http://old/v1", apiKey: "sk-old" } } }))
+  const env = fakeEnv({
+    config: { defaultProvider: "proj", defaultModel: "m1", permissionMode: "normal", providers: { proj: { baseUrl: "http://p/v1" } } },
+    discoverModels: fakeDiscover,
+  })
+  const { type, allOutput } = renderTui(<App env={env} globalConfigPath={global} />)
+  type("/add-provider\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("shadowed\rhttp://new/v1\rsk-new\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // test
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // import → must NOT save yet
+  await new Promise(r => setTimeout(r, 60))
+  expect(allOutput()).toContain("overwrite shadowed?")
+  expect(JSON.parse(readFileSync(global, "utf8")).providers.shadowed.apiKey).toBe("sk-old")
+  type("\r")                                   // confirm
+  await new Promise(r => setTimeout(r, 60))
+  expect(JSON.parse(readFileSync(global, "utf8")).providers.shadowed.apiKey).toBe("sk-new")
+  rmSync(global, { force: true })
+
 })

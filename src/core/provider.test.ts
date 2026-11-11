@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test"
-import { Provider } from "./provider"
+import { Provider, discoverModels } from "./provider"
 
 function sseBody(chunks: object[]): Response {
   const stream = new ReadableStream({
@@ -236,4 +236,99 @@ test("a 429 body is cancelled before the retry fires", async () => {
   await expect(p.chat({ messages: [], tools: [], maxRetries: 2, backoffBaseMs: 50, signal: new AbortController().signal })).rejects.toThrow("429")
   expect(calls).toBe(3)
   expect(cancelled).toEqual([true, true, true])
+})
+
+test("discoverModels returns ids on 200 and resolves the key", async () => {
+  let seen = ""
+  const r = await discoverModels({ baseUrl: "http://r/v1", apiKey: "sk-1" }, {
+    fetchFn: (async (url: string, init: any) => { seen = `${url} ${init.headers.authorization}`; return new Response(JSON.stringify({ data: [{ id: "a" }, { id: "b" }] }), { status: 200 }) }) as any,
+  })
+  expect(r.ok).toBe(true)
+  expect(r.models).toEqual(["a", "b"])
+  expect(seen).toBe("http://r/v1/models Bearer sk-1")
+})
+
+test("discoverModels does not double the slash on a trailing-slash baseUrl", async () => {
+  let seen = ""
+  await discoverModels({ baseUrl: "http://r/v1/" }, {
+    fetchFn: (async (url: string) => { seen = url; return new Response(JSON.stringify({ data: [] }), { status: 200 }) }) as any,
+  })
+  expect(seen).toBe("http://r/v1/models")
+})
+
+test("discoverModels reports a non-200 without throwing", async () => {
+  const r = await discoverModels({ baseUrl: "http://r/v1" }, { fetchFn: (async () => new Response("nope", { status: 401 })) as any })
+  expect(r.ok).toBe(false)
+  expect(r.error).toContain("401")
+})
+
+test("discoverModels rejects a 200 with no models, and one with an HTML body", async () => {
+  const empty = await discoverModels({ baseUrl: "http://r/v1" }, {
+    fetchFn: (async () => new Response(JSON.stringify({ data: [] }), { status: 200 })) as any,
+  })
+  expect(empty.ok).toBe(false)
+  expect(empty.error).toContain("no models")
+  const html = await discoverModels({ baseUrl: "http://r/v1" }, {
+    fetchFn: (async () => new Response("<html>hi</html>", { status: 200 })) as any,
+  })
+  expect(html.ok).toBe(false)
+})
+
+test("discoverModels treats an unparsable 200 body like an empty list, not a failed test", async () => {
+  // Spec decision 6 names non-JSON bodies alongside {"data":[]}: a gateway behind
+  // a login page, a wrong path or a proxy error page answers 200 text/html, and
+  // that is "reachable but advertises nothing" — the models-less save must stay
+  // reachable instead of the user being told to retest a working url.
+  for (const body of ["<html>hi</html>", "not json at all", ""]) {
+    const r = await discoverModels({ baseUrl: "http://r/v1" }, {
+      fetchFn: (async () => new Response(body, { status: 200 })) as any,
+    })
+    expect(r.ok).toBe(false)
+    expect(r.noModels).toBe(true)
+    expect(r.error).toBe("endpoint answered but advertised no models")
+  }
+  // A body that parses but carries no usable `data` entry is the same case.
+  for (const json of [{ data: "nope" }, { data: [{ nope: 1 }] }, { data: [""] }, {}]) {
+    const r = await discoverModels({ baseUrl: "http://r/v1" }, {
+      fetchFn: (async () => new Response(JSON.stringify(json), { status: 200 })) as any,
+    })
+    expect(r.noModels).toBe(true)
+  }
+  // A non-2xx is still a hard failure: there is nothing to save against a 401.
+  const denied = await discoverModels({ baseUrl: "http://r/v1" }, {
+    fetchFn: (async () => new Response("<html>denied</html>", { status: 401 })) as any,
+  })
+  expect(denied.noModels).toBeUndefined()
+  expect(denied.error).toBe("HTTP 401")
+})
+
+test("discoverModels flags a 200 with no models as a models-less provider", async () => {
+  const empty = await discoverModels({ baseUrl: "http://r/v1" }, {
+    fetchFn: (async () => new Response(JSON.stringify({ data: [] }), { status: 200 })) as any,
+  })
+  // The form needs this bit to offer "save without a model list" (spec decision 6)
+  // instead of treating a reachable endpoint as a hard failure.
+  expect(empty.noModels).toBe(true)
+  // A hard failure is NOT a models-less provider — it is a dead end to retest.
+  const denied = await discoverModels({ baseUrl: "http://r/v1" }, {
+    fetchFn: (async () => new Response("nope", { status: 401 })) as any,
+  })
+  expect(denied.noModels).toBeUndefined()
+})
+
+test("discoverModels reports an unresolved {env:VAR} as a missing variable", async () => {
+  const r = await discoverModels({ baseUrl: "http://r/v1", apiKey: "{env:LUGENT_UNSET_KEY}" }, { fetchFn: (async () => new Response("{}")) as any })
+  expect(r.ok).toBe(false)
+  expect(r.error).toContain("LUGENT_UNSET_KEY")
+})
+
+test("discoverModels gives up on a host that never answers", async () => {
+  const r = await discoverModels({ baseUrl: "http://dead/v1" }, {
+    timeoutMs: 50,
+    fetchFn: ((_u: string, init: any) => new Promise((_res, rej) => {
+      init.signal.addEventListener("abort", () => rej(new Error("aborted")))
+    })) as any,
+  })
+  expect(r.ok).toBe(false)
+  expect(r.error).toBeTruthy()
 })
