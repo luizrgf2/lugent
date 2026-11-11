@@ -61,6 +61,8 @@ test("a passing test lists the models and saves on confirm", async () => {
   await wait(40)
   expect(lastFrame()).toContain("a")
   expect(lastFrame()).toContain("b")
+  type("a")                                   // check both rows
+  await wait(30)
   type("\r")                                  // import & save
   await wait(30)
   expect(saved[0][0]).toBe("r")
@@ -247,6 +249,8 @@ test("an existing name asks before overwriting", async () => {
   await wait(30)
   type("\r")                                  // Test
   await wait(40)
+  type("a")                                   // check the one row
+  await wait(30)
   type("\r")                                  // import
   await wait(30)
   expect(lastFrame()).toContain("overwrite")
@@ -281,7 +285,7 @@ test("a blank key field on a re-run Tests with the stored key", async () => {
   type("\r")                                  // Test
   await wait(40)
   expect(seen).toEqual([{ baseUrl: "http://r/v1", apiKey: "sk-stored" }])
-  expect(lastFrame()).toContain("1 model found")
+  expect(lastFrame()).toContain("0 of 1 model selected")
 })
 
 test("a stored {env:VAR} key is resolved for the TUI Test, raw in the file", async () => {
@@ -540,20 +544,32 @@ test("a long model list is windowed so the header and footer stay on screen", as
   expect(frame).toContain("model-001")
   expect(frame).not.toContain("model-300")
   expect(frame).toContain("1-8 of 300")
-  expect(frame).toContain("enter import & save")     // the footer still exists
+  expect(frame).toContain("space toggle")             // the footer still exists
   expect(frame.split("\n").length).toBeLessThanOrEqual(20)  // and the frame is bounded
 })
 
-test("down and up move the window by one model", async () => {
+test("down and up move the cursor, and the window follows only past the last visible row", async () => {
+  // Measured: `model-picker.tsx:74`'s arithmetic freezes the window while the
+  // cursor is still inside it, so the first `↓` moves the marker only.
   const { type, lastFrame } = await toImport(20)
-  type("\u001b[B")                                // down
+  type("\u001b[B")                                // down — cursor on row 2
   await wait(30)
-  expect(lastFrame()).toContain("model-002")
-  expect(lastFrame()).not.toContain("model-001 ")
+  expect(lastFrame()).toContain("1-8 of 20")
+  expect(lastFrame()).toContain("❯ [ ] model-002")
+  for (let i = 0; i < 6; i++) {                   // six more: cursor on row 8, still inside
+    type("\u001b[B")
+    await wait(30)
+  }
+  expect(lastFrame()).toContain("1-8 of 20")
+  expect(lastFrame()).toContain("❯ [ ] model-008")
+  type("\u001b[B")                                // eighth — cursor passes row 8, window moves
+  await wait(30)
   expect(lastFrame()).toContain("2-9 of 20")
-  type("\u001b[A")                                // up
+  expect(lastFrame()).toContain("❯ [ ] model-009")
+  type("\u001b[A")                                // up — cursor back inside the window
   await wait(30)
-  expect(lastFrame()).toContain("model-001")
+  expect(lastFrame()).toContain("1-8 of 20")      // window follows the cursor back
+  expect(lastFrame()).toContain("❯ [ ] model-008")
 })
 
 test("end jumps to the last window and home returns to the top", async () => {
@@ -568,38 +584,50 @@ test("end jumps to the last window and home returns to the top", async () => {
   expect(lastFrame()).toContain("1-8 of 20")
 })
 
-test("page down moves a full window, clamped at the end", async () => {
+test("page down moves the cursor a full window, clamped at the end", async () => {
+  // Measured on the spike: PgDn on 20 rows gives 2-9, then 10-17, then clamps to
+  // 13-20. The old 9-16 was free-scroll arithmetic and does not survive a cursor:
+  // `PgDn` moves the cursor by MAX_VISIBLE and the window follows the cursor.
   const { type, lastFrame } = await toImport(20)
   type("\u001b[6~")                               // pgdn
   await wait(30)
-  expect(lastFrame()).toContain("9-16 of 20")
-  type("\u001b[6~")                               // pgdn again — clamps, no overshoot
+  expect(lastFrame()).toContain("2-9 of 20")
+  type("\u001b[6~")                               // pgdn again
+  await wait(30)
+  expect(lastFrame()).toContain("10-17 of 20")
+  type("\u001b[6~")                               // pgdn a third time — clamps, no overshoot
   await wait(30)
   expect(lastFrame()).toContain("13-20 of 20")
 })
 
-test("enter after scrolling still imports every model, not just the window", async () => {
-  // Two asserts on purpose: the window assert makes this RED before the feature
-  // exists, and the import assert pins the all-or-nothing contract against a
-  // future slice of `pendingModelsRef`. Asserting only that `model-020` is
-  // visible would pass on the unfixed code, where the un-windowed list renders
-  // every id — it must be `model-001` disappearing that proves the window moved.
+test("enter imports exactly the checked rows, including one scrolled out of view", async () => {
+  // Inverted from "enter after scrolling still imports every model". Two asserts
+  // on purpose: the window assert makes this RED before the feature exists, and
+  // the import assert pins the subset against a future revert to all-or-nothing.
+  // Task 3's "scrolled out of view" test covers the same shape at the component
+  // level; this one is the same guarantee through the window machinery.
   const saved: any[] = []
   const { type, lastFrame } = await toImport(20, saved)
-  type("\u001b[F")                                // end
+  type("\u001b[F")                                // end — window is 13-20
   await wait(30)
   expect(lastFrame()).toContain("model-020")
   expect(lastFrame()).not.toContain("model-001")
+  type(" ")                                       // check model-020 only
+  await wait(30)
   type("\r")                                      // import & save
   await wait(30)
   expect(saved.length).toBe(1)
-  expect(saved[0][1].models).toEqual(many(20))
+  expect(saved[0][1].models).toEqual(["model-020"])
 })
 
 test("a list that fits the window shows no scroll hint", async () => {
-  const { lastFrame } = await toImport(3)
+  // `a` first: the count is the checked count, so "3 of 3" is only honest once
+  // everything is checked (spec §4 retargets the old `3 models found` assert).
+  const { type, lastFrame } = await toImport(3)
+  type("a")
+  await wait(30)
   const frame = lastFrame()
-  expect(frame).toContain("3 models found")
-  expect(frame).not.toContain(" of 3")
+  expect(frame).toContain("3 of 3 models selected")
+  expect(frame).not.toContain("—")                // no `— start-end of total` suffix
   expect(frame).not.toContain("scroll")
 })

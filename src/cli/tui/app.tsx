@@ -555,7 +555,7 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
                   { cmd: "resume", desc: "resume a past session" },
                   { cmd: "permissions", desc: "permission mode (normal/yolo)" },
                   { cmd: "agent", desc: "switch agent profile" },
-                  { cmd: "add-provider", desc: "register a provider (test + import models)" },
+                  { cmd: "add-provider", desc: "register a provider (test + select models)" },
                 ]} />}
       </Box>
       </Box>

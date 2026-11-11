@@ -208,7 +208,7 @@ export async function runRepl(env: ReplEnv): Promise<void> {
         continue
       }
       if (slash.cmd === "add-provider") {
-        const USAGE = "usage: /add-provider <name> — interactive: asks base url and api key, tests the endpoint, imports its models"
+        const USAGE = "usage: /add-provider <name> — interactive: asks base url and api key, tests the endpoint, asks which models to import"
         // A piped (non-TTY) session has no one to answer the prompts: printing
         // usage and returning beats hanging on rl.question forever.
         if (!process.stdin.isTTY) { console.log(USAGE); continue }
