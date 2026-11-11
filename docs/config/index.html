@@ -90,6 +90,17 @@
 </section>
 
 <section class="sec">
+  <h2>Add a provider without editing the file</h2>
+  <p><code>/add-provider</code> is the alternative to writing the JSON above by hand. It opens a form — name, base URL, API key — and writes the <strong>global</strong> file only, leaving <code>lugent.json</code> alone. Every other key in that file survives.</p>
+  <dl class="table">
+    <div class="row"><dt>Test</dt><dd>Calls <code>&lt;baseUrl&gt;/models</code>. Only a <code>200</code> with at least one model unlocks import; a failed test is recoverable — go back and edit a field instead of retyping the form.</dd></div>
+    <div class="row"><dt>Import</dt><dd>Writes the provider and every model id to <code>providers.&lt;name&gt;.models</code>, so <code>/model</code> lists it right away. An endpoint that answers with no models offers a models-less save, which keeps a list already cached.</dd></div>
+    <div class="row"><dt>Key</dt><dd>Stored exactly as typed — <code>{env:VAR}</code> stays a reference — and never printed back in either UI. A file holding an inline key is set to mode <code>0600</code>.</dd></div>
+    <div class="row"><dt>Existing name</dt><dd>Never replaced silently: both UIs ask first, and say what is replaced (base URL, model list) and kept (the stored key, if the key field is left empty).</dd></div>
+  </dl>
+</section>
+
+<section class="sec">
   <h2>Defaults</h2>
   <dl class="table">
     <div class="row"><dt>defaultProvider</dt><dd>Provider a new session starts on.</dd></div>
