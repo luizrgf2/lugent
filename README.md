@@ -142,7 +142,7 @@ LUGENT
 
 - UI is hand-rolled ANSI (`src/cli/ui.ts`) in plain mode; colors/spinner auto-disable when output is piped.
 - Permission prompts answer `y` / `n` / `a` (always, session-scoped). Anything else — including Enter — denies.
-- `--db <path>` overrides the database location.
+- `--db <path>` overrides the database location. A missing, empty or flag-like value (`lugent --db`, `lugent --db --plain`) exits 2 with the usage line on stderr, before the store is opened.
 
 ## Tools
 
