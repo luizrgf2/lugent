@@ -91,6 +91,7 @@
   <span class="k">"defaultModel"</span>: <span class="c">"qwen3.5:14b"</span>
 }</pre>
   <p>At startup each provider gets a health check. Unreachable ones report <code>OFF</code>, and lugent still starts.</p>
+  <p>Or skip the JSON: <code>/add-provider</code> asks for a name, base URL and API key, tests the endpoint against <code>&lt;baseUrl&gt;/models</code>, and writes the entry for you — the provider plus every model id it found — to the global <code>~/.config/lugent/config.json</code>, never the project file. The key is never echoed back, and a <code>{env:VAR}</code> reference is stored exactly as typed. Editing the file by hand stays the explicit path; the form just writes the same thing.</p>
 </section>
 
 <section class="sec">

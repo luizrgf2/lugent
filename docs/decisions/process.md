@@ -81,3 +81,27 @@ Decision: a fixed `<canvas id="stars">` (z-index -1, `pointer-events:none`) draw
 Why: the design's `#101010` page ground read flat and grey at full-page height. Painting the sky *under* the page, instead of lightening or darkening the page itself, keeps every contrast pair from the design intact: the text colors are unchanged and the surfaces are unchanged — only the empty ground got deeper. The stars are decoration, and the code treats them that way: alpha capped at 0.36, radius ≤ 1.6px, so even the brightest one covers a fraction of a glyph (dim text over the brightest star in the render is still 6.03:1).
 
 Cost if wrong: one more request (`stars.js`, ~5 KB) on 12 pages, one rAF loop that is capped at 30fps and stopped while the tab is hidden; `prefers-reduced-motion` draws a single static frame and never starts the loop (verified by driving Chrome with `--force-prefers-reduced-motion` and diffing two screenshots). If the twinkle ever reads as noise, the fix is one line in `stars.js` (the `TINTS`/`a` range) — no layout depends on it, and the pages render correctly with the script absent, since the sky is the `body` background.
+
+## 2026-11-11 — the site documents `/add-provider` as the alternative to editing the file
+
+Context: `/add-provider` shipped with a full description in `README.md` and zero
+mentions anywhere under `docs/` (grep across the generated pages: 0). The docs
+site told a newcomer to hand-write `~/.config/lugent/config.json` and stopped
+there, so the form was discoverable only from the README.
+
+Decision: three generated pages carry it — `getting-started` ("or skip the JSON"),
+`config` (a section with Test / Import / Key / Existing-name rows) and `usage` (one
+table row). The manual JSON keeps its place and is introduced first; the form comes
+after it. No landing-page card: the landing grid is `repeat(4,1fr)` with exactly
+four cards, and the hero already promises any OpenAI-compatible endpoint. The
+change edits `docs/build.ts` and commits the regenerated HTML — never the HTML
+alone, since `build.ts` rewrites it.
+
+Why: the site is where someone sets lugent up; a setup step that only exists in the
+README is invisible from the docs. Three short sections, one per page, keep every
+page under the repo's ~150-line ceiling instead of one long provider page.
+
+Cost if wrong: the same facts now live in the README and on three site pages, so a
+behavior change has to be applied in two places and can drift. If the `config`
+section outgrows the page, it becomes its own `docs/providers/` topic with a
+sidebar entry — a change this entry deliberately defers.

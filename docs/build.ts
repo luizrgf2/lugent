@@ -53,6 +53,7 @@ page({
   <span class="k">"defaultModel"</span>: <span class="c">"qwen3.5:14b"</span>
 }</pre>
   <p>At startup each provider gets a health check. Unreachable ones report <code>OFF</code>, and lugent still starts.</p>
+  <p>Or skip the JSON: <code>/add-provider</code> asks for a name, base URL and API key, tests the endpoint against <code>&lt;baseUrl&gt;/models</code>, and writes the entry for you — the provider plus every model id it found — to the global <code>~/.config/lugent/config.json</code>, never the project file. The key is never echoed back, and a <code>{env:VAR}</code> reference is stored exactly as typed. Editing the file by hand stays the explicit path; the form just writes the same thing.</p>
 </section>
 
 <section class="sec">
@@ -90,6 +91,17 @@ page({
 </section>
 
 <section class="sec">
+  <h2>Add a provider without editing the file</h2>
+  <p><code>/add-provider</code> is the alternative to writing the JSON above by hand. It opens a form — name, base URL, API key — and writes the <strong>global</strong> file only, leaving <code>lugent.json</code> alone. Every other key in that file survives.</p>
+  <dl class="table">
+    <div class="row"><dt>Test</dt><dd>Calls <code>&lt;baseUrl&gt;/models</code>. Only a <code>200</code> with at least one model unlocks import; a failed test is recoverable — go back and edit a field instead of retyping the form.</dd></div>
+    <div class="row"><dt>Import</dt><dd>Writes the provider and every model id to <code>providers.&lt;name&gt;.models</code>, so <code>/model</code> lists it right away. An endpoint that answers with no models offers a models-less save, which keeps a list already cached.</dd></div>
+    <div class="row"><dt>Key</dt><dd>Stored exactly as typed — <code>{env:VAR}</code> stays a reference — and never printed back in either UI. A file holding an inline key is set to mode <code>0600</code>.</dd></div>
+    <div class="row"><dt>Existing name</dt><dd>Never replaced silently: both UIs ask first, and say what is replaced (base URL, model list) and kept (the stored key, if the key field is left empty).</dd></div>
+  </dl>
+</section>
+
+<section class="sec">
   <h2>Defaults</h2>
   <dl class="table">
     <div class="row"><dt>defaultProvider</dt><dd>Provider a new session starts on.</dd></div>
@@ -117,6 +129,7 @@ page({
   <h2>Slash commands</h2>
   <dl class="table">
     <div class="row"><dt>/model</dt><dd>Two-level picker: provider, then live model list. Pinned to the session.</dd></div>
+    <div class="row"><dt>/add-provider</dt><dd>Form: name, base URL, API key. Tests the endpoint, then imports its models into the global config.</dd></div>
     <div class="row"><dt>/agent</dt><dd>Agent picker. Prompt, model and toolset apply from the next turn.</dd></div>
     <div class="row"><dt>/skills</dt><dd>Browse loaded skills, read-only.</dd></div>
     <div class="row"><dt>/mcp</dt><dd>Servers with status. Reconnect, disable, enable, authenticate, logout.</dd></div>
