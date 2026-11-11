@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test"
-import { subEnv, loadConfig, parseMcpServer, loadMcpConfig, savePermissionMode } from "./config"
-import { rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs"
+import { subEnv, loadConfig, parseMcpServer, loadMcpConfig, savePermissionMode, saveProvider } from "./config"
+import { rmSync, writeFileSync, mkdirSync, readFileSync, statSync } from "node:fs"
 
 describe("subEnv", () => {
   test("substitutes {env:VAR}", () => {
@@ -303,5 +303,77 @@ describe("defaultSubagentModel", () => {
     writeFileSync(`${dir}/lugent.json`, JSON.stringify({ providers: {}, defaultProvider: "", defaultModel: "" }))
     expect(loadConfig(dir).defaultSubagentModel).toBeUndefined()
     rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe("saveProvider", () => {
+  test("loader keeps a provider's cached models list", () => {
+    const dir = `/tmp/opencode/cfg-models-${Date.now()}`
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(`${dir}/lugent.json`, JSON.stringify({
+      providers: { r: { baseUrl: "http://r/v1", models: ["a", "b", "", 7] } },
+      defaultProvider: "r", defaultModel: "a",
+    }))
+    expect(loadConfig(dir).providers.r.models).toEqual(["a", "b"])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("loader leaves an absent or non-array models alone", () => {
+    const dir = `/tmp/opencode/cfg-nomodels-${Date.now()}`
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(`${dir}/lugent.json`, JSON.stringify({
+      providers: { r: { baseUrl: "http://r/v1", models: "nope" } },
+      defaultProvider: "r", defaultModel: "a",
+    }))
+    expect(loadConfig(dir).providers.r.models).toBeUndefined()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test("saveProvider writes the global file and keeps every other key", () => {
+    const p = `/tmp/opencode/save-prov-${Date.now()}.json`
+    writeFileSync(p, JSON.stringify({ permissionMode: "yolo", defaultProvider: "x", mcp: { a: { type: "remote", url: "https://a/mcp" } } }))
+    const r = saveProvider("router", { baseUrl: "http://r/v1", apiKey: "sk-1", models: ["m1"] }, p)
+    expect(r.ok).toBe(true)
+    const raw = JSON.parse(readFileSync(p, "utf8"))
+    expect(raw.providers.router).toEqual({ baseUrl: "http://r/v1", apiKey: "sk-1", models: ["m1"] })
+    expect(raw.permissionMode).toBe("yolo")
+    expect(raw.defaultProvider).toBe("x")
+    expect(raw.mcp.a.url).toBe("https://a/mcp")
+    rmSync(p, { force: true })
+  })
+
+  test("saveProvider strips trailing slashes from baseUrl", () => {
+    const p = `/tmp/opencode/save-slash-${Date.now()}.json`
+    expect(saveProvider("r", { baseUrl: "http://r/v1///" }, p).ok).toBe(true)
+    expect(JSON.parse(readFileSync(p, "utf8")).providers.r.baseUrl).toBe("http://r/v1")
+    rmSync(p, { force: true })
+  })
+
+  test("saveProvider keeps an existing apiKey when the new one is empty", () => {
+    const p = `/tmp/opencode/save-keep-${Date.now()}.json`
+    saveProvider("r", { baseUrl: "http://r/v1", apiKey: "old" }, p)
+    saveProvider("r", { baseUrl: "http://r/v1", apiKey: "", models: ["x"] }, p)
+    const raw = JSON.parse(readFileSync(p, "utf8"))
+    expect(raw.providers.r.apiKey).toBe("old")
+    expect(raw.providers.r.models).toEqual(["x"])
+    rmSync(p, { force: true })
+  })
+
+  test("saveProvider mode is 0600 when an inline key is written", () => {
+    const p = `/tmp/opencode/save-mode-${Date.now()}.json`
+    saveProvider("r", { baseUrl: "http://r/v1", apiKey: "sk-secret" }, p)
+    expect(statSync(p).mode & 0o777).toBe(0o600)
+    rmSync(p, { force: true })
+  })
+
+  test("saveProvider replaces an unparseable file and reports a failed write", () => {
+    const p = `/tmp/opencode/save-corrupt-${Date.now()}.json`
+    writeFileSync(p, "not json")
+    expect(saveProvider("r", { baseUrl: "http://r/v1" }, p).ok).toBe(true)
+    expect(JSON.parse(readFileSync(p, "utf8")).providers.r.baseUrl).toBe("http://r/v1")
+    const bad = saveProvider("r", { baseUrl: "http://r/v1" }, "/proc/nope/config.json")
+    expect(bad.ok).toBe(false)
+    expect(bad.error).toBeTruthy()
+    rmSync(p, { force: true })
   })
 })

@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 import { homedir } from "node:os"
 import { parseModelRef } from "./agents"
 import type { AgentModelRef } from "./types"
 
-export interface ProviderConfig { baseUrl: string; apiKey?: string }
+export interface ProviderConfig { baseUrl: string; apiKey?: string; models?: string[] }
 export type PermissionMode = "normal" | "yolo"
 export interface AppConfig {
   providers: Record<string, ProviderConfig>
@@ -34,7 +34,17 @@ export function loadConfig(root: string, globalPath = `${homedir()}/.config/luge
   const providers: Record<string, ProviderConfig> = {}
   for (const [name, p] of Object.entries(raw.providers ?? {})) {
     const pc = p as ProviderConfig
-    providers[name] = { baseUrl: pc.baseUrl, apiKey: pc.apiKey ? subEnv(pc.apiKey) : undefined }
+    // Model ids are literal — `{env:}` is a key-only mechanism, substituting here
+    // would silently corrupt an id that happens to look like a reference.
+    const models = Array.isArray(pc.models)
+      ? pc.models.filter((m): m is string => typeof m === "string" && m !== "")
+      : undefined
+    const key = pc.apiKey
+    providers[name] = {
+      baseUrl: pc.baseUrl,
+      apiKey: key ? subEnv(key) : undefined,
+      ...(models ? { models } : {}),
+    }
   }
   let defaultSubagentModel: AgentModelRef | undefined
   if (raw.defaultSubagentModel !== undefined) {
@@ -79,6 +89,52 @@ export function savePermissionMode(mode: PermissionMode, path = globalConfigPath
     return false
   }
   return true
+}
+
+/**
+ * Persist one provider into the global config (never a project file — a repo
+ * must not carry credentials). Read-modify-write: every other key survives, and
+ * an unparseable file is replaced, exactly like `savePermissionMode`.
+ *
+ * - `baseUrl` trailing slashes are stripped *before* writing: `Provider`
+ *   concatenates raw, so a saved slash would make every later chat 404.
+ * - An empty `apiKey` keeps the key already on disk (re-running the form is the
+ *   only refresh path, and it must not destroy a working key); `models` is
+ *   replaced whenever the argument is present.
+ * - A file that now holds an inline key is `0600` — the same rule the MCP token
+ *   store applies. The key is stored exactly as typed, `{env:VAR}` included.
+ * Returns `{ ok: false, error }` instead of throwing; the caller keeps the
+ * provider for the session only.
+ */
+export function saveProvider(
+  name: string,
+  cfg: { baseUrl: string; apiKey?: string; models?: string[] },
+  path = globalConfigPath(),
+): { ok: boolean; error?: string } {
+  let raw: Record<string, any> = {}
+  try { raw = JSON.parse(readFileSync(path, "utf8")) } catch { /* missing or unparseable → start over */ }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) raw = {}
+  if (typeof raw.providers !== "object" || raw.providers === null || Array.isArray(raw.providers)) raw.providers = {}
+
+  const prev = raw.providers[name]
+  const previous: Record<string, any> = typeof prev === "object" && prev !== null ? prev : {}
+  const entry: Record<string, any> = { baseUrl: cfg.baseUrl.replace(/\/+$/, "") }
+  const apiKey = cfg.apiKey === undefined || cfg.apiKey === "" ? previous.apiKey : cfg.apiKey
+  if (apiKey !== undefined && apiKey !== "") entry.apiKey = apiKey
+  if (cfg.models !== undefined) entry.models = cfg.models
+  else if (Array.isArray(previous.models)) entry.models = previous.models
+  raw.providers[name] = entry
+
+  try {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, JSON.stringify(raw, null, 2) + "\n")
+    // A pre-existing looser file keeps its bits on a plain overwrite — the mode
+    // has to be set explicitly, as the MCP token store does.
+    if (typeof entry.apiKey === "string" && entry.apiKey !== "") chmodSync(path, 0o600)
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+  return { ok: true }
 }
 
 function subEnvMap(m: unknown): Record<string, string> | undefined {
