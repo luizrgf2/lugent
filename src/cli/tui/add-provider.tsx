@@ -19,8 +19,8 @@ const MAX_VISIBLE = 8
 
 /**
  * `/add-provider` — register an OpenAI-compatible provider: name, base URL, key,
- * a Test that probes `<baseUrl>/models`, then an all-or-nothing import of every
- * model it advertises.
+ * a Test that probes `<baseUrl>/models`, then a checklist of the models it
+ * advertises — only the checked ids are written.
  *
  * Contract with the caller: the component never writes the config and never
  * closes itself after a save. It calls `onSaved(name, cfg)` and leaves the
