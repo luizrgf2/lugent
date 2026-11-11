@@ -408,6 +408,63 @@ test("down past the last row does not move the cursor", async () => {
   expect(lastFrame()).toContain("1 of 2 model")
 })
 
+test("enter writes only the checked models, not the whole list", async () => {
+  // The proving test for the demand: one row checked out of 20. The old code
+  // writes all 20, so `toEqual(["model-002"])` is RED before the change.
+  const saved: any[] = []
+  const { type } = await toImport(20, saved)
+  type("\u001b[B")                            // down to model-002
+  await wait(30)
+  type(" ")                                   // check it
+  await wait(30)
+  type("\r")                                  // import & save
+  await wait(30)
+  expect(saved.length).toBe(1)
+  expect(saved[0][1].models).toEqual(["model-002"])
+})
+
+test("enter at zero selected writes nothing and says why", async () => {
+  // The "mandatory" requirement had no test at all before this change.
+  const saved: any[] = []
+  const { type, lastFrame } = await toImport(3, saved)
+  type("\r")
+  await wait(30)
+  expect(saved.length).toBe(0)
+  expect(lastFrame()).toContain("select at least one")
+})
+
+test("a checked row scrolled out of view is still written", async () => {
+  const saved: any[] = []
+  const { type, lastFrame } = await toImport(20, saved)
+  type(" ")                                   // check model-001
+  await wait(30)
+  type("\u001b[F")                            // end — model-001 leaves the window
+  await wait(30)
+  expect(lastFrame()).not.toContain("model-001")
+  type(" ")
+  await wait(30)
+  type("\r")
+  await wait(30)
+  expect(saved[0][1].models).toEqual(["model-001", "model-020"])
+})
+
+test("duplicate ids toggle independently and are written once per checked row", async () => {
+  const saved: any[] = []
+  const { type } = renderTui(
+    <AddProvider {...base} onSaved={(n, c) => saved.push([n, c])}
+      discover={() => Promise.resolve({ ok: true, models: ["dup", "dup"] })} />,
+  )
+  type("r\rhttp://r/v1\rsk-1\r")
+  await wait(30)
+  type("\r")
+  await wait(40)
+  type(" ")                                   // first row only
+  await wait(30)
+  type("\r")
+  await wait(30)
+  expect(saved[0][1].models).toEqual(["dup"])   // second row unchecked → one entry
+})
+
 test("a long model list is windowed so the header and footer stay on screen", async () => {
   // Measured before the fix: 300 models rendered a 69-row frame on a 30-row
   // terminal, pushing the form's own header and footer off the screen.

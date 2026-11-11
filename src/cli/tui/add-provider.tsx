@@ -145,8 +145,14 @@ export function AddProvider(p: {
     p.onSaved(nameRef.current, cfg)
   }
 
-  /** Shared by `import` and `nomodels`: confirm when the name already exists. */
+  /**
+   * `models` is the list this write will hold: the checked subset for an import,
+   * `undefined` for a models-less save (the `nomodels` branch). An existing name
+   * is confirmed first, and the confirmation names the count so a subset write is
+   * never confirmed blind.
+   */
   function commit(models?: string[]) {
+    pendingModelsRef.current = models
     if (p.existing.includes(nameRef.current)) { go("confirm"); return }
     save(models)
   }
@@ -187,7 +193,7 @@ export function AddProvider(p: {
         return
       }
       if (phaseRef.current === "nomodels") {
-        if (back) { clearMsg(); pendingModelsRef.current = undefined; go("test"); return }
+        if (back) { clearMsg(); go("test"); return }
         if (k.return) commit(undefined)
         return
       }
@@ -296,7 +302,7 @@ export function AddProvider(p: {
       {phase === "confirm" && (
         <Text color="yellow">
           overwrite {name}? {pendingModelsRef.current
-            ? "its model list will be replaced"
+            ? `its model list will be replaced by the ${pendingModelsRef.current.length} you selected`
             : "it keeps its current model list (the endpoint advertised none this time)"}; an empty key field keeps the current key
         </Text>
       )}
@@ -304,7 +310,10 @@ export function AddProvider(p: {
       <Text dimColor>
         {phase === "test" ? "enter test · ⌫ edit · esc cancel"
           : phase === "nomodels" ? "enter save without models · ⌫ back · esc cancel"
-            : phase === "import" ? `↑/↓ move · space toggle · enter import ${picked.size} & save · esc cancel`
+            : phase === "import"
+              ? (picked.size === 0
+                ? "↑/↓ move · space toggle · select at least one · esc cancel"
+                : `↑/↓ move · space toggle · enter import ${picked.size} & save · esc cancel`)
               : phase === "confirm" ? "enter overwrite · esc cancel"
                 : "tab/enter next · ⌫/← back · esc cancel"}
       </Text>
