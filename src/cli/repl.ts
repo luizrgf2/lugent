@@ -1,9 +1,11 @@
 import * as readline from "node:readline/promises"
+import { readFileSync } from "node:fs"
 import { runTurn } from "../core/loop"
-import { Provider } from "../core/provider"
+import { Provider, discoverModels } from "../core/provider"
 import { toolsForAgent, agentActivationModel, resolveAgent, primaryAgents } from "../core/agents"
 import type { Store } from "../core/store"
 import type { AppConfig } from "../core/config"
+import { saveProvider, globalConfigPath } from "../core/config"
 import type { ToolDef } from "../core/tools/registry"
 import type { McpManager } from "../core/mcp/manager"
 import type { SkillMeta, Agent } from "../core/types"
@@ -19,6 +21,21 @@ export interface ReplEnv {
   agents: Agent[]
   projectRoot: string
   mcp: McpManager
+}
+
+/**
+ * Whether this directory's `lugent.json` declares providers — `loadConfig` is
+ * first-file-wins, so an entry written to the global file is invisible here on
+ * the next launch. The command still saves; it just says so.
+ */
+function projectHasProviders(projectRoot: string): boolean {
+  try {
+    const raw = JSON.parse(readFileSync(`${projectRoot}/lugent.json`, "utf8"))
+    const providers = raw?.providers
+    return typeof providers === "object" && providers !== null && Object.keys(providers).length > 0
+  } catch {
+    return false
+  }
 }
 
 export async function runRepl(env: ReplEnv): Promise<void> {
@@ -58,7 +75,7 @@ export async function runRepl(env: ReplEnv): Promise<void> {
     `session ${session.id.slice(0, 8)}…`,
     `${providerName} · ${model}`,
   ]))
-  console.log(dim("/model /agent /skills /mcp /clear /resume /exit · Ctrl+C aborts turn"))
+  console.log(dim("/model /add-provider /agent /skills /mcp /clear /resume /exit · Ctrl+C aborts turn"))
 
   while (true) {
     let input: string
@@ -166,6 +183,8 @@ export async function runRepl(env: ReplEnv): Promise<void> {
         const [provName, modelName] = slash.args
         if (!provName) {
           if (providerCfg) {
+            // A cached list is authoritative: no endpoint call needed.
+            if (providerCfg.models?.length) { console.log(providerCfg.models.join("\n")); continue }
             try { console.log((await new Provider(providerCfg, model).listModels()).join("\n") || "(no models)") }
             catch (e: any) { console.log(`list failed: ${e.message}`) }
           } else console.log("no provider configured (lugent.json)")
@@ -181,6 +200,36 @@ export async function runRepl(env: ReplEnv): Promise<void> {
         } else {
           console.log("usage: /model <provider> [model]")
         }
+        continue
+      }
+      if (slash.cmd === "add-provider") {
+        const USAGE = "usage: /add-provider <name> — interactive: asks base url and api key, tests the endpoint, imports its models"
+        // A piped (non-TTY) session has no one to answer the prompts: printing
+        // usage and returning beats hanging on rl.question forever.
+        if (!process.stdin.isTTY) { console.log(USAGE); continue }
+        const name = (slash.args[0] ?? (await rl.question("name: "))).trim()
+        if (!name) { console.log(red("name is required")); continue }
+        if (/\s/.test(name)) { console.log(red("name cannot contain spaces")); continue }
+        if (name.includes("/")) { console.log(red("name cannot contain /")); continue }
+        const baseUrl = (await rl.question("base url: ")).trim()
+        if (!/^https?:\/\/.+/.test(baseUrl)) { console.log(red("base url must start with http:// or https://")); continue }
+        if (!/\/v\d+\/?$/.test(baseUrl)) console.log(yellow("! no /v1 in the base url — most OpenAI-compatible endpoints need it"))
+        // Blank keeps whatever the global config already holds for this name.
+        const apiKey = (await rl.question("api key (blank keeps the stored one): ")).trim()
+        console.log(dim(`testing ${baseUrl.replace(/\/+$/, "")}/models…`))
+        const found = await discoverModels({ baseUrl, apiKey })
+        if (!found.ok) { console.log(red(`test failed: ${found.error}`)); continue }
+        found.models.forEach((m, i) => console.log(`  ${dim(`${i + 1}.`)} ${m}`))
+        const yes = await rl.question(`import these ${found.models.length} models? [Y/n] `)
+        if (yes.trim().toLowerCase() === "n") { console.log("cancelled — nothing written"); continue }
+        const cfg: { baseUrl: string; apiKey?: string; models?: string[] } = { baseUrl, models: found.models }
+        if (apiKey) cfg.apiKey = apiKey
+        const saved = saveProvider(name, cfg, globalConfigPath())
+        if (!saved.ok) { console.log(red(`save failed, session only: ${saved.error}`)); continue }
+        const normalized: any = { baseUrl: baseUrl.replace(/\/+$/, ""), models: found.models }
+        if (apiKey) normalized.apiKey = apiKey
+        env.config.providers[name] = normalized
+        console.log(`saved ${name} · ${found.models.length} models${projectHasProviders(env.projectRoot) ? yellow(" — shadowed by this directory's lugent.json") : ""}`)
         continue
       }
       console.log("unknown command")
