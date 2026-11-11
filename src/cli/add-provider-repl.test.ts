@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { saveProvider, providerEntryInFile } from "../core/config"
 import { discoverModels } from "../core/provider"
 import { runAddProviderForm, existingProviderNames } from "./add-provider-repl"
+import { readSecret } from "./secret-prompt"
 
 const SEEDED = {
   providers: { existing: { baseUrl: "http://old/v1", apiKey: "sk-old", models: ["m-old"] } },
@@ -301,5 +302,79 @@ test("plain repl: a front end without a masking reader still gets the key prompt
   try {
     expect(asked.some(q => /api key/.test(q))).toBe(true)
     expect(f.read().providers.fresh.apiKey).toBe("sk-plain")
+  } finally { f.cleanup() }
+})
+
+test("plain repl: Ctrl+C at the key prompt cancels the form instead of throwing", async () => {
+  // `readSecret` rejects with `Error("cancelled")` on ^C — that is the contract,
+  // and it is the documented abort key. Nothing caught it: the rejection escaped
+  // `repl.ts`, Bun printed a stack and exited 1, so a user who changed their mind
+  // at the key prompt lost the whole session (reproduced 3/3 on a real pty).
+  const f = fixture()
+  const r = await runAddProviderForm({
+    name: "fresh",
+    ask: async (q: string) => q.startsWith("base url") ? "http://n/v1" : "y",
+    askSecret: async () => { throw new Error("cancelled") },
+    discover: async () => ({ ok: true, models: ["alpha"] }),
+    existing: [],
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    // A cancellation, not a thrown error and not an "invalid" line: the REPL
+    // prints the same `cancelled — nothing written` it prints for a `n`.
+    expect(r).toEqual({ status: "cancelled" })
+    expect(f.read()).toEqual(SEEDED)
+  } finally { f.cleanup() }
+})
+
+test("plain repl: a Ctrl+C on the key prompt leaves the answers already given alone", async () => {
+  // The abort must not reach the save: the file is untouched, and the only
+  // prompts answered were the ones before the cancel.
+  const f = fixture()
+  const asked: string[] = []
+  const r = await runAddProviderForm({
+    name: "existing",
+    ask: async (q: string) => { asked.push(q); return q.startsWith("base url") ? "http://new/v1" : "y" },
+    askSecret: async () => { throw new Error("cancelled") },
+    discover: async () => ({ ok: true, models: ["alpha"] }),
+    existing: ["existing"],
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    expect(r.status).toBe("cancelled")
+    expect(f.read()).toEqual(SEEDED)
+    expect(asked.some(q => /overwrite/.test(q))).toBe(false)
+  } finally { f.cleanup() }
+})
+
+test("plain repl: a key corrected with the arrow keys is saved exactly as typed", async () => {
+  // End to end through the real masked reader: the field renders one dot per
+  // character, so a corrupted secret is invisible on screen. The reviewed bug
+  // saved `sk-ab[Dcd` after ← while editing — this walks the same keystrokes
+  // through the form and asserts what lands on disk.
+  const f = fixture()
+  const { EventEmitter } = await import("node:events")
+  const input: any = new EventEmitter()
+  input.setRawMode = () => input
+  input.resume = () => input
+  const out = { write: () => true }
+  const r = await runAddProviderForm({
+    name: "fresh",
+    ask: async (q: string) => q.startsWith("base url") ? "http://n/v1" : "y",
+    askSecret: () => {
+      const p = readSecret({ prompt: "api key: ", input, output: out })
+      input.emit("data", Buffer.from("sk-ab"))
+      input.emit("data", Buffer.from("\u001b[D"))       // ←
+      input.emit("data", Buffer.from("\u001b[C"))       // →
+      input.emit("data", Buffer.from("cd\r"))
+      return p
+    },
+    discover: async () => ({ ok: true, models: ["alpha"] }),
+    existing: [],
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    expect(r.status).toBe("saved")
+    expect(f.read().providers.fresh.apiKey).toBe("sk-abcd")
   } finally { f.cleanup() }
 })

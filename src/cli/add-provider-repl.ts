@@ -1,6 +1,7 @@
 import type { ProviderConfig } from "../core/config"
 import { providerNamesInFile } from "../core/config"
 import type { discoverModels } from "../core/provider"
+import { isCancellation } from "./secret-prompt"
 
 type Cfg = { baseUrl: string; apiKey?: string; models?: string[] }
 
@@ -82,11 +83,33 @@ export async function runAddProviderForm(opts: {
 }): Promise<AddProviderResult> {
   const say = opts.say ?? (() => {})
 
-  const name = (opts.name ?? (await opts.ask("name: "))).trim()
+  /**
+   * Every question goes through here so a user **cancellation** becomes a
+   * `cancelled` result instead of a rejection.
+   *
+   * Ctrl+C is the documented way to abort, and the mask reader signals it by
+   * rejecting. That rejection used to escape `runAddProviderForm` into
+   * `repl.ts`, which awaited it bare: Bun printed a stack and exited 1, taking
+   * the whole `--plain` session down (reproduced 3/3 on a real pty). The form
+   * owns the cancellation semantics; the caller only prints the line.
+   */
+  const CANCELLED = Symbol("cancelled")
+  const askFor = async <T>(fn: () => Promise<T>): Promise<T | typeof CANCELLED> => {
+    try { return await fn() } catch (e) {
+      if (isCancellation(e)) return CANCELLED
+      throw e
+    }
+  }
+
+  const nameAnswer = opts.name ?? await askFor(() => opts.ask("name: "))
+  if (nameAnswer === CANCELLED) return { status: "cancelled" }
+  const name = nameAnswer.trim()
   const nameError = validateName(name)
   if (nameError) return { status: "invalid", error: nameError }
 
-  const baseUrl = (await opts.ask("base url: ")).trim()
+  const urlAnswer = await askFor(() => opts.ask("base url: "))
+  if (urlAnswer === CANCELLED) return { status: "cancelled" }
+  const baseUrl = urlAnswer.trim()
   const urlError = validateUrl(baseUrl)
   if (urlError) return { status: "invalid", error: urlError }
   if (needsV1(baseUrl)) say("! no /v1 in the base url — most OpenAI-compatible endpoints need it")
@@ -94,7 +117,9 @@ export async function runAddProviderForm(opts: {
   // Blank keeps whatever the global config already holds for this name.
   const keyPrompt = "api key (blank keeps the stored one): "
   const askKey = opts.askSecret ?? opts.ask
-  const apiKey = (await askKey(keyPrompt)).trim()
+  const keyAnswer = await askFor(() => askKey(keyPrompt))
+  if (keyAnswer === CANCELLED) return { status: "cancelled" }
+  const apiKey = keyAnswer.trim()
 
   // The Test must send the key the save will keep, or a re-run on an
   // auth-enforcing endpoint dies at the first step of the only refresh path.
@@ -109,13 +134,15 @@ export async function runAddProviderForm(opts: {
   let models: string[] | undefined
   if (found.ok) {
     found.models.forEach((m, i) => say(`  ${i + 1}. ${m}`))
-    const yes = await opts.ask(`import these ${found.models.length} models? [Y/n] `)
+    const yes = await askFor(() => opts.ask(`import these ${found.models.length} models? [Y/n] `))
+    if (yes === CANCELLED) return { status: "cancelled" }
     if (yes.trim().toLowerCase() === "n") return { status: "cancelled" }
     models = found.models
   } else if (found.noModels) {
     // A reachable endpoint that advertises nothing: the provider is usable, it
     // just has no cached list (`/model` falls back to a live call).
-    const yes = await opts.ask(`test ok but the endpoint lists no models — save ${name} anyway? [Y/n] `)
+    const yes = await askFor(() => opts.ask(`test ok but the endpoint lists no models — save ${name} anyway? [Y/n] `))
+    if (yes === CANCELLED) return { status: "cancelled" }
     if (yes.trim().toLowerCase() === "n") return { status: "cancelled" }
   } else {
     return { status: "invalid", error: `test failed: ${found.error}` }
