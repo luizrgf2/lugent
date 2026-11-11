@@ -33,27 +33,26 @@ test("plain repl: /add-provider without a TTY prints usage instead of prompting"
     stderr: "pipe",
     env: { ...process.env, HOME: home },
   })
-  const reader = proc.stdout.getReader()
   const dec = new TextDecoder()
   let out = ""
   let err = ""
-  const errReader = proc.stderr.getReader()
-  const deadline = Date.now() + 60000
-  const pump = async () => {
-    while (Date.now() < deadline && !out.includes("/add-provider <name>")) {
-      const chunk: any = await Promise.race([
-        reader.read(),
-        errReader.read().then((c: any) => ({ stderr: dec.decode(c.value) })),
-        new Promise(res => setTimeout(() => res({ timeout: true }), 100)),
-      ])
-      if (chunk.timeout) continue
-      if (chunk.stderr !== undefined) { err += chunk.stderr; continue }
-      if (chunk.done) break
-      out += dec.decode(chunk.value)
+  // One long-lived reader per stream. Racing `reader.read()` against a timeout
+  // abandons the pending read and starts another on the next tick; the chunk
+  // that later arrives is delivered to the abandoned one and lost — which is
+  // why this test passed alone and timed out under full-suite load.
+  const drain = async (stream: ReadableStream<Uint8Array>, sink: (s: string) => void) => {
+    const reader = stream.getReader()
+    for (;;) {
+      const c = await reader.read()
+      if (c.done) return
+      sink(dec.decode(c.value))
     }
   }
+  void drain(proc.stdout, s => { out += s })
+  void drain(proc.stderr, s => { err += s })
+  const deadline = Date.now() + 60000
   try {
-    await pump()
+    while (Date.now() < deadline && !out.includes("/add-provider <name>")) await Bun.sleep(20)
     expect(err).toBe("")
     expect(out).toContain("/add-provider <name>")   // the usage form, not a hung prompt
     expect(out).not.toContain("unknown command")
@@ -61,4 +60,4 @@ test("plain repl: /add-provider without a TTY prints usage instead of prompting"
     proc.kill()
     rmSync(home, { recursive: true, force: true })
   }
-}, 40000)
+}, 80000)
