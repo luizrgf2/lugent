@@ -1,5 +1,6 @@
 import type { ChatMsg, ChatResponse, ToolCall } from "./types"
 import type { ProviderConfig } from "./config"
+import { subEnv } from "./config"
 
 export async function* parseSSE(res: Response, idleMs = 120_000, totalMs = 600_000): AsyncGenerator<any> {
   if (!res.body) return
@@ -44,6 +45,56 @@ export async function* parseSSE(res: Response, idleMs = 120_000, totalMs = 600_0
       }
     }
   }
+}
+
+/**
+ * Probe an OpenAI-compatible endpoint's `/models` list — the form's Test action.
+ *
+ * Deliberately separate from `Provider.listModels()`: that one is unbounded and
+ * throwing for the turn path, while a form needs a bounded call that reports its
+ * failure instead of hanging the overlay or crashing the render. Never throws.
+ *
+ * `ok` requires a `2xx` *and* at least one parsed model id: gateways that answer
+ * `200 {"data":[]}` or an HTML page would otherwise unlock an import that
+ * imports nothing.
+ */
+export async function discoverModels(
+  cfg: ProviderConfig,
+  opts: { fetchFn?: typeof fetch; timeoutMs?: number } = {},
+): Promise<{ ok: boolean; models: string[]; error?: string }> {
+  const base = cfg.baseUrl.replace(/\/+$/, "")
+  const headers: Record<string, string> = { "content-type": "application/json" }
+  if (cfg.apiKey) {
+    // The file keeps `{env:VAR}` literally; only the request resolves it. A
+    // reference that resolves to nothing is a config error — say so instead of
+    // sending an unauthenticated request and blaming the server's 401.
+    const resolved = subEnv(cfg.apiKey)
+    if (resolved === "" && cfg.apiKey.includes("{env:")) {
+      const name = cfg.apiKey.match(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/)?.[1] ?? cfg.apiKey
+      return { ok: false, models: [], error: `environment variable ${name} is not set` }
+    }
+    headers.authorization = `Bearer ${resolved}`
+  }
+  let res: Response
+  try {
+    res = await (opts.fetchFn ?? fetch)(`${base}/models`, {
+      headers,
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
+    })
+  } catch (e) {
+    return { ok: false, models: [], error: e instanceof Error ? e.message : String(e) }
+  }
+  if (!res.ok) {
+    res.body?.cancel().catch(() => {})
+    return { ok: false, models: [], error: `HTTP ${res.status}` }
+  }
+  let json: any
+  try { json = await res.json() } catch { return { ok: false, models: [], error: "response is not JSON" } }
+  const models = (Array.isArray(json?.data) ? json.data : [])
+    .map((m: any) => m?.id)
+    .filter((id: unknown): id is string => typeof id === "string" && id !== "")
+  if (models.length === 0) return { ok: false, models: [], error: "endpoint answered but advertised no models" }
+  return { ok: true, models }
 }
 
 export class Provider {

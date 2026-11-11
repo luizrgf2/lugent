@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test"
-import { Provider } from "./provider"
+import { Provider, discoverModels } from "./provider"
 
 function sseBody(chunks: object[]): Response {
   const stream = new ReadableStream({
@@ -236,4 +236,57 @@ test("a 429 body is cancelled before the retry fires", async () => {
   await expect(p.chat({ messages: [], tools: [], maxRetries: 2, backoffBaseMs: 50, signal: new AbortController().signal })).rejects.toThrow("429")
   expect(calls).toBe(3)
   expect(cancelled).toEqual([true, true, true])
+})
+
+test("discoverModels returns ids on 200 and resolves the key", async () => {
+  let seen = ""
+  const r = await discoverModels({ baseUrl: "http://r/v1", apiKey: "sk-1" }, {
+    fetchFn: (async (url: string, init: any) => { seen = `${url} ${init.headers.authorization}`; return new Response(JSON.stringify({ data: [{ id: "a" }, { id: "b" }] }), { status: 200 }) }) as any,
+  })
+  expect(r.ok).toBe(true)
+  expect(r.models).toEqual(["a", "b"])
+  expect(seen).toBe("http://r/v1/models Bearer sk-1")
+})
+
+test("discoverModels does not double the slash on a trailing-slash baseUrl", async () => {
+  let seen = ""
+  await discoverModels({ baseUrl: "http://r/v1/" }, {
+    fetchFn: (async (url: string) => { seen = url; return new Response(JSON.stringify({ data: [] }), { status: 200 }) }) as any,
+  })
+  expect(seen).toBe("http://r/v1/models")
+})
+
+test("discoverModels reports a non-200 without throwing", async () => {
+  const r = await discoverModels({ baseUrl: "http://r/v1" }, { fetchFn: (async () => new Response("nope", { status: 401 })) as any })
+  expect(r.ok).toBe(false)
+  expect(r.error).toContain("401")
+})
+
+test("discoverModels rejects a 200 with no models, and one with an HTML body", async () => {
+  const empty = await discoverModels({ baseUrl: "http://r/v1" }, {
+    fetchFn: (async () => new Response(JSON.stringify({ data: [] }), { status: 200 })) as any,
+  })
+  expect(empty.ok).toBe(false)
+  expect(empty.error).toContain("no models")
+  const html = await discoverModels({ baseUrl: "http://r/v1" }, {
+    fetchFn: (async () => new Response("<html>hi</html>", { status: 200 })) as any,
+  })
+  expect(html.ok).toBe(false)
+})
+
+test("discoverModels reports an unresolved {env:VAR} as a missing variable", async () => {
+  const r = await discoverModels({ baseUrl: "http://r/v1", apiKey: "{env:LUGENT_UNSET_KEY}" }, { fetchFn: (async () => new Response("{}")) as any })
+  expect(r.ok).toBe(false)
+  expect(r.error).toContain("LUGENT_UNSET_KEY")
+})
+
+test("discoverModels gives up on a host that never answers", async () => {
+  const r = await discoverModels({ baseUrl: "http://dead/v1" }, {
+    timeoutMs: 50,
+    fetchFn: ((_u: string, init: any) => new Promise((_res, rej) => {
+      init.signal.addEventListener("abort", () => rej(new Error("aborted")))
+    })) as any,
+  })
+  expect(r.ok).toBe(false)
+  expect(r.error).toBeTruthy()
 })
