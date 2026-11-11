@@ -144,10 +144,11 @@ export function AddProvider(p: {
   useInput((input, k) => {
     if (k.escape) { p.onClose(); return }
     // Action phases: enter acts; test/import always allow a way back. Backspace
-    // (or ←) from a failed test returns to the key with its value intact; from
-    // the models-less prompt it returns to the test, where a different url can
-    // be probed. Once models are listed or an overwrite is being confirmed the
-    // only exits are enter and esc — nothing there is a typo to correct.
+    // (or ←) from a failed test returns to the key with its value intact, and
+    // the fields walk further back from there (see backField). From the
+    // models-less prompt it returns to the test. Once models are listed or an
+    // overwrite is being confirmed the only exits are enter and esc — nothing
+    // there is a typo to correct.
     if (phaseRef.current !== "name" && phaseRef.current !== "url" && phaseRef.current !== "key") {
       const back = k.backspace || k.delete || k.leftArrow
       if (phaseRef.current === "test") {
