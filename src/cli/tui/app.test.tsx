@@ -1427,3 +1427,25 @@ test("/model: ctrl+c closes the picker; a following esc types nothing and does n
   await new Promise(r => setTimeout(r, 80))
   expect(lastFrame()).toContain("x")               // composer alive, caret has the text
 })
+
+test("two separate enters persist the choice once", async () => {
+  const provider = {
+    chat: async () => ({ content: "", toolCalls: [] }),
+    listModels: async () => ["m1", "m2"],
+  }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const calls: string[] = []
+  const real = env.store.setModel.bind(env.store)
+  env.store.setModel = (...a: any[]) => { calls.push(String(a[1])); return real(...a) }
+  const { type } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 40))
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                        // providers → models
+  await new Promise(r => setTimeout(r, 80))
+  type("\r")                                        // pick — overlay closes here
+  await new Promise(r => setTimeout(r, 80))
+  type("\r")                                        // stray third Enter
+  await new Promise(r => setTimeout(r, 120))
+  expect(calls).toEqual(["9router"])                // one setModel, not two
+})
