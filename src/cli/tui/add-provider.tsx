@@ -37,6 +37,10 @@ export function AddProvider(p: {
   const [url, setUrl] = useState("")
   const [key, setKey] = useState("")
   const [models, setModels] = useState<string[]>([])
+  // What the next save will write: `undefined` = no list (models-less save, or a
+  // `200` that advertised none). Both success paths go through `commit()`, so an
+  // existing name gets the same overwrite confirmation either way.
+  const pendingModelsRef = useRef<string[] | undefined>(undefined)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [warning, setWarning] = useState<string | null>(null)
@@ -96,6 +100,7 @@ export function AddProvider(p: {
       setError(r.error ?? "test failed"); return
     }
     modelsRef.current = r.models; setModels(r.models)
+    pendingModelsRef.current = r.models
     go("import")
   }
 
@@ -109,10 +114,13 @@ export function AddProvider(p: {
     p.onSaved(nameRef.current, cfg)
   }
 
-  function submitImport() {
+  /** Shared by `import` and `nomodels`: confirm when the name already exists. */
+  function commit(models?: string[]) {
     if (p.existing.includes(nameRef.current)) { go("confirm"); return }
-    save(modelsRef.current)
+    save(models)
   }
+
+  function submitImport() { commit(pendingModelsRef.current) }
 
   /**
    * Recovery from a failed Test. The frame tells the user to fix the fields and
@@ -139,13 +147,13 @@ export function AddProvider(p: {
         return
       }
       if (phaseRef.current === "nomodels") {
-        if (back) { clearMsg(); go("test"); return }
-        if (k.return) save(undefined)
+        if (back) { clearMsg(); pendingModelsRef.current = undefined; go("test"); return }
+        if (k.return) commit(undefined)
         return
       }
       if (!k.return) return
       if (phaseRef.current === "import") { submitImport(); return }
-      if (phaseRef.current === "confirm") save(modelsRef.current)
+      if (phaseRef.current === "confirm") save(pendingModelsRef.current)
       return
     }
     if (k.return) { submitField(); return }
@@ -195,7 +203,9 @@ export function AddProvider(p: {
 
       {phase === "confirm" && (
         <Text color="yellow">
-          overwrite {name}? its model list will be replaced; an empty key field keeps the current key
+          overwrite {name}? {pendingModelsRef.current
+            ? "its model list will be replaced"
+            : "it keeps no model list (the endpoint advertised none)"}; an empty key field keeps the current key
         </Text>
       )}
 

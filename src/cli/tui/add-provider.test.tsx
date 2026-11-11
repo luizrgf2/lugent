@@ -105,6 +105,26 @@ test("a 200 with no models offers a save without a model list", async () => {
   expect(saved[0][1]).toEqual({ baseUrl: "http://r/v1", apiKey: "sk-1" })   // no `models` key
 })
 
+test("an existing name still confirms before a models-less save", async () => {
+  const saved: any[] = []
+  const { type, lastFrame } = renderTui(
+    <AddProvider {...base} existing={["r"]} onSaved={(n, c) => saved.push([n, c])}
+      discover={async () => ({ ok: false, models: [], noModels: true, error: "endpoint answered but advertised no models" })} />,
+  )
+  type("r\rhttp://r/v1\rsk-1\r")
+  await wait(30)
+  type("\r")                                  // Test → no models
+  await wait(40)
+  type("\r")                                  // save without a list
+  await wait(30)
+  // Same gate as the import path: overwriting is never silent.
+  expect(lastFrame()).toContain("overwrite")
+  expect(saved.length).toBe(0)
+  type("\r")                                  // confirm
+  await wait(30)
+  expect(saved[0][1]).toEqual({ baseUrl: "http://r/v1", apiKey: "sk-1" })
+})
+
 test("the key is never echoed, not even masked reversibly", async () => {
   const { type, lastFrame } = renderTui(<AddProvider {...base} />)
   type("r\rhttp://r/v1\rsk-supersecret-abc\r")
