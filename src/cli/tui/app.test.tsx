@@ -1449,3 +1449,53 @@ test("two separate enters persist the choice once", async () => {
   await new Promise(r => setTimeout(r, 120))
   expect(calls).toEqual(["9router"])                // one setModel, not two
 })
+
+test("/model: down-arrow while the model list is empty cannot select a missing row", async () => {
+  const provider = {
+    chat: async () => ({ content: "", toolCalls: [] }),
+    listModels: () => new Promise<string[]>(r => setTimeout(() => r(["m1", "m2"]), 120)),
+  }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const picks: string[] = []
+  const real = env.store.setModel.bind(env.store)
+  env.store.setModel = (...a: any[]) => { picks.push(String(a[2])); return real(...a) }
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 40))
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                        // provider chosen; list still empty
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("loading models…")
+  type("\u001b[B")                                  // ↓ on an empty list: min(-1, 0) = -1
+  await new Promise(r => setTimeout(r, 200))        // list has landed; sel must still be 0
+  type("\r")
+  await new Promise(r => setTimeout(r, 80))
+  expect(picks).toEqual(["m1"])                     // a real model, never undefined
+  expect(lastFrame()).not.toContain("undefined")
+})
+
+test("/model: a slow provider's list cannot overwrite the one now on screen", async () => {
+  const env = fakeEnv()                             // 9router → http://x, ollama → http://y
+  env.makeProvider = (cfg: any) => ({
+    chat: async () => ({ content: "", toolCalls: [] }),
+    listModels: () => cfg.baseUrl === "http://x/v1"
+      ? new Promise<string[]>(r => setTimeout(() => r(["slow-A"]), 500))
+      : Promise.resolve(["fast-A"]),
+  })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 40))
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                        // 9router: slow load starts
+  await new Promise(r => setTimeout(r, 30))
+  type("\u001b")                                    // back to providers, load still in flight
+  await new Promise(r => setTimeout(r, 60))
+  type("\u001b[B")                                  // ↓ to ollama
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                        // ollama: resolves immediately
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).toContain("fast-A")
+  await new Promise(r => setTimeout(r, 500))        // the slow list settles after this one
+  expect(lastFrame()).toContain("fast-A")           // still the rows we are looking at
+  expect(lastFrame()).not.toContain("slow-A")
+})

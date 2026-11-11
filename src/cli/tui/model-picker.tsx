@@ -23,10 +23,13 @@ export function ModelPicker(p: {
   const modelsRef = useRef(models)
   const loadingRef = useRef(loading)
   const errorRef = useRef(error)
+  // A load that settles after another was started must not overwrite the newer list.
+  const reqRef = useRef(0)
 
   const setSelBoth = (i: number) => { selRef.current = i; setSel(i) }
 
   async function openModels(prov: string) {
+    const req = ++reqRef.current
     setChosen(prov)
     levelRef.current = "models"; setLevel("models")
     setSelBoth(0)
@@ -34,11 +37,13 @@ export function ModelPicker(p: {
     errorRef.current = null; setError(null)
     try {
       const list = await p.loadModels(prov)
+      if (req !== reqRef.current) return
       modelsRef.current = list; setModels(list)
     } catch (e: any) {
+      if (req !== reqRef.current) return
       errorRef.current = e.message; setError(e.message)
     } finally {
-      loadingRef.current = false; setLoading(false)
+      if (req === reqRef.current) { loadingRef.current = false; setLoading(false) }
     }
   }
 
@@ -49,11 +54,12 @@ export function ModelPicker(p: {
 
   useInput((_input, key) => {
     const list = levelRef.current === "providers" ? p.providers : modelsRef.current
-    if (key.upArrow) { setSelBoth(Math.max(0, selRef.current - 1)); return }
-    if (key.downArrow) { setSelBoth(Math.min(list.length - 1, selRef.current + 1)); return }
+    if (list.length && key.upArrow) { setSelBoth(Math.max(0, selRef.current - 1)); return }
+    if (list.length && key.downArrow) { setSelBoth(Math.min(list.length - 1, selRef.current + 1)); return }
     if (key.return) {
       if (levelRef.current === "providers") { if (list.length) openModels(list[selRef.current]); return }
-      if (!loadingRef.current && !errorRef.current && list.length) p.onPick(chosen, list[selRef.current])
+      const pick = list[selRef.current]
+      if (!loadingRef.current && !errorRef.current && pick !== undefined) p.onPick(chosen, pick)
       return
     }
     if (key.escape) {
