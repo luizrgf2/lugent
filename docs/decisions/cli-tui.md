@@ -157,6 +157,16 @@ Why: the field does not need cursor movement to be correct — it needs to not c
 
 Cost if wrong: arrow keys do not move a cursor in the key field (they never did — they only corrupted it); a user expecting readline-style editing there gets none. A future front end that signals cancellation with a different error type must go through `isCancellation`, or its cancel will surface as a red failure line instead of `cancelled — nothing written`.
 
+## 2026-11-11 — `/add-provider`'s import lists models in an 8-row window
+
+Context: the `import` phase rendered one `<Text>` per advertised model with no ceiling. Measured with the repo's own `renderTui` on a 30-row terminal: 60 models produced a 69-row frame, so the form's header (`/add-provider · register an OpenAI-compatible provider`) and its footer (`enter import & save · esc cancel`) scrolled off the screen and no key reached the end of the list. A gateway advertising ~300 models made the phase unusable. The form is the only picker in `src/cli/tui/` without a row cap — the other five all use `MAX_VISIBLE = 8`.
+
+Decision: `add-provider.tsx` gains `MAX_VISIBLE = 8`, a `scroll` state plus a `scrollRef` mirror (the file's existing ink-batching discipline), and six bindings that exist only while `phase === "import"`: `↑`/`↓` move the window by one, `PgUp`/`PgDn` (or `shift+↑/↓`) by a window, `Home`/`End` to the ends. The render clamps on every pass (`start = min(scroll, max(0, len - 8))`), so an overshoot from `End` — or from a shorter list after a retest — can never produce an empty window. The header shows `— start-end of total` and the footer the scroll hint **only** when the list exceeds the window; at 8 ids or fewer the frame is byte-identical to before. The scroll state is view-only: `enter` still hands every model in `pendingModelsRef` to `onSaved`. Render keys become `` `${start + i}-${m}` `` because a duplicate id from an endpoint collided on `key={m}`.
+
+Why a fixed 8 and not `stdout.rows`: the form overlay does not receive `rows`, and all five sibling pickers already use the same constant — a second sizing mechanism for a four-field form is more machinery than the problem asks for. Why `↑`/`↓` move the window instead of a `❯` cursor: nothing is being selected, the import is all-or-nothing, so the closest existing model is `SkillList` (windows without a persisted selection), not `ModelPicker`.
+
+Cost if wrong: a 30-row terminal shows 8 rows of models where it could show ~20 — the window is smaller than the space available, and the `ChildViewer`'s `transcriptWindow` remains the only row-derived list in the TUI. A user who expects `↑`/`↓` to pick a subset finds no selection at all; that is the documented all-or-nothing contract, not an oversight, and a checklist would be a new feature with its own decision.
+
 ---
 
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.

@@ -336,3 +336,91 @@ test("a blank key on a brand-new name Tests with no key at all", async () => {
   await wait(40)
   expect(seen[0]).toEqual({ baseUrl: "http://r/v1", apiKey: "" })
 })
+
+const many = (n: number) => Array.from({ length: n }, (_, i) => `model-${String(i + 1).padStart(3, "0")}`)
+
+/** Drive the form to the import phase with `n` advertised models. */
+async function toImport(n: number, saved: any[] = []) {
+  const list = many(n)
+  const ui = renderTui(
+    <AddProvider {...base} onSaved={(name, cfg) => saved.push([name, cfg])}
+      discover={() => Promise.resolve({ ok: true, models: list })} />,
+  )
+  ui.type("r\rhttp://r/v1\rsk-1\r")
+  await wait(30)
+  ui.type("\r")                                  // Test
+  await wait(40)
+  return ui
+}
+
+test("a long model list is windowed so the header and footer stay on screen", async () => {
+  // Measured before the fix: 300 models rendered a 69-row frame on a 30-row
+  // terminal, pushing the form's own header and footer off the screen.
+  const { lastFrame } = await toImport(300)
+  const frame = lastFrame()
+  expect(frame).toContain("model-001")
+  expect(frame).not.toContain("model-300")
+  expect(frame).toContain("1-8 of 300")
+  expect(frame).toContain("enter import & save")     // the footer still exists
+  expect(frame.split("\n").length).toBeLessThanOrEqual(20)  // and the frame is bounded
+})
+
+test("down and up move the window by one model", async () => {
+  const { type, lastFrame } = await toImport(20)
+  type("\u001b[B")                                // down
+  await wait(30)
+  expect(lastFrame()).toContain("model-002")
+  expect(lastFrame()).not.toContain("model-001 ")
+  expect(lastFrame()).toContain("2-9 of 20")
+  type("\u001b[A")                                // up
+  await wait(30)
+  expect(lastFrame()).toContain("model-001")
+})
+
+test("end jumps to the last window and home returns to the top", async () => {
+  const { type, lastFrame } = await toImport(20)
+  type("\u001b[F")                                // end
+  await wait(30)
+  expect(lastFrame()).toContain("model-020")
+  expect(lastFrame()).toContain("13-20 of 20")
+  type("\u001b[H")                                // home
+  await wait(30)
+  expect(lastFrame()).toContain("model-001")
+  expect(lastFrame()).toContain("1-8 of 20")
+})
+
+test("page down moves a full window, clamped at the end", async () => {
+  const { type, lastFrame } = await toImport(20)
+  type("\u001b[6~")                               // pgdn
+  await wait(30)
+  expect(lastFrame()).toContain("9-16 of 20")
+  type("\u001b[6~")                               // pgdn again — clamps, no overshoot
+  await wait(30)
+  expect(lastFrame()).toContain("13-20 of 20")
+})
+
+test("enter after scrolling still imports every model, not just the window", async () => {
+  // Two asserts on purpose: the window assert makes this RED before the feature
+  // exists, and the import assert pins the all-or-nothing contract against a
+  // future slice of `pendingModelsRef`. Asserting only that `model-020` is
+  // visible would pass on the unfixed code, where the un-windowed list renders
+  // every id — it must be `model-001` disappearing that proves the window moved.
+  const saved: any[] = []
+  const { type, lastFrame } = await toImport(20, saved)
+  type("\u001b[F")                                // end
+  await wait(30)
+  expect(lastFrame()).toContain("model-020")
+  expect(lastFrame()).not.toContain("model-001")
+  type("\r")                                      // import & save
+  await wait(30)
+  expect(saved.length).toBe(1)
+  expect(saved[0][1].models).toEqual(many(20))
+})
+
+test("a list that fits the window shows no scroll hint", async () => {
+  const { lastFrame } = await toImport(3)
+  const frame = lastFrame()
+  expect(frame).toContain("3 models found")
+  expect(frame).not.toContain(" of 3")
+  expect(frame).not.toContain("scroll")
+})
