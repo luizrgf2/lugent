@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test"
 import { $ } from "bun"
+import { tmpdir } from "node:os"
 
 test("non-TTY (piped) stdin runs REPL fallback path", async () => {
   const out = await $`printf '/exit\n' | bun src/main.ts --db /tmp/opencode/tui-smoke.db`.quiet().text()
@@ -18,14 +19,18 @@ test("--db with no value: usage error on stderr, exit 2, no traceback", async ()
 }, 30000)
 
 test("--db followed by a flag is not taken as the path", async () => {
-  const dir = `${import.meta.dir}/__dbflag_tmp__`
-  await $`mkdir -p ${dir}`.quiet()
-  const r = await $`bun ${import.meta.dir}/main.ts --db --plain`.cwd(dir).nothrow().quiet()
-  const created = await $`ls ${dir}`.quiet().text()
-  await $`rm -rf ${dir}`.quiet()
-  expect(r.exitCode).toBe(2)
-  expect(r.stderr.toString()).toContain("lugent: --db needs a path")
-  expect(created.trim()).toBe("")   // no file named "--plain"
+  // Unique dir per run, outside the source tree: the unguarded code orphaned a
+  // fixed `src/__dbflag_tmp__/--plain` on timeout and then failed the suite.
+  const dir = (await $`mktemp -d ${tmpdir()}/lugent-dbflag-XXXXXX`.quiet().text()).trim()
+  try {
+    const r = await $`bun ${import.meta.dir}/main.ts --db --plain`.cwd(dir).nothrow().quiet()
+    const created = await $`ls -A ${dir}`.quiet().text()
+    expect(r.exitCode).toBe(2)
+    expect(r.stderr.toString()).toContain("lugent: --db needs a path")
+    expect(created.trim()).toBe("")   // no file named "--plain"
+  } finally {
+    await $`rm -rf ${dir}`.quiet()
+  }
 }, 30000)
 
 test("--db with an empty string is rejected", async () => {
