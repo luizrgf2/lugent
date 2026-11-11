@@ -353,6 +353,61 @@ async function toImport(n: number, saved: any[] = []) {
   return ui
 }
 
+test("the import phase is a checklist with nothing selected on a first run", async () => {
+  const { lastFrame } = await toImport(3)
+  const frame = lastFrame()
+  expect(frame).toContain("0 of 3 models selected")
+  expect(frame).toContain("[ ] model-001")
+  expect(frame).not.toContain("[x]")
+  expect(frame).toContain("space toggle")
+})
+
+test("space toggles the row under the cursor, twice returns it", async () => {
+  const { type, lastFrame } = await toImport(3)
+  type(" ")
+  await wait(30)
+  expect(lastFrame()).toContain("1 of 3 models selected")
+  expect(lastFrame()).toContain("[x] model-001")
+  type(" ")
+  await wait(30)
+  expect(lastFrame()).toContain("0 of 3 models selected")
+})
+
+test("a checks every row, and pressing it again clears them", async () => {
+  const { type, lastFrame } = await toImport(3)
+  type("a")
+  await wait(30)
+  expect(lastFrame()).toContain("3 of 3 models selected")
+  type("a")
+  await wait(30)
+  expect(lastFrame()).toContain("0 of 3 models selected")
+})
+
+test("the cursor clamps at the last row, and space there toggles the last model", async () => {
+  // `End` used to set `scroll = models.length` and let the render clamp. A cursor
+  // cannot: models[sel] would be undefined on the next space.
+  const { type, lastFrame } = await toImport(5)
+  type("\u001b[F")                            // end
+  await wait(30)
+  type(" ")                                   // toggle the last row
+  await wait(30)
+  expect(lastFrame()).toContain("1 of 5 models selected")
+  // 5 rows fit MAX_VISIBLE, so the frame carries no window suffix; the point here
+  // is that `End` left the cursor on a real row, not one past the end.
+  expect(lastFrame()).not.toContain(" of 5 —")
+  expect(lastFrame()).toContain("[x] model-005")
+})
+
+test("down past the last row does not move the cursor", async () => {
+  const { type, lastFrame } = await toImport(2)
+  type("\u001b[B\u001b[B\u001b[B")            // three downs on two rows
+  await wait(30)
+  type(" ")
+  await wait(30)
+  expect(lastFrame()).toContain("[x] model-002")
+  expect(lastFrame()).toContain("1 of 2 model")
+})
+
 test("a long model list is windowed so the header and footer stay on screen", async () => {
   // Measured before the fix: 300 models rendered a 69-row frame on a 30-row
   // terminal, pushing the form's own header and footer off the screen.
