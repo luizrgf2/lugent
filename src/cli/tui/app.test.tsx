@@ -1350,6 +1350,157 @@ test("ctrl+9 with at most 8 children does not open the picker", async () => {
   expect(lastFrame()).not.toContain("choose child")
 })
 
+test("/model: esc at the provider level closes the picker, no crash", async () => {
+  const provider = {
+    chat: async () => ({ content: "", toolCalls: [] }),
+    listModels: async () => ["m1", "m2"],
+  }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 40))
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).toContain("choose provider")
+  type("\u001b")                                   // esc at the provider level
+  await new Promise(r => setTimeout(r, 80))
+  const f = lastFrame()
+  expect(f).not.toContain("choose provider")       // picker unmounted
+  expect(f).toContain(">")                         // composer is back
+})
+
+test("/model: models level, esc returns to providers, esc again closes", async () => {
+  const provider = {
+    chat: async () => ({ content: "", toolCalls: [] }),
+    listModels: async () => ["m1", "m2"],
+  }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 40))
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                       // enter on the current provider
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).toContain("m1")
+  type("\u001b")                                   // back to providers
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).toContain("choose provider")
+  type("\u001b")                                   // close
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).not.toContain("choose provider")
+})
+
+test("/model: esc while the model list is still loading still closes", async () => {
+  const provider = {
+    chat: async () => ({ content: "", toolCalls: [] }),
+    listModels: () => new Promise<string[]>(r => setTimeout(() => r(["m1"]), 150)),
+  }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 40))
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                       // provider chosen; fetch pending
+  await new Promise(r => setTimeout(r, 20))
+  expect(lastFrame()).toContain("loading models")
+  type("\u001b")                                   // back mid-load
+  await new Promise(r => setTimeout(r, 20))
+  type("\u001b")                                   // close mid-load
+  await new Promise(r => setTimeout(r, 300))       // let the promise settle after unmount
+  expect(lastFrame()).not.toContain("choose provider")
+  expect(lastFrame()).not.toContain("loading models")
+})
+
+test("/model: ctrl+c closes the picker; a following esc types nothing and does not crash", async () => {
+  const provider = { chat: async () => ({ content: "", toolCalls: [] }), listModels: async () => ["m1"] }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 40))
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).toContain("choose provider")
+  type("\u0003")                                   // ctrl+c closes the overlay
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).not.toContain("choose provider")
+  type("\u001b")                                   // dead-handler hazard: must be inert
+  await new Promise(r => setTimeout(r, 60))        // separate read: ESC+x in one write
+                                                   // parses as alt+x (key.meta), not two keys
+  type("x")
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).toContain("x")               // composer alive, caret has the text
+})
+
+test("two separate enters persist the choice once", async () => {
+  const provider = {
+    chat: async () => ({ content: "", toolCalls: [] }),
+    listModels: async () => ["m1", "m2"],
+  }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const calls: string[] = []
+  const real = env.store.setModel.bind(env.store)
+  env.store.setModel = (...a: any[]) => { calls.push(String(a[1])); return real(...a) }
+  const { type } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 40))
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                        // providers → models
+  await new Promise(r => setTimeout(r, 80))
+  type("\r")                                        // pick — overlay closes here
+  await new Promise(r => setTimeout(r, 80))
+  type("\r")                                        // stray third Enter
+  await new Promise(r => setTimeout(r, 120))
+  expect(calls).toEqual(["9router"])                // one setModel, not two
+})
+
+test("/model: down-arrow while the model list is empty cannot select a missing row", async () => {
+  const provider = {
+    chat: async () => ({ content: "", toolCalls: [] }),
+    listModels: () => new Promise<string[]>(r => setTimeout(() => r(["m1", "m2"]), 120)),
+  }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const picks: string[] = []
+  const real = env.store.setModel.bind(env.store)
+  env.store.setModel = (...a: any[]) => { picks.push(String(a[2])); return real(...a) }
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 40))
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                        // provider chosen; list still empty
+  await new Promise(r => setTimeout(r, 30))
+  expect(lastFrame()).toContain("loading models…")
+  type("\u001b[B")                                  // ↓ on an empty list: min(-1, 0) = -1
+  await new Promise(r => setTimeout(r, 200))        // list has landed; sel must still be 0
+  type("\r")
+  await new Promise(r => setTimeout(r, 80))
+  expect(picks).toEqual(["m1"])                     // a real model, never undefined
+  expect(lastFrame()).not.toContain("undefined")
+})
+
+test("/model: a slow provider's list cannot overwrite the one now on screen", async () => {
+  const env = fakeEnv()                             // 9router → http://x, ollama → http://y
+  env.makeProvider = (cfg: any) => ({
+    chat: async () => ({ content: "", toolCalls: [] }),
+    listModels: () => cfg.baseUrl === "http://x/v1"
+      ? new Promise<string[]>(r => setTimeout(() => r(["slow-A"]), 500))
+      : Promise.resolve(["fast-A"]),
+  })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 40))
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                        // 9router: slow load starts
+  await new Promise(r => setTimeout(r, 30))
+  type("\u001b")                                    // back to providers, load still in flight
+  await new Promise(r => setTimeout(r, 60))
+  type("\u001b[B")                                  // ↓ to ollama
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                        // ollama: resolves immediately
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).toContain("fast-A")
+  await new Promise(r => setTimeout(r, 500))        // the slow list settles after this one
+  expect(lastFrame()).toContain("fast-A")           // still the rows we are looking at
+  expect(lastFrame()).not.toContain("slow-A")
+})
+
 const fakeDiscover = async () => ({ ok: true as const, models: ["m1", "m2"] })
 
 test("/add-provider saves to the global config and the provider is usable at once", async () => {
@@ -1540,4 +1691,5 @@ test("/add-provider confirms before overwriting a global entry the live config c
   await new Promise(r => setTimeout(r, 60))
   expect(JSON.parse(readFileSync(global, "utf8")).providers.shadowed.apiKey).toBe("sk-new")
   rmSync(global, { force: true })
+
 })

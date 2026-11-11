@@ -105,3 +105,35 @@ test("long model list windows to ~8 visible rows", async () => {
   expect(f2).toContain("m19")
   expect(f2).not.toContain("m00")
 })
+
+test("zero providers: says so instead of rendering 'undefined'; enter does not load", async () => {
+  const loads: string[] = []
+  const { type, lastFrame } = renderTui(
+    <ModelPicker providers={[]} currentProvider="" currentModel=""
+      loadModels={async p => { loads.push(p); return [] }}
+      onPick={() => {}} onClose={() => {}} />
+  )
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  expect(f).toContain("no providers configured")
+  expect(f).not.toContain("undefined")
+  type("\r")
+  await new Promise(r => setTimeout(r, 60))
+  expect(loads).toEqual([])                       // no openModels(undefined)
+  expect(lastFrame()).not.toContain("choose model")
+})
+
+test("single provider: arrows cannot move off it, enter still opens its models", async () => {
+  const { type, lastFrame } = renderTui(
+    <ModelPicker providers={["solo"]} currentProvider="solo" currentModel="m1"
+      loadModels={async () => ["m1", "m2"]} onPick={() => {}} onClose={() => {}} />
+  )
+  await new Promise(r => setTimeout(r, 30))
+  type("\u001b[B")                                  // down: nothing below
+  type("\u001b[A")                                  // up: nothing above
+  await new Promise(r => setTimeout(r, 40))
+  expect(lastFrame()).toContain("❯ solo")           // still selected
+  type("\r")
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).toContain("m1")
+})
