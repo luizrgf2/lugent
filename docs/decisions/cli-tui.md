@@ -140,3 +140,13 @@ Cost if wrong: **the viewer keys are dead on terminals without the kitty keyboar
 ---
 
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.
+
+## 2026-11-11 — The `--plain` key prompt is masked, because readline echoes
+
+Context: the README said the api key "is never printed back". True in the TUI (a fixed run of dots), false in the `--plain` REPL, where the key went through `readline`'s ordinary `question()` and was echoed as typed into terminal scrollback. The plan prescribed plain `rl.question`, so this was not a plan violation — it was the claim outrunning the code.
+
+Decision: `src/cli/secret-prompt.ts` — `readSecret()` reads one line with the terminal in raw mode, echoes `•` per character, honours backspace, and restores canonical mode on the way out. `runAddProviderForm` takes an optional `askSecret` used for the key prompt only; `repl.ts` wires it with `rl` paused and readline's output **muted** through `muteableOutput()` for the duration. The prompt and the dots go to the real stdout (`promptOutput`), so the user still sees what to type.
+
+Why a mute, and why unconditional `setRawMode(true)`: both were found on a real pty, not in a unit test. Bun's `readline` keeps redrawing its line buffer while **paused** — a capture showed the key printed middle-truncated (`sk-TYP…RKER`) with `rl.pause()` in effect — and `rl`'s `isRaw` stays `true` across that pause while the tty underneath is already canonical, so a "only set raw when it says it is not raw" guard left the kernel echoing every keystroke. Each bug reproduces if you revert its one line; neither is visible from a fake stream.
+
+Cost if wrong: the key prompt no longer offers readline's line editing (arrow keys, paste-as-text, history) — only typing and backspace, which for a key is all anyone uses. A caller that forgets to mute its own line reader still leaks, while `readSecret` alone looks correct; that is why the doc comment and the `--plain` wiring point at each other, and why the pty probe (not the unit tests) is the check that matters here. `--plain` in a non-TTY never reaches this path — `/add-provider` prints usage instead.
