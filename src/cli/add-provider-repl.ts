@@ -30,6 +30,47 @@ export function needsV1(raw: string): boolean {
 }
 
 /**
+ * Parse a counted selection into ascending, unique, 0-based indices.
+ *
+ * The REPL's model list is printed as `1. alpha`, so the numbers are the
+ * interface: `"1,3-5"` is the natural answer. Rules that are decisions, not
+ * conveniences:
+ *
+ * - out-of-range indices are **dropped**, not clamped — turning `1,99` into
+ *   "the last model" would import an id the user never named;
+ * - a reversed range (`5-3`) is swapped rather than rejected: it is unambiguous;
+ * - `null` means "not a selection", never "empty" — an empty write and a typo
+ *   must stay distinguishable at the call site.
+ */
+export function parseModelSelection(input: string, count: number): number[] | null {
+  const raw = input.trim().toLowerCase()
+  if (raw === "") return []
+  if (raw === "a" || raw === "all") return count > 0 ? Array.from({ length: count }, (_, i) => i) : null
+  const out = new Set<number>()
+  let valid = 0
+  for (const token of raw.split(",")) {
+    const t = token.trim()
+    if (t === "") continue
+    const range = t.match(/^(\d+)\s*-\s*(\d+)$/)
+    if (range) {
+      const a = Number(range[1]), b = Number(range[2])
+      const [lo, hi] = a <= b ? [a, b] : [b, a]
+      for (let n = lo; n <= hi; n++) { valid++; if (n >= 1 && n <= count) out.add(n - 1) }
+      continue
+    }
+    const single = t.match(/^\d+$/)
+    if (!single) return null
+    valid++
+    const n = Number(t)
+    if (n >= 1 && n <= count) out.add(n - 1)
+  }
+  if (valid === 0) return null
+  // Every token parsed but nothing landed in range (`"99"` on 3 models): the
+  // answer selects nothing, which is a typo, not a decision.
+  return out.size === 0 ? null : [...out].sort((a, b) => a - b)
+}
+
+/**
  * Names the save would overwrite: the live config's plus whatever the global file
  * already holds.
  *
@@ -133,11 +174,31 @@ export async function runAddProviderForm(opts: {
   const found = await opts.discover({ baseUrl, apiKey: testKey })
   let models: string[] | undefined
   if (found.ok) {
-    found.models.forEach((m, i) => say(`  ${i + 1}. ${m}`))
-    const yes = await askFor(() => opts.ask(`import these ${found.models.length} models? [Y/n] `))
-    if (yes === CANCELLED) return { status: "cancelled" }
-    if (yes.trim().toLowerCase() === "n") return { status: "cancelled" }
-    models = found.models
+    const stored = opts.storedEntry?.(name)?.models ?? []
+    found.models.forEach((m, i) => say(`  ${i + 1}. ${stored.includes(m) ? "* " : "  "}${m}`))
+    // A blank answer keeps `*` (the models the file already holds), which is the
+    // re-run path; with nothing stored there is no default to fall into and a
+    // blank answer re-asks. `n` is the explicit cancel.
+    const keep = stored.map(id => found.models.indexOf(id)).filter(i => i >= 0).sort((a, b) => a - b)
+    const tries = 3
+    let chosen: string[] | undefined
+    for (let attempt = 0; attempt < tries && chosen === undefined; attempt++) {
+      const answer = await askFor(() => opts.ask(
+        "select models to import (1,3-5 · a all · n cancel · blank keeps *) : ",
+      ))
+      if (answer === CANCELLED) return { status: "cancelled" }
+      const text = answer.trim().toLowerCase()
+      if (text === "n" || text === "no") return { status: "cancelled" }
+      if (text === "") {
+        if (keep.length === 0) continue
+        chosen = keep.map(i => found.models[i]); break
+      }
+      const idx = parseModelSelection(answer, found.models.length)
+      if (idx === null || idx.length === 0) continue
+      chosen = idx.map(i => found.models[i])
+    }
+    if (chosen === undefined) return { status: "invalid", error: `no valid selection after ${tries} tries` }
+    models = chosen
   } else if (found.noModels) {
     // A reachable endpoint that advertises nothing: the provider is usable, it
     // just has no cached list (`/model` falls back to a live call).

@@ -167,6 +167,27 @@ Why a fixed 8 and not `stdout.rows`: the form overlay does not receive `rows`, a
 
 Cost if wrong: a 30-row terminal shows 8 rows of models where it could show ~20 — the window is smaller than the space available, and the `ChildViewer`'s `transcriptWindow` remains the only row-derived list in the TUI. A user who expects `↑`/`↓` to pick a subset finds no selection at all; that is the documented all-or-nothing contract, not an oversight, and a checklist would be a new feature with its own decision.
 
+## 2026-11-12 — /add-provider imports a selection, not the whole list
+
+Decision: the `import` phase is a checklist. `space` toggles the row under the cursor,
+`a` checks all or none, and `enter` writes exactly the checked ids — in endpoint order,
+duplicates included. Selection is a `Set<number>` of indices, not of ids: a gateway can
+advertise the same id twice, and an id set would toggle both rows at once. `enter` with
+nothing checked is a no-op; the `--plain` REPL asks for numbers, keeps the stored set on
+a blank answer, and gives up after three unparseable tries. This reverses the 2026-11-11
+entry above ("a checklist would be a new feature with its own decision") — this is that
+feature, and the demand is that the owner was handed a 200-model provider with all of it
+imported.
+
+Why: the cached `models` list is what `/model` shows, so an all-or-nothing import turns
+every junk id, embedding model and dated snapshot into a row the user scrolls past daily.
+Listing is free; the write has to be a choice.
+
+Cost if wrong: a user who wanted everything pays one keystroke (`a`), and a user who
+wanted the models-less save now has only the `nomodels` path to get it — the `enter`-at-zero
+shortcut is deliberately gone, because that outcome is indistinguishable from a save the
+user never chose.
+
 ---
 
 Index: [`docs/decisions.md`](../decisions.md) — one file per area, chronological within each.

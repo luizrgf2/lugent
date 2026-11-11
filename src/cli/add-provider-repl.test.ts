@@ -2,7 +2,7 @@ import { test, expect } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { saveProvider, providerEntryInFile } from "../core/config"
 import { discoverModels } from "../core/provider"
-import { runAddProviderForm, existingProviderNames } from "./add-provider-repl"
+import { runAddProviderForm, existingProviderNames, parseModelSelection } from "./add-provider-repl"
 import { readSecret } from "./secret-prompt"
 
 const SEEDED = {
@@ -39,12 +39,115 @@ function scripted(list: string[]) {
 
 const foundTwo = async () => ({ ok: true, models: ["alpha", "beta"] })
 
+test("parseModelSelection: a comma list becomes ascending unique 0-based indices", () => {
+  expect(parseModelSelection("1,3", 5)).toEqual([0, 2])
+  expect(parseModelSelection("3,1", 5)).toEqual([0, 2])     // order in, order out
+  expect(parseModelSelection("1,1", 5)).toEqual([0])        // deduped
+})
+
+test("parseModelSelection: ranges expand, and a reversed range is swapped", () => {
+  expect(parseModelSelection("3-5", 6)).toEqual([2, 3, 4])
+  expect(parseModelSelection("5-3", 6)).toEqual([2, 3, 4])
+  expect(parseModelSelection("1,3-4", 5)).toEqual([0, 2, 3])
+})
+
+test("parseModelSelection: whitespace is tolerated, `a`/`all` is everything", () => {
+  expect(parseModelSelection(" 1 , 3 ", 5)).toEqual([0, 2])
+  expect(parseModelSelection("a", 3)).toEqual([0, 1, 2])
+  expect(parseModelSelection("ALL", 3)).toEqual([0, 1, 2])
+})
+
+test("parseModelSelection: blank is empty, a typo is null, out-of-range is dropped", () => {
+  expect(parseModelSelection("", 3)).toEqual([])
+  expect(parseModelSelection("   ", 3)).toEqual([])
+  expect(parseModelSelection("abc", 3)).toBeNull()
+  expect(parseModelSelection("1;2", 3)).toBeNull()
+  expect(parseModelSelection("99", 3)).toBeNull()            // nothing selectable → null, not []
+  expect(parseModelSelection("1,99", 3)).toEqual([0])        // the valid part survives
+})
+
+test("plain repl: only the numbered models are imported", async () => {
+  // The proving test: the old code reads "2" as "not n" and imports both.
+  const f = fixture()
+  const s = scripted(["http://new/v1", "sk-new", "2"])
+  const r = await runAddProviderForm({
+    name: "fresh", ask: s.ask, discover: foundTwo, existing: [],
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    expect(r.status).toBe("saved")
+    if (r.status !== "saved") throw new Error("unreachable")
+    expect(r.imported).toBe(1)
+    expect(f.read().providers.fresh.models).toEqual(["beta"])
+  } finally { f.cleanup() }
+})
+
+test("plain repl: a range selects a slice, `a` selects everything", async () => {
+  const f = fixture()
+  const s = scripted(["http://new/v1", "sk-new", "1"])
+  const withThree = async () => ({ ok: true, models: ["one", "two", "three"] })
+  const r = await runAddProviderForm({
+    name: "fresh", ask: s.ask, discover: withThree, existing: [],
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    expect(r.status).toBe("saved")
+    if (r.status !== "saved") throw new Error("unreachable")
+    expect(f.read().providers.fresh.models).toEqual(["one"])
+  } finally { f.cleanup() }
+})
+
+test("plain repl: a typo re-asks instead of cancelling, and the third failure is an error", async () => {
+  const f = fixture()
+  const s = scripted(["http://new/v1", "sk-new", "abc", "zzz", "99"])
+  const r = await runAddProviderForm({
+    name: "fresh", ask: s.ask, discover: foundTwo, existing: [],
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    expect(r.status).toBe("invalid")
+    if (r.status !== "invalid") throw new Error("unreachable")
+    expect(r.error).toContain("3")
+    expect(s.prompts.filter(p => /select models/.test(p)).length).toBe(3)
+    expect(f.read().providers.fresh).toBeUndefined()   // nothing written
+  } finally { f.cleanup() }
+})
+
+test("plain repl: `n` cancels, and so does blank when nothing is stored", async () => {
+  const f = fixture()
+  const s = scripted(["http://new/v1", "sk-new", "n"])
+  const r = await runAddProviderForm({
+    name: "fresh", ask: s.ask, discover: foundTwo, existing: [],
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    expect(r.status).toBe("cancelled")
+    expect(f.read().providers.fresh).toBeUndefined()
+  } finally { f.cleanup() }
+})
+
+test("plain repl: blank keeps the stored selection on a re-run, marked with *", async () => {
+  const f = fixture()                                  // SEEDED holds models: ["m-old"]
+  const s = scripted(["http://new/v1", "sk-old", "", "y"])   // blank keeps *, then overwrite
+  const r = await runAddProviderForm({
+    name: "existing", ask: s.ask,
+    discover: async () => ({ ok: true, models: ["m-old", "m-new"] }),
+    existing: ["existing"], storedEntry: n => providerEntryInFile(n, f.path),
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    expect(r.status).toBe("saved")
+    if (r.status !== "saved") throw new Error("unreachable")
+    expect(f.read().providers.existing.models).toEqual(["m-old"])
+  } finally { f.cleanup() }
+})
+
 test("plain repl: an existing provider is not overwritten without a [y/N] confirmation", async () => {
   // Spec §"Validation, cheaply": "Name collision with an existing provider asks
   // before overwriting." The TUI form asks; the REPL silently rewrote the entry,
   // destroying a working base url, key and cached model list on one `enter`.
   const f = fixture()
-  const s = scripted(["http://new/v1", "sk-new", "y", "n"])   // url, key, import, overwrite
+  const s = scripted(["http://new/v1", "sk-new", "a", "n"])   // url, key, select all, overwrite
   const r = await runAddProviderForm({
     name: "existing",
     ask: s.ask,
@@ -64,7 +167,7 @@ test("plain repl: an existing provider is not overwritten without a [y/N] confir
 
 test("plain repl: answering y overwrites, keeping the keys this save does not own", async () => {
   const f = fixture()
-  const s = scripted(["http://new/v1", "sk-new", "y", "y"])
+  const s = scripted(["http://new/v1", "sk-new", "a", "y"])
   const r = await runAddProviderForm({
     name: "existing",
     ask: s.ask,
@@ -87,7 +190,7 @@ test("plain repl: an empty answer to the overwrite prompt is a no — the defaul
   // Every other prompt in this flow defaults to yes ([Y/n]). This one replaces a
   // working provider, so a bare `enter` has to mean no.
   const f = fixture()
-  const s = scripted(["http://new/v1", "sk-new", "y", ""])
+  const s = scripted(["http://new/v1", "sk-new", "a", ""])
   const r = await runAddProviderForm({
     name: "existing",
     ask: s.ask,
@@ -103,7 +206,7 @@ test("plain repl: an empty answer to the overwrite prompt is a no — the defaul
 
 test("plain repl: a new provider name is written without asking for confirmation", async () => {
   const f = fixture()
-  const s = scripted(["http://new/v1", "sk-new", "y"])   // no overwrite answer scripted
+  const s = scripted(["http://new/v1", "sk-new", "a"])   // no overwrite answer scripted
   const r = await runAddProviderForm({
     name: "fresh",
     ask: s.ask,
@@ -126,7 +229,7 @@ test("plain repl: a name only in the global file still gets the overwrite prompt
   // the user cannot even see from here, with no prompt.
   const f = fixture()
   expect(existingProviderNames([], f.path)).toContain("existing")
-  const s = scripted(["http://new/v1", "sk-new", "y", "n"])
+  const s = scripted(["http://new/v1", "sk-new", "a", "n"])
   const r = await runAddProviderForm({
     name: "existing",
     ask: s.ask,
@@ -145,7 +248,8 @@ test("plain repl: the overwrite prompt says what this save replaces and what it 
   // An existing name with a models-less Test keeps its cached list (decision 5),
   // and the prompt has to say so — the TUI's confirm text is the reference.
   const f = fixture()
-  const s = scripted(["http://new/v1", "sk-new", "y", "y"])   // url, key, save-anyway?, overwrite
+  // noModels path — this answer goes to the save-anyway [Y/n], not the selection
+  const s = scripted(["http://new/v1", "sk-new", "y", "y"])   // url, key, save-anyway, overwrite
   const r = await runAddProviderForm({
     name: "existing",
     ask: s.ask,
@@ -172,7 +276,7 @@ test("plain repl: a blank key field Tests with the key the save will keep", asyn
   // answered 401, making the refresh path unusable without the key at hand.
   const f = fixture()
   const seen: any[] = []
-  const s = scripted(["http://old/v1", "", "y", "y"])           // url, blank key, import, overwrite
+  const s = scripted(["http://old/v1", "", "a", "y"])           // url, blank key, select all, overwrite
   const r = await runAddProviderForm({
     name: "existing",
     ask: s.ask,
@@ -206,7 +310,7 @@ test("plain repl: a stored {env:VAR} key is resolved for the Test, raw in the fi
     auths.push(init?.headers?.authorization)
     return new Response(JSON.stringify({ data: [{ id: "alpha" }] }), { status: 200 })
   }) as any
-  const s = scripted(["http://old/v1", "", "y", "y"])
+  const s = scripted(["http://old/v1", "", "a", "y"])
   const r = await runAddProviderForm({
     name: "existing",
     ask: s.ask,
@@ -230,7 +334,7 @@ test("plain repl: a stored {env:VAR} key is resolved for the Test, raw in the fi
 test("plain repl: a typed key still wins over the stored one", async () => {
   const f = fixture()
   const seen: any[] = []
-  const s = scripted(["http://old/v1", "sk-typed", "y", "y"])
+  const s = scripted(["http://old/v1", "sk-typed", "a", "y"])
   await runAddProviderForm({
     name: "existing",
     ask: s.ask,
@@ -249,7 +353,7 @@ test("plain repl: a new name with a blank key Tests with no key, not some other 
   // authenticate the Test as a different provider and hide a missing credential.
   const f = fixture()
   const seen: any[] = []
-  const s = scripted(["http://new/v1", "", "y"])
+  const s = scripted(["http://new/v1", "", "a"])
   await runAddProviderForm({
     name: "fresh",
     ask: s.ask,
@@ -273,7 +377,7 @@ test("plain repl: the key prompt goes through the masking reader, everything els
   const said: string[] = []
   await runAddProviderForm({
     name: "fresh",
-    ask: async (q: string) => { asked.push(q); return q.startsWith("base url") ? "http://n/v1" : "y" },
+    ask: async (q: string) => { asked.push(q); return q.startsWith("base url") ? "http://n/v1" : "a" },
     askSecret: async (q: string) => { secret.push(q); return "sk-hidden" },
     say: l => said.push(l),
     discover: async () => ({ ok: true, models: ["alpha"] }),
@@ -294,7 +398,7 @@ test("plain repl: a front end without a masking reader still gets the key prompt
   const asked: string[] = []
   await runAddProviderForm({
     name: "fresh",
-    ask: async (q: string) => { asked.push(q); return q.startsWith("base url") ? "http://n/v1" : q.startsWith("api key") ? "sk-plain" : "y" },
+    ask: async (q: string) => { asked.push(q); return q.startsWith("base url") ? "http://n/v1" : q.startsWith("api key") ? "sk-plain" : "a" },
     discover: async () => ({ ok: true, models: ["alpha"] }),
     existing: [],
     save: (n, cfg) => saveProvider(n, cfg, f.path),
@@ -313,7 +417,7 @@ test("plain repl: Ctrl+C at the key prompt cancels the form instead of throwing"
   const f = fixture()
   const r = await runAddProviderForm({
     name: "fresh",
-    ask: async (q: string) => q.startsWith("base url") ? "http://n/v1" : "y",
+    ask: async (q: string) => q.startsWith("base url") ? "http://n/v1" : "a",
     askSecret: async () => { throw new Error("cancelled") },
     discover: async () => ({ ok: true, models: ["alpha"] }),
     existing: [],
@@ -334,7 +438,7 @@ test("plain repl: a Ctrl+C on the key prompt leaves the answers already given al
   const asked: string[] = []
   const r = await runAddProviderForm({
     name: "existing",
-    ask: async (q: string) => { asked.push(q); return q.startsWith("base url") ? "http://new/v1" : "y" },
+    ask: async (q: string) => { asked.push(q); return q.startsWith("base url") ? "http://new/v1" : "a" },
     askSecret: async () => { throw new Error("cancelled") },
     discover: async () => ({ ok: true, models: ["alpha"] }),
     existing: ["existing"],
@@ -360,7 +464,7 @@ test("plain repl: a key corrected with the arrow keys is saved exactly as typed"
   const out = { write: () => true }
   const r = await runAddProviderForm({
     name: "fresh",
-    ask: async (q: string) => q.startsWith("base url") ? "http://n/v1" : "y",
+    ask: async (q: string) => q.startsWith("base url") ? "http://n/v1" : "a",
     askSecret: () => {
       const p = readSecret({ prompt: "api key: ", input, output: out })
       input.emit("data", Buffer.from("sk-ab"))

@@ -19,8 +19,8 @@ const MAX_VISIBLE = 8
 
 /**
  * `/add-provider` — register an OpenAI-compatible provider: name, base URL, key,
- * a Test that probes `<baseUrl>/models`, then an all-or-nothing import of every
- * model it advertises.
+ * a Test that probes `<baseUrl>/models`, then a checklist of the models it
+ * advertises — only the checked ids are written.
  *
  * Contract with the caller: the component never writes the config and never
  * closes itself after a save. It calls `onSaved(name, cfg)` and leaves the
@@ -64,11 +64,23 @@ export function AddProvider(p: {
   const urlRef = useRef("")
   const keyRef = useRef("")
   const loadingRef = useRef(false)
-  // Which slice of a long model list is on screen. View-only: the import always
-  // writes every model, so this never feeds `pendingModelsRef`.
-  const [scroll, setScroll] = useState(0)
-  const scrollRef = useRef(0)
-  const setScrollBoth = (n: number) => { scrollRef.current = n; setScroll(n) }
+  // Which model the cursor is on, and which rows are checked for import. Index,
+  // not id: an endpoint can advertise the same id twice (the render key is
+  // `${start + i}-${m}` for exactly that reason), and a Set<string> would toggle
+  // both rows at once. Refs mirror state: ink batches keys into one render.
+  const [sel, setSel] = useState(0)
+  const selRef = useRef(0)
+  const setSelBoth = (i: number) => { selRef.current = i; setSel(i) }
+  const [picked, setPicked] = useState<Set<number>>(new Set())
+  const pickedRef = useRef<Set<number>>(new Set())
+  // Every mutation passes a NEW Set: `setPicked(ref.current)` after `add()` is the
+  // same reference, and React bails out — the box would never appear.
+  const setPickedBoth = (next: Set<number>) => { pickedRef.current = next; setPicked(next) }
+  const chosenModels = () => models.filter((_, i) => pickedRef.current.has(i))
+  // The models the file already holds for this name — the same source the Test
+  // reads its key from. Drives both the pre-check and the removal notice.
+  const [previous, setPrevious] = useState<string[]>([])
+  const previousRef = useRef<string[]>([])
 
   const go = (next: Phase) => { phaseRef.current = next; setPhase(next) }
   const clearMsg = () => { setError(null); setWarning(null) }
@@ -122,8 +134,16 @@ export function AddProvider(p: {
       setError(r.error ?? "test failed"); return
     }
     setModels(r.models)
-    setScrollBoth(0)
-    pendingModelsRef.current = r.models
+    const prev = p.storedEntry?.(nameRef.current)?.models ?? []
+    previousRef.current = prev; setPrevious(prev)
+    const keep = new Set<number>()
+    // First occurrence only: a duplicate id keeps one row checked, not both.
+    prev.forEach(id => {
+      const i = r.models.indexOf(id)
+      if (i >= 0) keep.add(i)
+    })
+    setPickedBoth(keep)
+    setSelBoth(0)
     go("import")
   }
 
@@ -137,13 +157,17 @@ export function AddProvider(p: {
     p.onSaved(nameRef.current, cfg)
   }
 
-  /** Shared by `import` and `nomodels`: confirm when the name already exists. */
+  /**
+   * `models` is the list this write will hold: the checked subset for an import,
+   * `undefined` for a models-less save (the `nomodels` branch). An existing name
+   * is confirmed first, and the confirmation names the count so a subset write is
+   * never confirmed blind.
+   */
   function commit(models?: string[]) {
+    pendingModelsRef.current = models
     if (p.existing.includes(nameRef.current)) { go("confirm"); return }
     save(models)
   }
-
-  function submitImport() { commit(pendingModelsRef.current) }
 
   /**
    * Recovery from a failed Test. The frame tells the user to fix the fields and
@@ -181,22 +205,37 @@ export function AddProvider(p: {
         return
       }
       if (phaseRef.current === "nomodels") {
-        if (back) { clearMsg(); pendingModelsRef.current = undefined; go("test"); return }
+        if (back) { clearMsg(); go("test"); return }
         if (k.return) commit(undefined)
         return
       }
       if (phaseRef.current === "import") {
-        const step = (d: number) => setScrollBoth(Math.max(0, scrollRef.current + d))
-        if (k.upArrow) { step(-1); return }
-        if (k.downArrow) { step(1); return }
-        if (k.pageUp || (k.shift && k.upArrow)) { step(-MAX_VISIBLE); return }
-        if (k.pageDown || (k.shift && k.downArrow)) { step(MAX_VISIBLE); return }
-        if (k.home) { setScrollBoth(0); return }
-        // `end` may overshoot; the render clamps to the last full window.
-        if (k.end) { setScrollBoth(models.length); return }
+        const last = models.length - 1
+        const move = (to: number) => setSelBoth(Math.max(0, Math.min(to, last)))
+        if (k.upArrow) { move(selRef.current - 1); return }
+        if (k.downArrow) { move(selRef.current + 1); return }
+        if (k.pageUp || (k.shift && k.upArrow)) { move(selRef.current - MAX_VISIBLE); return }
+        if (k.pageDown || (k.shift && k.downArrow)) { move(selRef.current + MAX_VISIBLE); return }
+        if (k.home) { move(0); return }
+        if (k.end) { move(last); return }
+        // No `space` member in ink's Key (use-input.d.ts), so the character is the signal.
+        if (input === " ") {
+          const i = selRef.current
+          const next = new Set(pickedRef.current)
+          if (next.has(i)) next.delete(i); else next.add(i)
+          setPickedBoth(next)
+          return
+        }
+        if (input === "a") {
+          setPickedBoth(pickedRef.current.size === models.length
+            ? new Set()
+            : new Set(models.map((_, i) => i)))
+          return
+        }
+        if (k.return && pickedRef.current.size > 0) { commit(chosenModels()); return }
+        return
       }
       if (!k.return) return
-      if (phaseRef.current === "import") { submitImport(); return }
       if (phaseRef.current === "confirm") save(pendingModelsRef.current)
       return
     }
@@ -213,10 +252,16 @@ export function AddProvider(p: {
 
   const dots = MASK.repeat(key.length)
   const shown = (v: string) => (v ? v : "")
-  // A long list is view-only windowed: `enter` still imports every model.
+  // Cursor window, the same arithmetic as model-picker.tsx:74: the window only
+  // moves once the cursor passes the last visible row.
   const fit = models.length <= MAX_VISIBLE
-  const start = Math.min(scroll, Math.max(0, models.length - MAX_VISIBLE))
+  const start = sel < MAX_VISIBLE ? 0 : sel - MAX_VISIBLE + 1
   const view = models.slice(start, start + MAX_VISIBLE)
+  const goneNow = previous.filter(id => !models.includes(id))
+  const goneUnchecked = previous.filter(id => {
+    const i = models.indexOf(id)
+    return i >= 0 && !picked.has(i)
+  })
 
   return (
     <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1}>
@@ -253,19 +298,38 @@ export function AddProvider(p: {
 
       {phase === "import" && (
         <Box flexDirection="column" marginTop={1}>
+          {goneNow.length > 0 && (
+            <Text color="yellow">
+              {goneNow.length} previously imported model{goneNow.length === 1 ? " is" : "s are"} no longer advertised
+            </Text>
+          )}
+          {goneUnchecked.length > 0 && (
+            <Text color="yellow">
+              {goneUnchecked.length} previously imported model{goneUnchecked.length === 1 ? " will be" : "s will be"} removed (unchecked)
+            </Text>
+          )}
           <Text>
-            {models.length} model{models.length === 1 ? "" : "s"} found
+            {picked.size} of {models.length} model{models.length === 1 ? "" : "s"} selected
             {fit ? "" : ` — ${start + 1}-${start + view.length} of ${models.length}`}
-            {" — import all of them?"}
           </Text>
-          {view.map((m, i) => <Text key={`${start + i}-${m}`} dimColor>  {start + i + 1}. {m}</Text>)}
+          {view.map((m, i) => {
+            const idx = start + i
+            const on = picked.has(idx)
+            return (
+              <Text key={`${idx}-${m}`}>
+                <Text color={idx === sel ? "cyan" : undefined}>{idx === sel ? "❯ " : "  "}</Text>
+                <Text>{on ? "[x]" : "[ ]"}</Text>
+                <Text dimColor> {m}</Text>
+              </Text>
+            )
+          })}
         </Box>
       )}
 
       {phase === "confirm" && (
         <Text color="yellow">
           overwrite {name}? {pendingModelsRef.current
-            ? "its model list will be replaced"
+            ? `its model list will be replaced by the ${pendingModelsRef.current.length} you selected`
             : "it keeps its current model list (the endpoint advertised none this time)"}; an empty key field keeps the current key
         </Text>
       )}
@@ -273,7 +337,10 @@ export function AddProvider(p: {
       <Text dimColor>
         {phase === "test" ? "enter test · ⌫ edit · esc cancel"
           : phase === "nomodels" ? "enter save without models · ⌫ back · esc cancel"
-            : phase === "import" ? (fit ? "enter import & save · esc cancel" : "↑/↓ scroll · pgup/pgdn page · enter import & save · esc cancel")
+            : phase === "import"
+              ? (picked.size === 0
+                ? "↑/↓ move · space toggle · select at least one · esc cancel"
+                : `↑/↓ move · space toggle · enter import ${picked.size} & save · esc cancel`)
               : phase === "confirm" ? "enter overwrite · esc cancel"
                 : "tab/enter next · ⌫/← back · esc cancel"}
       </Text>
