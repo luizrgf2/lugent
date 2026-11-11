@@ -1,10 +1,11 @@
+import { readFileSync } from "node:fs"
 import { useEffect, useRef, useState } from "react"
 import { Box, Text, Static, render, useApp, useInput, useStdout } from "ink"
 import type { ReplEnv } from "../repl"
 import type { Agent } from "../../core/types"
-import { Provider } from "../../core/provider"
+import { Provider, discoverModels } from "../../core/provider"
 import { runTurn } from "../../core/loop"
-import { savePermissionMode, globalConfigPath } from "../../core/config"
+import { savePermissionMode, saveProvider, globalConfigPath } from "../../core/config"
 import { toolsForAgent, agentActivationModel, resolveAgent, primaryAgents } from "../../core/agents"
 import { buildPromptInput, safeAgentsMd } from "../context"
 import { frameRows, logoTopPad, splashWindow, transcriptWindow, CHROME_HEIGHT } from "../logo"
@@ -18,6 +19,7 @@ import { SkillList } from "./skill-list"
 import { PermissionMode } from "./permission-mode"
 import { SessionPicker } from "./session-picker"
 import { McpList } from "./mcp-list"
+import { AddProvider } from "./add-provider"
 import { ChildViewer, ChildPicker, decorateSubagents, type ChildInfo } from "./child-viewer"
 import { truncate } from "../ui"
 import type { McpServerState } from "../../core/mcp/manager"
@@ -25,12 +27,30 @@ import type { McpServerState } from "../../core/mcp/manager"
 export type TuiEnv = ReplEnv & {
   offProviders: string[]
   makeProvider?: (cfg: any, model: string) => { chat(args: any): Promise<any> }
+  /** Injection seam for the provider form's Test — tests never hit the network. */
+  discoverModels?: typeof discoverModels
 }
 
 function patchTail(items: TItem[], item: TItem): TItem[] {
   return items.length && items[items.length - 1].kind === item.kind
     ? [...items.slice(0, -1), item]
     : [...items, item]
+}
+
+/**
+ * Whether this directory's `lugent.json` declares providers — `loadConfig` is
+ * first-file-wins, so anything added to the global file is invisible here on
+ * the next launch. The form still saves; it just says so. Any read error means
+ * "no shadowing": a broken project file is a different problem.
+ */
+function projectShadowsProviders(projectRoot: string): boolean {
+  try {
+    const raw = JSON.parse(readFileSync(`${projectRoot}/lugent.json`, "utf8"))
+    const providers = raw?.providers
+    return typeof providers === "object" && providers !== null && Object.keys(providers).length > 0
+  } catch {
+    return false
+  }
 }
 
 export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
@@ -73,8 +93,8 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
   // A defaultAgent's model (when its provider is configured) wins over the config default at startup.
   const [provider, setProvider] = useState(() => startupTarget.model?.provider ?? env.config.defaultProvider)
   const [model, setModel] = useState(() => startupTarget.model?.model ?? env.config.defaultModel)
-  const [overlay, setOverlay] = useState<null | "model" | "skills" | "resume" | "permissions" | "agent" | "mcp" | "child" | "childpick">(null)
-  const overlayRef = useRef<null | "model" | "skills" | "resume" | "permissions" | "agent" | "mcp" | "child" | "childpick">(null)
+  const [overlay, setOverlay] = useState<null | "model" | "skills" | "resume" | "permissions" | "agent" | "mcp" | "child" | "childpick" | "add-provider">(null)
+  const overlayRef = useRef<null | "model" | "skills" | "resume" | "permissions" | "agent" | "mcp" | "child" | "childpick" | "add-provider">(null)
   const [mcpStates, setMcpStates] = useState<McpServerState[]>([])
   // Subagent children of the current turn (or of the resumed session), in
   // launch order: index 0 = ctrl+1. childTrans holds each child's transcript
@@ -164,6 +184,10 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
       }
       if (text.trim() === "/resume") {
         if (!busy) { say({ kind: "user", text }); overlayRef.current = "resume"; setOverlay("resume") }
+        return
+      }
+      if (text.trim() === "/add-provider") {
+        if (!busy) { say({ kind: "user", text }); overlayRef.current = "add-provider"; setOverlay("add-provider") }
         return
       }
       say({ kind: "error", text: `${text} — use --plain mode for slash commands in v1` })
@@ -397,6 +421,9 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
             loadModels={prov => {
               const cfg = env.config.providers[prov]
               if (!cfg) return Promise.resolve([])
+              // A cached list is authoritative (spec decision 5): the import is
+              // what makes /model work while the endpoint is briefly down.
+              if (cfg.models && cfg.models.length) return Promise.resolve(cfg.models)
               const pr = env.makeProvider?.(cfg, model) ?? new Provider(cfg, model)
               return (pr as any).listModels()
             }}
@@ -470,7 +497,32 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
                   setItems(is => [...is, { kind: "system", text: saved ? note : `${note} — save failed, session only` }])
                 }}
                 onClose={closeOverlay} />
-          : overlay === "childpick"
+        : overlay === "add-provider"
+          ? <AddProvider
+              existing={Object.keys(env.config.providers)}
+              shadowed={projectShadowsProviders(env.projectRoot)}
+              discover={env.discoverModels ?? discoverModels}
+              onClose={closeOverlay}
+              onSaved={(name, cfg) => {
+                closeOverlay()
+                const saved = saveProvider(name, cfg, props.globalConfigPath ?? globalConfigPath())
+                // Push the normalized entry into the live config so /model lists
+                // it without a restart. baseUrl is normalized the same way the
+                // file is (trailing slashes stripped) — one shape, two homes.
+                const normalized = { baseUrl: cfg.baseUrl.replace(/\/+$/, "") } as any
+                if (cfg.apiKey) normalized.apiKey = cfg.apiKey
+                if (cfg.models) normalized.models = cfg.models
+                env.config.providers[name] = normalized
+                const count = cfg.models?.length ?? 0
+                const shadow = projectShadowsProviders(env.projectRoot)
+                  ? " — shadowed by this directory's lugent.json"
+                  : ""
+                const note = saved.ok
+                  ? `${name} · ${count} models imported${shadow}`
+                  : `${name} · save failed, session only (${saved.error})`
+                setItems(is => [...is, { kind: "system", text: note }])
+              }} />
+        : overlay === "childpick"
             ? <ChildPicker
                 kids={kids}
                 onPick={i => { setChildIdx(i); overlayRef.current = "child"; setOverlay("child") }}
@@ -488,6 +540,7 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
                   { cmd: "resume", desc: "resume a past session" },
                   { cmd: "permissions", desc: "permission mode (normal/yolo)" },
                   { cmd: "agent", desc: "switch agent profile" },
+                  { cmd: "add-provider", desc: "register a provider (test + import models)" },
                 ]} />}
       </Box>
       </Box>

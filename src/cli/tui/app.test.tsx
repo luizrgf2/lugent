@@ -1348,3 +1348,61 @@ test("ctrl+9 with at most 8 children does not open the picker", async () => {
   await new Promise(r => setTimeout(r, 80))
   expect(lastFrame()).not.toContain("choose child")
 })
+
+const fakeDiscover = async () => ({ ok: true as const, models: ["m1", "m2"] })
+
+test("/add-provider saves to the global config and the provider is usable at once", async () => {
+  const global = `/tmp/opencode/tui-addprov-${Date.now()}.json`
+  const env = fakeEnv({ projectRoot: "/tmp/opencode", discoverModels: fakeDiscover })
+  const { type, allOutput } = renderTui(<App env={env} globalConfigPath={global} />)
+  type("/add-provider\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("r\rhttp://r/v1\rsk-1\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // test — injected discover lists m1, m2
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // import
+  await new Promise(r => setTimeout(r, 60))
+  expect(JSON.parse(readFileSync(global, "utf8")).providers.r.models).toEqual(["m1", "m2"])
+  expect(env.config.providers.r.baseUrl).toBe("http://r/v1")   // live push, no restart
+  expect(allOutput()).toContain("models imported")
+  rmSync(global, { force: true })
+})
+
+test("/model lists a cached model list without calling the endpoint", async () => {
+  const env = fakeEnv({
+    config: {
+      defaultProvider: "r", defaultModel: "m1",
+      providers: { r: { baseUrl: "http://r/v1", models: ["cached-a", "cached-b"] } },
+      permissionMode: "normal",
+    },
+    makeProvider: () => ({ chat: async () => ({}), listModels: async () => { throw new Error("must not be called") } }),
+  })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // enter the provider level
+  await new Promise(r => setTimeout(r, 40))
+  expect(lastFrame()).toContain("cached-a")
+  expect(lastFrame()).toContain("cached-b")
+})
+
+test("/add-provider warns when a project config shadows it", async () => {
+  const dir = `/tmp/opencode/tui-shadow-${Date.now()}`
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(`${dir}/lugent.json`, JSON.stringify({ providers: { p: { baseUrl: "http://p/v1" } } }))
+  const global = `${dir}/global.json`
+  const env = fakeEnv({ projectRoot: dir, discoverModels: fakeDiscover })
+  const { type, allOutput } = renderTui(<App env={env} globalConfigPath={global} />)
+  type("/add-provider\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("r\rhttp://r/v1\rsk-1\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // test
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // import
+  await new Promise(r => setTimeout(r, 60))
+  // The result line is a system item: it prints to the scrollback (<Static>), not the frame.
+  expect(allOutput()).toContain("shadowed")
+  rmSync(dir, { recursive: true, force: true })
+})
