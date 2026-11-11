@@ -29,6 +29,15 @@ export function AddProvider(p: {
   existing: string[]
   shadowed?: boolean
   discover?: typeof discoverModels
+  /**
+   * The entry the save would keep, by name — the same source the save writes.
+   * An empty key field means "keep the current key", so the Test has to send that
+   * key: built from the typed fields alone, a re-run against an endpoint that
+   * enforces auth answers `401` to the only refresh path this form has. The entry
+   * comes back raw, so `discoverModels` resolves a `{env:VAR}` (and reports an
+   * unset variable) exactly as it does for a typed key.
+   */
+  storedEntry?: (name: string) => { baseUrl: string; apiKey?: string; models?: string[] } | undefined
   onSaved(name: string, cfg: Cfg): void
   onClose(): void
 }) {
@@ -90,7 +99,12 @@ export function AddProvider(p: {
   async function runTest() {
     if (loadingRef.current) return
     loadingRef.current = true; setLoading(true); clearMsg()
-    const r = await discover({ baseUrl: urlRef.current, apiKey: keyRef.current })
+    // A blank key field keeps the stored key on save, so the Test must send the
+    // same key — otherwise a re-run (the only refresh path) 401s on any endpoint
+    // that enforces auth, and a `{env:VAR}` user cannot fix it by retyping.
+    // `storedEntry` reads the file being written, per name.
+    const stored = keyRef.current ? undefined : p.storedEntry?.(nameRef.current)?.apiKey
+    const r = await discover({ baseUrl: urlRef.current, apiKey: keyRef.current || stored || "" })
     loadingRef.current = false; setLoading(false)
     if (!r.ok) {
       // A reachable endpoint that advertises nothing is not a typo in the key —

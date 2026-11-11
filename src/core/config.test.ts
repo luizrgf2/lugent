@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test"
-import { subEnv, loadConfig, parseMcpServer, loadMcpConfig, savePermissionMode, saveProvider, providerNamesInFile } from "./config"
+import { subEnv, loadConfig, parseMcpServer, loadMcpConfig, savePermissionMode, saveProvider, providerNamesInFile, providerEntryInFile } from "./config"
 import { rmSync, writeFileSync, mkdirSync, readFileSync, statSync } from "node:fs"
 
 describe("subEnv", () => {
@@ -431,6 +431,27 @@ describe("saveProvider", () => {
     expect(providerNamesInFile(p)).toEqual([])
     writeFileSync(p, JSON.stringify({ providers: { bad: "nope", ok: { baseUrl: "http://o/v1" } } }))
     expect(providerNamesInFile(p)).toEqual(["ok"])
+    rmSync(p, { force: true })
+  })
+
+  test("providerEntryInFile returns the stored entry raw, {env:VAR} unresolved", () => {
+    // Re-running `/add-provider` with a blank key field must Test with the key
+    // the save will keep. The Test is built before `loadConfig` runs, so the only
+    // honest source is the file `saveProvider` reads — and it has to stay raw:
+    // a `{env:VAR}` is resolved by `discoverModels`, an unset one reported there.
+    process.env.LUGENT_STORED_KEY = "sekret"
+    const p = `/tmp/opencode/entry-${Date.now()}.json`
+    writeFileSync(p, JSON.stringify({
+      providers: { r: { baseUrl: "http://r/v1", apiKey: "{env:LUGENT_STORED_KEY}", models: ["a"] } },
+    }))
+    expect(providerEntryInFile("r", p)).toEqual({ baseUrl: "http://r/v1", apiKey: "{env:LUGENT_STORED_KEY}", models: ["a"] })
+    expect(providerEntryInFile("nope", p)).toBeUndefined()
+    // Same tolerance as `providerNamesInFile`: a broken shape declares nothing.
+    expect(providerEntryInFile("r", `/tmp/opencode/entry-missing-${Date.now()}.json`)).toBeUndefined()
+    writeFileSync(p, "not json")
+    expect(providerEntryInFile("r", p)).toBeUndefined()
+    writeFileSync(p, JSON.stringify({ providers: { r: "nope" } }))
+    expect(providerEntryInFile("r", p)).toBeUndefined()
     rmSync(p, { force: true })
   })
 })

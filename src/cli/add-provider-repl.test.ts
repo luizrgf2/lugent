@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { saveProvider } from "../core/config"
+import { saveProvider, providerEntryInFile } from "../core/config"
+import { discoverModels } from "../core/provider"
 import { runAddProviderForm, existingProviderNames } from "./add-provider-repl"
 
 const SEEDED = {
@@ -159,5 +160,146 @@ test("plain repl: the overwrite prompt says what this save replaces and what it 
     expect(prompt).toContain("[y/N]")
     // `saveProvider` retained the cached list — the prompt promised exactly that.
     expect(f.read().providers.existing.models).toEqual(["m-old"])
+  } finally { f.cleanup() }
+})
+
+test("plain repl: a blank key field Tests with the key the save will keep", async () => {
+  // Decision 3 makes re-running `/add-provider` the only refresh path, and the
+  // prompt invites a blank key ("blank keeps the stored one"). The write does
+  // retain it — but the Test was built from the form fields alone, so it went
+  // out with no `Authorization` header at all and any auth-enforcing endpoint
+  // answered 401, making the refresh path unusable without the key at hand.
+  const f = fixture()
+  const seen: any[] = []
+  const s = scripted(["http://old/v1", "", "y", "y"])           // url, blank key, import, overwrite
+  const r = await runAddProviderForm({
+    name: "existing",
+    ask: s.ask,
+    discover: async (cfg: any) => { seen.push({ ...cfg }); return { ok: true, models: ["alpha", "beta"] } },
+    existing: ["existing"],
+    // The Test's key comes from the file the save writes — the same source the
+    // write itself keeps the key from.
+    storedEntry: name => providerEntryInFile(name, f.path),
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    expect(seen).toEqual([{ baseUrl: "http://old/v1", apiKey: "sk-old" }])
+    expect(r.status).toBe("saved")
+    // The file still holds the original key, untouched by the blank field.
+    expect(f.read().providers.existing.apiKey).toBe("sk-old")
+  } finally { f.cleanup() }
+})
+
+test("plain repl: a stored {env:VAR} key is resolved for the Test, raw in the file", async () => {
+  // Decision 2 makes no exception for a key the user did not retype: the Test
+  // resolves it through `subEnv()` like every other path, and an env var that is
+  // unset is reported as such instead of sending an unauthenticated request.
+  process.env.LUGENT_ADDPROV_STORED = "sk-from-env"
+  const dir = mkdtempSync("/tmp/opencode/addprov-repl-env-")
+  const path = `${dir}/config.json`
+  writeFileSync(path, JSON.stringify({
+    providers: { existing: { baseUrl: "http://old/v1", apiKey: "{env:LUGENT_ADDPROV_STORED}" } },
+  }))
+  const auths: (string | undefined)[] = []
+  const fetchFn = (async (_url: string, init: any) => {
+    auths.push(init?.headers?.authorization)
+    return new Response(JSON.stringify({ data: [{ id: "alpha" }] }), { status: 200 })
+  }) as any
+  const s = scripted(["http://old/v1", "", "y", "y"])
+  const r = await runAddProviderForm({
+    name: "existing",
+    ask: s.ask,
+    // The real `discoverModels`, so the resolution is the production one.
+    discover: (cfg: any) => discoverModels(cfg, { fetchFn }),
+    existing: ["existing"],
+    storedEntry: name => providerEntryInFile(name, path),
+    save: (n, cfg) => saveProvider(n, cfg, path),
+  })
+  try {
+    expect(auths).toEqual(["Bearer sk-from-env"])
+    expect(r.status).toBe("saved")
+    // The file keeps the reference, not the secret.
+    expect(JSON.parse(readFileSync(path, "utf8")).providers.existing.apiKey).toBe("{env:LUGENT_ADDPROV_STORED}")
+  } finally {
+    delete process.env.LUGENT_ADDPROV_STORED
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("plain repl: a typed key still wins over the stored one", async () => {
+  const f = fixture()
+  const seen: any[] = []
+  const s = scripted(["http://old/v1", "sk-typed", "y", "y"])
+  await runAddProviderForm({
+    name: "existing",
+    ask: s.ask,
+    discover: async (cfg: any) => { seen.push({ ...cfg }); return { ok: true, models: ["alpha"] } },
+    existing: ["existing"],
+    storedEntry: name => providerEntryInFile(name, f.path),
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    expect(seen[0].apiKey).toBe("sk-typed")
+  } finally { f.cleanup() }
+})
+
+test("plain repl: a new name with a blank key Tests with no key, not some other provider's", async () => {
+  // The stored-key lookup is per name: falling back to any key in the file would
+  // authenticate the Test as a different provider and hide a missing credential.
+  const f = fixture()
+  const seen: any[] = []
+  const s = scripted(["http://new/v1", "", "y"])
+  await runAddProviderForm({
+    name: "fresh",
+    ask: s.ask,
+    discover: async (cfg: any) => { seen.push({ ...cfg }); return { ok: true, models: ["alpha"] } },
+    existing: existingProviderNames([], f.path),
+    storedEntry: name => providerEntryInFile(name, f.path),
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    expect(seen[0]).toEqual({ baseUrl: "http://new/v1", apiKey: "" })
+  } finally { f.cleanup() }
+})
+
+test("plain repl: the key prompt goes through the masking reader, everything else through ask", async () => {
+  // The README promises the key is never printed back. `readline` echoes, so the
+  // plain REPL needs a masked read for exactly that one prompt — and only that
+  // one, since the rest of the flow's answers are not secret.
+  const f = fixture()
+  const asked: string[] = []
+  const secret: string[] = []
+  const said: string[] = []
+  await runAddProviderForm({
+    name: "fresh",
+    ask: async (q: string) => { asked.push(q); return q.startsWith("base url") ? "http://n/v1" : "y" },
+    askSecret: async (q: string) => { secret.push(q); return "sk-hidden" },
+    say: l => said.push(l),
+    discover: async () => ({ ok: true, models: ["alpha"] }),
+    existing: [],
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    expect(secret).toHaveLength(1)
+    expect(secret[0]).toContain("api key")
+    expect(asked.some(q => /api key/.test(q))).toBe(false)
+    expect(f.read().providers.fresh.apiKey).toBe("sk-hidden")
+  } finally { f.cleanup() }
+})
+
+test("plain repl: a front end without a masking reader still gets the key prompt", async () => {
+  // `askSecret` is optional: the flow must stay usable (and testable) without a TTY.
+  const f = fixture()
+  const asked: string[] = []
+  await runAddProviderForm({
+    name: "fresh",
+    ask: async (q: string) => { asked.push(q); return q.startsWith("base url") ? "http://n/v1" : q.startsWith("api key") ? "sk-plain" : "y" },
+    discover: async () => ({ ok: true, models: ["alpha"] }),
+    existing: [],
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    expect(asked.some(q => /api key/.test(q))).toBe(true)
+    expect(f.read().providers.fresh.apiKey).toBe("sk-plain")
   } finally { f.cleanup() }
 })

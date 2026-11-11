@@ -80,13 +80,43 @@ export const globalConfigPath = (): string => `${homedir()}/.config/lugent/confi
  * so there is nothing there to destroy.
  */
 export function providerNamesInFile(path = globalConfigPath()): string[] {
+  return Object.keys(readProviderEntries(path))
+}
+
+/**
+ * One provider entry as the *file* holds it — `apiKey` still a raw reference
+ * (`{env:VAR}` unresolved), no normalizing.
+ *
+ * Why it exists: re-running `/add-provider` is the refresh path, and both UIs
+ * invite a blank key field meaning "keep the stored one". The Test is built
+ * before/outside `loadConfig`, so without this it would go out with no
+ * `Authorization` header at all — a `401` the user cannot fix without retyping a
+ * key they may deliberately never read. Reads the file `saveProvider` writes, for
+ * the same reason the overwrite gate does. Raw rather than resolved: `subEnv()`
+ * belongs to `discoverModels`, which also reports a reference that resolves to
+ * nothing, and the same function must behave identically for a key the user typed.
+ */
+export function providerEntryInFile(name: string, path = globalConfigPath()): ProviderConfig | undefined {
+  const raw = readProviderEntries(path)[name] as Record<string, unknown> | undefined
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined
+  const entry: ProviderConfig = { baseUrl: typeof raw.baseUrl === "string" ? raw.baseUrl : "" }
+  if (typeof raw.apiKey === "string") entry.apiKey = raw.apiKey
+  const models = Array.isArray(raw.models) ? raw.models.filter((m): m is string => typeof m === "string") : undefined
+  if (models) entry.models = models
+  return entry
+}
+
+/** The `providers` object of `path`, or `{}` — missing, unparseable and shape-less all read as empty. */
+function readProviderEntries(path: string): Record<string, unknown> {
   let raw: any
-  try { raw = JSON.parse(readFileSync(path, "utf8")) } catch { return [] }
+  try { raw = JSON.parse(readFileSync(path, "utf8")) } catch { return {} }
   const providers = raw?.providers
-  if (typeof providers !== "object" || providers === null || Array.isArray(providers)) return []
-  return Object.entries(providers)
-    .filter(([, v]) => typeof v === "object" && v !== null && !Array.isArray(v))
-    .map(([k]) => k)
+  if (typeof providers !== "object" || providers === null || Array.isArray(providers)) return {}
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(providers)) {
+    if (typeof v === "object" && v !== null && !Array.isArray(v)) out[k] = v
+  }
+  return out
 }
 
 /**

@@ -263,3 +263,76 @@ test("escape closes without saving", async () => {
   await wait(30)
   expect(closed).toBe(1)
 })
+
+test("a blank key field on a re-run Tests with the stored key", async () => {
+  // Decision 3 makes re-running the form the only refresh path, and the frame
+  // invites a blank key ("an empty key field keeps the current key"). The save
+  // does keep it — but the Test went out built from the typed fields alone, so
+  // an auth-enforcing endpoint answered 401 and the refresh path was unusable
+  // without the key at hand (a `{env:VAR}` user never has it).
+  const seen: any[] = []
+  const { type, lastFrame } = renderTui(
+    <AddProvider {...base} existing={["r"]} onSaved={() => {}}
+      storedEntry={() => ({ baseUrl: "http://old/v1", apiKey: "sk-stored" })}
+      discover={async (cfg: any) => { seen.push({ ...cfg }); return { ok: true, models: ["a"] } }} />,
+  )
+  type("r\rhttp://r/v1\r\r")                  // blank key
+  await wait(30)
+  type("\r")                                  // Test
+  await wait(40)
+  expect(seen).toEqual([{ baseUrl: "http://r/v1", apiKey: "sk-stored" }])
+  expect(lastFrame()).toContain("1 model found")
+})
+
+test("a stored {env:VAR} key is resolved for the TUI Test, raw in the file", async () => {
+  // Decision 2 makes no exception for a key the user did not retype.
+  process.env.LUGENT_TUI_STORED = "sk-from-env"
+  const auths: (string | undefined)[] = []
+  const fetchFn = (async (_u: string, init: any) => {
+    auths.push(init?.headers?.authorization)
+    return new Response(JSON.stringify({ data: [{ id: "alpha" }] }), { status: 200 })
+  }) as any
+  const discover = (cfg: any) => discoverModels(cfg, { fetchFn })
+  const { type } = renderTui(
+    <AddProvider {...base} existing={["r"]} onSaved={() => {}}
+      storedEntry={() => ({ baseUrl: "http://old/v1", apiKey: "{env:LUGENT_TUI_STORED}" })}
+      discover={discover} />,
+  )
+  try {
+    type("r\rhttp://r/v1\r\r")                // blank key
+    await wait(30)
+    type("\r")                                // Test — the real discoverModels
+    await wait(60)
+    expect(auths).toEqual(["Bearer sk-from-env"])
+  } finally { delete process.env.LUGENT_TUI_STORED }
+})
+
+test("a typed key still wins over the stored one", async () => {
+  const seen: any[] = []
+  const { type } = renderTui(
+    <AddProvider {...base} existing={["r"]} onSaved={() => {}}
+      storedEntry={() => ({ baseUrl: "http://old/v1", apiKey: "sk-stored" })}
+      discover={async (cfg: any) => { seen.push({ ...cfg }); return { ok: true, models: ["a"] } }} />,
+  )
+  type("r\rhttp://r/v1\rsk-typed\r")
+  await wait(30)
+  type("\r")
+  await wait(40)
+  expect(seen[0].apiKey).toBe("sk-typed")
+})
+
+test("a blank key on a brand-new name Tests with no key at all", async () => {
+  // The lookup is per name: borrowing another provider's key would authenticate
+  // the Test as someone else and hide a missing credential.
+  const seen: any[] = []
+  const { type } = renderTui(
+    <AddProvider {...base} existing={["other"]} onSaved={() => {}}
+      storedEntry={n => (n === "other" ? { baseUrl: "http://o/v1", apiKey: "sk-other" } : undefined)}
+      discover={async (cfg: any) => { seen.push({ ...cfg }); return { ok: true, models: ["a"] } }} />,
+  )
+  type("r\rhttp://r/v1\r\r")
+  await wait(30)
+  type("\r")
+  await wait(40)
+  expect(seen[0]).toEqual({ baseUrl: "http://r/v1", apiKey: "" })
+})

@@ -5,7 +5,7 @@ import type { ReplEnv } from "../repl"
 import type { Agent } from "../../core/types"
 import { Provider, discoverModels } from "../../core/provider"
 import { runTurn } from "../../core/loop"
-import { savePermissionMode, saveProvider, globalConfigPath } from "../../core/config"
+import { savePermissionMode, saveProvider, providerEntryInFile, globalConfigPath } from "../../core/config"
 import { toolsForAgent, agentActivationModel, resolveAgent, primaryAgents } from "../../core/agents"
 import { buildPromptInput, safeAgentsMd } from "../context"
 import { frameRows, logoTopPad, splashWindow, transcriptWindow, CHROME_HEIGHT } from "../logo"
@@ -502,6 +502,9 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
           ? <AddProvider
               existing={existingProviderNames(Object.keys(env.config.providers), props.globalConfigPath ?? globalConfigPath())}
               shadowed={projectShadowsProviders(env.projectRoot)}
+              // A blank key field keeps the file's key on save, so the Test must
+              // send it too — read from the file being written, per name.
+              storedEntry={n => providerEntryInFile(n, props.globalConfigPath ?? globalConfigPath())}
               discover={env.discoverModels ?? discoverModels}
               onClose={closeOverlay}
               onSaved={(name, cfg) => {

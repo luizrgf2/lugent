@@ -5,7 +5,7 @@ import { Provider, discoverModels } from "../core/provider"
 import { toolsForAgent, agentActivationModel, resolveAgent, primaryAgents } from "../core/agents"
 import type { Store } from "../core/store"
 import type { AppConfig } from "../core/config"
-import { saveProvider, globalConfigPath } from "../core/config"
+import { saveProvider, providerEntryInFile, globalConfigPath } from "../core/config"
 import type { ToolDef } from "../core/tools/registry"
 import type { McpManager } from "../core/mcp/manager"
 import type { SkillMeta, Agent } from "../core/types"
@@ -13,6 +13,7 @@ import { parseSlash, parseAnswer, mcpActions, formatMcpState, type McpAction } f
 import { box, glyph, truncate, dim, cyan, red, yellow, Spinner, logo, timeAgo } from "./ui"
 import { buildPromptInput } from "./context"
 import { runAddProviderForm, existingProviderNames } from "./add-provider-repl"
+import { readSecret, muteableOutput } from "./secret-prompt"
 
 export interface ReplEnv {
   store: Store
@@ -40,7 +41,10 @@ function projectHasProviders(projectRoot: string): boolean {
 }
 
 export async function runRepl(env: ReplEnv): Promise<void> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+  // readline writes through a muteable wrapper: the one prompt that reads a
+  // secret has to switch it off while it types, or readline redraws the value.
+  const mute = muteableOutput(process.stdout)
+  const rl = readline.createInterface({ input: process.stdin, output: mute.stream })
   // A declared model that cannot be honored kills the process at activation —
   // an agent that pins a model must run on it or not run at all.
   const activation = (a: Agent | undefined) => {
@@ -214,6 +218,25 @@ export async function runRepl(env: ReplEnv): Promise<void> {
         const r = await runAddProviderForm({
           name: slash.args[0],
           ask: q => rl.question(q),
+          // The key is masked: readline echoes as you type, and a secret must not
+          // stay in the terminal's scrollback. `rl` is paused so the two readers
+          // never split one keystroke between them.
+          askSecret: async q => {
+            rl.pause()
+            // readline keeps redrawing its line buffer while paused; mute the
+            // stream it writes into for the duration, or it prints the key it is
+            // not reading.
+            const unmute = mute.mute()
+            try {
+              return await readSecret({
+                prompt: q, input: process.stdin,
+                output: mute.stream, promptOutput: process.stdout,
+              })
+            } finally {
+              unmute()
+              rl.resume()
+            }
+          },
           say: line => console.log(line),
           onTest: url => console.log(dim(`testing ${url}/models…`)),
           discover: discoverModels,
@@ -221,6 +244,9 @@ export async function runRepl(env: ReplEnv): Promise<void> {
           // the form asks before destroying a working base url and key, exactly
           // as the TUI's confirm does (spec §"Validation, cheaply").
           existing: existingProviderNames(Object.keys(env.config.providers), globalConfigPath()),
+          // A blank key field keeps the stored key on write; the Test has to send
+          // that same key, or a re-run against an auth-enforcing endpoint 401s.
+          storedEntry: n => providerEntryInFile(n, globalConfigPath()),
           save: (n, cfg) => saveProvider(n, cfg, globalConfigPath()),
         })
         if (r.status === "invalid") { console.log(red(r.error)); continue }

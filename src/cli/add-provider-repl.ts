@@ -56,12 +56,28 @@ export async function runAddProviderForm(opts: {
   /** The name from `/add-provider <name>`; asked for when absent. */
   name?: string
   ask: (prompt: string) => Promise<string>
+  /**
+   * Asked for the key instead of `ask`, when the front end can mask input.
+   * An echoed api key lands in terminal scrollback, which is the one place a
+   * secret must not stay — the TUI already renders a fixed run of dots, and this
+   * is the `--plain` REPL's equivalent. Falls back to `ask`.
+   */
+  askSecret?: (prompt: string) => Promise<string>
   say?: (line: string) => void
   /** Fires once, right before the network call — the REPL prints a dim "testing…" line there. */
   onTest?: (normalizedUrl: string) => void
   discover: typeof discoverModels
   /** Names already in the live config — collision means "this overwrites". */
   existing: string[]
+  /**
+   * The entry the save would keep, by name — the same source `save` writes.
+   * A blank key field means "keep the stored one", so the **Test** has to use it
+   * too: built from the typed fields alone the request carries no credentials at
+   * all, and an endpoint that enforces auth answers `401` to the only refresh
+   * path this command has. A `{env:VAR}` entry comes back raw and is resolved by
+   * `discoverModels`, so an unset variable is reported as such.
+   */
+  storedEntry?: (name: string) => ProviderConfig | undefined
   save: (name: string, cfg: Cfg) => { ok: boolean; error?: string; live: ProviderConfig }
 }): Promise<AddProviderResult> {
   const say = opts.say ?? (() => {})
@@ -76,10 +92,20 @@ export async function runAddProviderForm(opts: {
   if (needsV1(baseUrl)) say("! no /v1 in the base url — most OpenAI-compatible endpoints need it")
 
   // Blank keeps whatever the global config already holds for this name.
-  const apiKey = (await opts.ask("api key (blank keeps the stored one): ")).trim()
+  const keyPrompt = "api key (blank keeps the stored one): "
+  const askKey = opts.askSecret ?? opts.ask
+  const apiKey = (await askKey(keyPrompt)).trim()
+
+  // The Test must send the key the save will keep, or a re-run on an
+  // auth-enforcing endpoint dies at the first step of the only refresh path.
+  // Read from the file being written (per name — never another provider's key);
+  // a `{env:VAR}` reference stays raw and `discoverModels` resolves it, so an
+  // unset variable is reported as "environment variable NAME is not set".
+  const storedKey = apiKey ? undefined : opts.storedEntry?.(name)?.apiKey
+  const testKey = apiKey || storedKey || ""
 
   opts.onTest?.(baseUrl.replace(/\/+$/, ""))
-  const found = await opts.discover({ baseUrl, apiKey })
+  const found = await opts.discover({ baseUrl, apiKey: testKey })
   let models: string[] | undefined
   if (found.ok) {
     found.models.forEach((m, i) => say(`  ${i + 1}. ${m}`))
