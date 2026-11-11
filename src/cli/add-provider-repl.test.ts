@@ -2,7 +2,7 @@ import { test, expect } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { saveProvider, providerEntryInFile } from "../core/config"
 import { discoverModels } from "../core/provider"
-import { runAddProviderForm, existingProviderNames } from "./add-provider-repl"
+import { runAddProviderForm, existingProviderNames, parseModelSelection } from "./add-provider-repl"
 import { readSecret } from "./secret-prompt"
 
 const SEEDED = {
@@ -38,6 +38,33 @@ function scripted(list: string[]) {
 }
 
 const foundTwo = async () => ({ ok: true, models: ["alpha", "beta"] })
+
+test("parseModelSelection: a comma list becomes ascending unique 0-based indices", () => {
+  expect(parseModelSelection("1,3", 5)).toEqual([0, 2])
+  expect(parseModelSelection("3,1", 5)).toEqual([0, 2])     // order in, order out
+  expect(parseModelSelection("1,1", 5)).toEqual([0])        // deduped
+})
+
+test("parseModelSelection: ranges expand, and a reversed range is swapped", () => {
+  expect(parseModelSelection("3-5", 6)).toEqual([2, 3, 4])
+  expect(parseModelSelection("5-3", 6)).toEqual([2, 3, 4])
+  expect(parseModelSelection("1,3-4", 5)).toEqual([0, 2, 3])
+})
+
+test("parseModelSelection: whitespace is tolerated, `a`/`all` is everything", () => {
+  expect(parseModelSelection(" 1 , 3 ", 5)).toEqual([0, 2])
+  expect(parseModelSelection("a", 3)).toEqual([0, 1, 2])
+  expect(parseModelSelection("ALL", 3)).toEqual([0, 1, 2])
+})
+
+test("parseModelSelection: blank is empty, a typo is null, out-of-range is dropped", () => {
+  expect(parseModelSelection("", 3)).toEqual([])
+  expect(parseModelSelection("   ", 3)).toEqual([])
+  expect(parseModelSelection("abc", 3)).toBeNull()
+  expect(parseModelSelection("1;2", 3)).toBeNull()
+  expect(parseModelSelection("99", 3)).toBeNull()            // nothing selectable → null, not []
+  expect(parseModelSelection("1,99", 3)).toEqual([0])        // the valid part survives
+})
 
 test("plain repl: an existing provider is not overwritten without a [y/N] confirmation", async () => {
   // Spec §"Validation, cheaply": "Name collision with an existing provider asks

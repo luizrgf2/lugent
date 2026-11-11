@@ -30,6 +30,47 @@ export function needsV1(raw: string): boolean {
 }
 
 /**
+ * Parse a counted selection into ascending, unique, 0-based indices.
+ *
+ * The REPL's model list is printed as `1. alpha`, so the numbers are the
+ * interface: `"1,3-5"` is the natural answer. Rules that are decisions, not
+ * conveniences:
+ *
+ * - out-of-range indices are **dropped**, not clamped — turning `1,99` into
+ *   "the last model" would import an id the user never named;
+ * - a reversed range (`5-3`) is swapped rather than rejected: it is unambiguous;
+ * - `null` means "not a selection", never "empty" — an empty write and a typo
+ *   must stay distinguishable at the call site.
+ */
+export function parseModelSelection(input: string, count: number): number[] | null {
+  const raw = input.trim().toLowerCase()
+  if (raw === "") return []
+  if (raw === "a" || raw === "all") return count > 0 ? Array.from({ length: count }, (_, i) => i) : null
+  const out = new Set<number>()
+  let valid = 0
+  for (const token of raw.split(",")) {
+    const t = token.trim()
+    if (t === "") continue
+    const range = t.match(/^(\d+)\s*-\s*(\d+)$/)
+    if (range) {
+      const a = Number(range[1]), b = Number(range[2])
+      const [lo, hi] = a <= b ? [a, b] : [b, a]
+      for (let n = lo; n <= hi; n++) { valid++; if (n >= 1 && n <= count) out.add(n - 1) }
+      continue
+    }
+    const single = t.match(/^\d+$/)
+    if (!single) return null
+    valid++
+    const n = Number(t)
+    if (n >= 1 && n <= count) out.add(n - 1)
+  }
+  if (valid === 0) return null
+  // Every token parsed but nothing landed in range (`"99"` on 3 models): the
+  // answer selects nothing, which is a typo, not a decision.
+  return out.size === 0 ? null : [...out].sort((a, b) => a - b)
+}
+
+/**
  * Names the save would overwrite: the live config's plus whatever the global file
  * already holds.
  *
