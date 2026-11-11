@@ -90,7 +90,12 @@ export async function discoverModels(
     return { ok: false, models: [], error: `HTTP ${res.status}` }
   }
   let json: any
-  try { json = await res.json() } catch { return { ok: false, models: [], error: "response is not JSON" } }
+  // An unparsable body is the same case as `{"data":[]}` for the form's purpose
+  // (spec decision 6 names it explicitly): a 200 from a login page, a wrong path
+  // or a proxy error page is a *reachable* endpoint that advertised nothing, not
+  // a typo to retest. Let it fall through to the empty-list branch below, which
+  // sets `noModels` and keeps the models-less save reachable.
+  try { json = await res.json() } catch { json = undefined }
   const models = (Array.isArray(json?.data) ? json.data : [])
     .map((m: any) => m?.id)
     .filter((id: unknown): id is string => typeof id === "string" && id !== "")

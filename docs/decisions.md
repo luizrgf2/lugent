@@ -6,7 +6,7 @@ Append-only. Format and inclusion rules: `.agents/skills/git-conventions/SKILL.m
 
 | Area | File | Entries |
 | --- | --- | --- |
-| Core — store, prompt, permissions, provider | [`core.md`](decisions/core.md) | 16 |
+| Core — store, prompt, permissions, provider | [`core.md`](decisions/core.md) | 19 |
 | CLI & TUI | [`cli-tui.md`](decisions/cli-tui.md) | 8 |
 | Agents | [`agents.md`](decisions/agents.md) | 14 |
 | MCP | [`mcp.md`](decisions/mcp.md) | 16 |

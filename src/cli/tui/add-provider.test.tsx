@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test"
 import { AddProvider } from "./add-provider"
 import { renderTui } from "./harness"
+import { discoverModels } from "../../core/provider"
 
 const base = { existing: [], onSaved: () => {}, onClose: () => {} }
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -184,6 +185,28 @@ test("a 200 with no models offers a save without a model list", async () => {
   await wait(30)
   expect(saved[0][0]).toBe("r")
   expect(saved[0][1]).toEqual({ baseUrl: "http://r/v1", apiKey: "sk-1" })   // no `models` key
+})
+
+test("an unparsable 200 body reaches the models-less offer, not a retest dead end", async () => {
+  // Spec decision 6 names non-JSON bodies explicitly. A gateway behind a login
+  // page answers 200 text/html — that is a reachable provider, so the form must
+  // offer the models-less save instead of printing "response is not JSON" and
+  // telling the user to retest a url that just answered.
+  const saved: any[] = []
+  const htmlDiscover: typeof discoverModels = (cfg, opts = {}) =>
+    discoverModels(cfg, { ...opts, fetchFn: (async () => new Response("<html>login</html>", { status: 200 })) as any })
+  const { type, lastFrame } = renderTui(
+    <AddProvider {...base} onSaved={(n, c) => saved.push([n, c])} discover={htmlDiscover} />,
+  )
+  type("r\rhttp://r/v1\rsk-1\r")
+  await wait(30)
+  type("\r")                                  // Test → 200 HTML
+  await wait(40)
+  expect(lastFrame()).toContain("lists no models")
+  expect(lastFrame()).not.toContain("not JSON")
+  type("\r")                                  // save without a list
+  await wait(30)
+  expect(saved[0][1]).toEqual({ baseUrl: "http://r/v1", apiKey: "sk-1" })
 })
 
 test("an existing name still confirms before a models-less save", async () => {

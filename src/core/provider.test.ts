@@ -274,6 +274,34 @@ test("discoverModels rejects a 200 with no models, and one with an HTML body", a
   expect(html.ok).toBe(false)
 })
 
+test("discoverModels treats an unparsable 200 body like an empty list, not a failed test", async () => {
+  // Spec decision 6 names non-JSON bodies alongside {"data":[]}: a gateway behind
+  // a login page, a wrong path or a proxy error page answers 200 text/html, and
+  // that is "reachable but advertises nothing" — the models-less save must stay
+  // reachable instead of the user being told to retest a working url.
+  for (const body of ["<html>hi</html>", "not json at all", ""]) {
+    const r = await discoverModels({ baseUrl: "http://r/v1" }, {
+      fetchFn: (async () => new Response(body, { status: 200 })) as any,
+    })
+    expect(r.ok).toBe(false)
+    expect(r.noModels).toBe(true)
+    expect(r.error).toBe("endpoint answered but advertised no models")
+  }
+  // A body that parses but carries no usable `data` entry is the same case.
+  for (const json of [{ data: "nope" }, { data: [{ nope: 1 }] }, { data: [""] }, {}]) {
+    const r = await discoverModels({ baseUrl: "http://r/v1" }, {
+      fetchFn: (async () => new Response(JSON.stringify(json), { status: 200 })) as any,
+    })
+    expect(r.noModels).toBe(true)
+  }
+  // A non-2xx is still a hard failure: there is nothing to save against a 401.
+  const denied = await discoverModels({ baseUrl: "http://r/v1" }, {
+    fetchFn: (async () => new Response("<html>denied</html>", { status: 401 })) as any,
+  })
+  expect(denied.noModels).toBeUndefined()
+  expect(denied.error).toBe("HTTP 401")
+})
+
 test("discoverModels flags a 200 with no models as a models-less provider", async () => {
   const empty = await discoverModels({ baseUrl: "http://r/v1" }, {
     fetchFn: (async () => new Response(JSON.stringify({ data: [] }), { status: 200 })) as any,
