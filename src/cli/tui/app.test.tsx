@@ -5,6 +5,7 @@ import { EventEmitter } from "node:events"
 import { App, runTui } from "./app"
 import { renderTui } from "./harness"
 import { Store } from "../../core/store"
+import { Provider } from "../../core/provider"
 import { makeSubagentTool } from "../../core/tools/subagent"
 
 
@@ -1405,6 +1406,58 @@ test("/add-provider warns when a project config shadows it", async () => {
   // The result line is a system item: it prints to the scrollback (<Static>), not the frame.
   expect(allOutput()).toContain("shadowed")
   rmSync(dir, { recursive: true, force: true })
+})
+
+test("/add-provider pushes a {env:VAR} key into the live session resolved, not literally", async () => {
+  process.env.LUGENT_ADDPROV_KEY = "sk-resolved-secret"
+  const global = `/tmp/opencode/tui-addprov-env-${Date.now()}.json`
+  const env = fakeEnv({ projectRoot: "/tmp/opencode", discoverModels: fakeDiscover })
+  const { type } = renderTui(<App env={env} globalConfigPath={global} />)
+  type("/add-provider\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("r\rhttp://r/v1\r{env:LUGENT_ADDPROV_KEY}\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // test
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // import
+  await new Promise(r => setTimeout(r, 60))
+  // The file keeps the reference: the format is unchanged.
+  expect(JSON.parse(readFileSync(global, "utf8")).providers.r.apiKey).toBe("{env:LUGENT_ADDPROV_KEY}")
+  // The live entry must carry the secret, because Provider.headers() sends it verbatim.
+  expect(env.config.providers.r.apiKey).toBe("sk-resolved-secret")
+  // And that is what actually goes on the wire — a stub fetch proves the header.
+  let auth = ""
+  const p = new Provider(env.config.providers.r, "m1", (async (_url: string, init: any) => {
+    auth = init.headers.authorization
+    return new Response("data: [DONE]\n\n", { status: 200 })
+  }) as any)
+  await p.chat({ messages: [{ role: "user", content: "hi" }], tools: [] })
+  expect(auth).toBe("Bearer sk-resolved-secret")
+  delete process.env.LUGENT_ADDPROV_KEY
+  rmSync(global, { force: true })
+})
+
+test("/add-provider offers a models-less save when the endpoint advertises nothing", async () => {
+  const global = `/tmp/opencode/tui-addprov-nomodels-${Date.now()}.json`
+  const env = fakeEnv({
+    projectRoot: "/tmp/opencode",
+    discoverModels: async () => ({ ok: false, models: [], noModels: true, error: "endpoint answered but advertised no models" }),
+  })
+  const { type, allOutput } = renderTui(<App env={env} globalConfigPath={global} />)
+  type("/add-provider\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("r\rhttp://r/v1\rsk-1\r")
+  await new Promise(r => setTimeout(r, 40))
+  type("\r")                                   // test
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                   // save without a model list
+  await new Promise(r => setTimeout(r, 80))
+  const written = JSON.parse(readFileSync(global, "utf8")).providers.r
+  expect(written.models).toBeUndefined()
+  expect(written.baseUrl).toBe("http://r/v1")
+  expect(env.config.providers.r.models).toBeUndefined()   // session mirrors the file
+  expect(allOutput()).toContain("no model list")
+  rmSync(global, { force: true })
 })
 
 test("/add-provider re-run with an empty key keeps the stored key in the live config too", async () => {

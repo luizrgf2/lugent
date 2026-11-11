@@ -274,6 +274,20 @@ test("discoverModels rejects a 200 with no models, and one with an HTML body", a
   expect(html.ok).toBe(false)
 })
 
+test("discoverModels flags a 200 with no models as a models-less provider", async () => {
+  const empty = await discoverModels({ baseUrl: "http://r/v1" }, {
+    fetchFn: (async () => new Response(JSON.stringify({ data: [] }), { status: 200 })) as any,
+  })
+  // The form needs this bit to offer "save without a model list" (spec decision 6)
+  // instead of treating a reachable endpoint as a hard failure.
+  expect(empty.noModels).toBe(true)
+  // A hard failure is NOT a models-less provider — it is a dead end to retest.
+  const denied = await discoverModels({ baseUrl: "http://r/v1" }, {
+    fetchFn: (async () => new Response("nope", { status: 401 })) as any,
+  })
+  expect(denied.noModels).toBeUndefined()
+})
+
 test("discoverModels reports an unresolved {env:VAR} as a missing variable", async () => {
   const r = await discoverModels({ baseUrl: "http://r/v1", apiKey: "{env:LUGENT_UNSET_KEY}" }, { fetchFn: (async () => new Response("{}")) as any })
   expect(r.ok).toBe(false)

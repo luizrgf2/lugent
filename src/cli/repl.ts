@@ -218,23 +218,32 @@ export async function runRepl(env: ReplEnv): Promise<void> {
         const apiKey = (await rl.question("api key (blank keeps the stored one): ")).trim()
         console.log(dim(`testing ${baseUrl.replace(/\/+$/, "")}/models…`))
         const found = await discoverModels({ baseUrl, apiKey })
-        if (!found.ok) { console.log(red(`test failed: ${found.error}`)); continue }
-        found.models.forEach((m, i) => console.log(`  ${dim(`${i + 1}.`)} ${m}`))
-        const yes = await rl.question(`import these ${found.models.length} models? [Y/n] `)
-        if (yes.trim().toLowerCase() === "n") { console.log("cancelled — nothing written"); continue }
-        // An empty key field keeps whatever the global config already holds — on
-        // disk AND in the live session (a session-only entry that dropped it
-        // would run unauthenticated until the next restart).
-        const priorKey = env.config.providers[name]?.apiKey
-        const cfg: { baseUrl: string; apiKey?: string; models?: string[] } = { baseUrl, models: found.models }
+        let models: string[] | undefined
+        if (found.ok) {
+          found.models.forEach((m, i) => console.log(`  ${dim(`${i + 1}.`)} ${m}`))
+          const yes = await rl.question(`import these ${found.models.length} models? [Y/n] `)
+          if (yes.trim().toLowerCase() === "n") { console.log("cancelled — nothing written"); continue }
+          models = found.models
+        } else if (found.noModels) {
+          // A reachable endpoint that advertises nothing: the provider is usable,
+          // it just has no cached list (`/model` falls back to a live call).
+          const yes = await rl.question(`test ok but the endpoint lists no models — save ${name} anyway? [Y/n] `)
+          if (yes.trim().toLowerCase() === "n") { console.log("cancelled — nothing written"); continue }
+        } else {
+          console.log(red(`test failed: ${found.error}`)); continue
+        }
+        const cfg: { baseUrl: string; apiKey?: string; models?: string[] } = { baseUrl }
         if (apiKey) cfg.apiKey = apiKey
+        if (models) cfg.models = models
         const saved = saveProvider(name, cfg, globalConfigPath())
-        if (!saved.ok) { console.log(red(`save failed, session only: ${saved.error}`)); continue }
-        const normalized: any = { baseUrl: baseUrl.replace(/\/+$/, ""), models: found.models }
-        const effectiveKey = apiKey || priorKey
-        if (effectiveKey) normalized.apiKey = effectiveKey
-        env.config.providers[name] = normalized
-        console.log(`saved ${name} · ${found.models.length} models${projectHasProviders(env.projectRoot) ? yellow(" — shadowed by this directory's lugent.json") : ""}`)
+        if (!saved.ok) console.log(red(`save failed, session only: ${saved.error}`))
+        // The entry `saveProvider` built for the session: key resolved through
+        // `subEnv()` (Provider sends it verbatim — a raw `{env:VAR}` here is a
+        // literal `Bearer {env:VAR}` and a 401 until restart), empty key field
+        // resolved to the stored one, `models` as written.
+        env.config.providers[name] = saved.live
+        const savedCount = saved.live.models?.length ?? 0
+        console.log(`saved ${name} · ${savedCount ? `${savedCount} models` : "no model list"}${projectHasProviders(env.projectRoot) ? yellow(" — shadowed by this directory's lugent.json") : ""}`)
         continue
       }
       console.log("unknown command")

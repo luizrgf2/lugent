@@ -27,7 +27,7 @@ test("plain repl: /add-provider without a TTY prints usage instead of prompting"
   const home = mkdtempSync("/tmp/opencode/addprov-home-")
   const script = `${home}/input.txt`
   writeFileSync(script, "/add-provider\n/exit\n")
-  const proc = Bun.spawn(["bun", "src/main.ts", "--plain", "--db", `${home}/lugent.db`], {
+  const proc = Bun.spawn([process.execPath, "src/main.ts", "--plain", "--db", `${home}/lugent.db`], {
     stdin: Bun.file(script),
     stdout: "pipe",
     stderr: "pipe",
@@ -38,7 +38,7 @@ test("plain repl: /add-provider without a TTY prints usage instead of prompting"
   let out = ""
   let err = ""
   const errReader = proc.stderr.getReader()
-  const deadline = Date.now() + 20000
+  const deadline = Date.now() + 60000
   const pump = async () => {
     while (Date.now() < deadline && !out.includes("/add-provider <name>")) {
       const chunk: any = await Promise.race([

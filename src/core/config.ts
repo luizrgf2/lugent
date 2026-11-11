@@ -103,14 +103,20 @@ export function savePermissionMode(mode: PermissionMode, path = globalConfigPath
  *   replaced whenever the argument is present.
  * - A file that now holds an inline key is `0600` — the same rule the MCP token
  *   store applies. The key is stored exactly as typed, `{env:VAR}` included.
- * Returns `{ ok: false, error }` instead of throwing; the caller keeps the
- * provider for the session only.
+ *
+ * Returns `{ ok, error?, live }`: `live` is the entry the *session* should hold —
+ * normalized `baseUrl`, `models` as written, and the key resolved through
+ * `subEnv()`. That last point is why this returns anything at all: `Provider`
+ * sends `cfg.apiKey` verbatim and never calls `subEnv`, which is safe only for
+ * entries that came from `loadConfig`. Writing the raw typed string into
+ * `env.config.providers` would send a literal `Bearer {env:VAR}` until restart —
+ * spec decision 2. The file keeps the reference; only the live entry resolves.
  */
 export function saveProvider(
   name: string,
   cfg: { baseUrl: string; apiKey?: string; models?: string[] },
   path = globalConfigPath(),
-): { ok: boolean; error?: string } {
+): { ok: boolean; error?: string; live: ProviderConfig } {
   let raw: Record<string, any> = {}
   try { raw = JSON.parse(readFileSync(path, "utf8")) } catch { /* missing or unparseable → start over */ }
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) raw = {}
@@ -125,6 +131,17 @@ export function saveProvider(
   else if (Array.isArray(previous.models)) entry.models = previous.models
   raw.providers[name] = entry
 
+  // The session's copy of the entry. Two deliberate differences from the file:
+  // the key is resolved (`Provider` sends it verbatim) and a reference that
+  // resolves to nothing is dropped entirely — an empty `Bearer ` is a worse
+  // error than an unauthenticated request whose 401 names the real problem.
+  const live: ProviderConfig = { baseUrl: entry.baseUrl }
+  if (typeof entry.apiKey === "string" && entry.apiKey !== "") {
+    const resolved = subEnv(entry.apiKey)
+    if (resolved !== "") live.apiKey = resolved
+  }
+  if (Array.isArray(entry.models)) live.models = entry.models
+
   try {
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(path, JSON.stringify(raw, null, 2) + "\n")
@@ -132,9 +149,10 @@ export function saveProvider(
     // has to be set explicitly, as the MCP token store does.
     if (typeof entry.apiKey === "string" && entry.apiKey !== "") chmodSync(path, 0o600)
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    // The caller keeps `live` for the session only, so a failed write still works.
+    return { ok: false, error: e instanceof Error ? e.message : String(e), live }
   }
-  return { ok: true }
+  return { ok: true, live }
 }
 
 function subEnvMap(m: unknown): Record<string, string> | undefined {

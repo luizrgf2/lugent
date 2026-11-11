@@ -505,26 +505,21 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
               onClose={closeOverlay}
               onSaved={(name, cfg) => {
                 closeOverlay()
-                // Read the stored key BEFORE writing: an empty key field keeps
-                // the key on disk, so the live entry has to keep it too — a
-                // session-only provider that dropped it would run unauthenticated
-                // until the next restart, which is the exact bug this guards.
-                const priorKey = env.config.providers[name]?.apiKey
                 const saved = saveProvider(name, cfg, props.globalConfigPath ?? globalConfigPath())
-                // Push the normalized entry into the live config so /model lists
-                // it without a restart. baseUrl is normalized the same way the
-                // file is (trailing slashes stripped) — one shape, two homes.
-                const normalized = { baseUrl: cfg.baseUrl.replace(/\/+$/, "") } as any
-                const effectiveKey = cfg.apiKey || priorKey
-                if (effectiveKey) normalized.apiKey = effectiveKey
-                if (cfg.models) normalized.models = cfg.models
-                env.config.providers[name] = normalized
-                const count = cfg.models?.length ?? 0
+                // Push the entry `saveProvider` built for the session — normalized
+                // `baseUrl`, `models` as written, and the key resolved through
+                // `subEnv()`. Building it here instead would push the raw typed
+                // `{env:VAR}` and send a literal `Bearer {env:VAR}` until restart
+                // (`Provider` never substitutes), which is spec decision 2.
+                env.config.providers[name] = saved.live
+                const count = saved.live.models?.length ?? 0
                 const shadow = projectShadowsProviders(env.projectRoot)
                   ? " — shadowed by this directory's lugent.json"
                   : ""
                 const note = saved.ok
-                  ? `${name} · ${count} models imported${shadow}`
+                  ? (count
+                      ? `${name} · ${count} models imported${shadow}`
+                      : `${name} · saved with no model list — /model fetches it live${shadow}`)
                   : `${name} · save failed, session only (${saved.error})`
                 setItems(is => [...is, { kind: "system", text: note }])
               }} />

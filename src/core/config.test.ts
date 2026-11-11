@@ -366,6 +366,46 @@ describe("saveProvider", () => {
     rmSync(p, { force: true })
   })
 
+  test("saveProvider returns a live entry with the {env:VAR} reference resolved", () => {
+    process.env.LUGENT_LIVE_KEY = "sekret"
+    const p = `/tmp/opencode/save-live-env-${Date.now()}.json`
+    const r = saveProvider("r", { baseUrl: "http://r/v1/", apiKey: "{env:LUGENT_LIVE_KEY}", models: ["m"] }, p)
+    // The session gets the secret — `Provider.headers()` sends its apiKey verbatim,
+    // so an unresolved reference there is a literal `Bearer {env:VAR}` and a 401.
+    expect(r.live).toEqual({ baseUrl: "http://r/v1", apiKey: "sekret", models: ["m"] })
+    // The file keeps the reference: the format is unchanged, `loadConfig` resolves it.
+    expect(JSON.parse(readFileSync(p, "utf8")).providers.r.apiKey).toBe("{env:LUGENT_LIVE_KEY}")
+    rmSync(p, { force: true })
+  })
+
+  test("saveProvider's live entry keeps the stored key when the field is empty", () => {
+    const p = `/tmp/opencode/save-live-keep-${Date.now()}.json`
+    writeFileSync(p, JSON.stringify({ providers: { r: { baseUrl: "http://r/v1", apiKey: "sk-old" } } }))
+    const r = saveProvider("r", { baseUrl: "http://r/v1", models: ["x"] }, p)
+    expect(r.live.apiKey).toBe("sk-old")
+    expect(r.live.models).toEqual(["x"])
+    rmSync(p, { force: true })
+  })
+
+  test("saveProvider omits a reference that resolves to nothing from the live entry", () => {
+    const p = `/tmp/opencode/save-live-unset-${Date.now()}.json`
+    const r = saveProvider("r", { baseUrl: "http://r/v1", apiKey: "{env:LUGENT_LIVE_UNSET}" }, p)
+    // No key on the session entry at all — `Bearer ` with an empty token is worse
+    // than an unauthenticated request, whose 401 at least names the real problem.
+    expect(r.live.apiKey).toBeUndefined()
+    expect(JSON.parse(readFileSync(p, "utf8")).providers.r.apiKey).toBe("{env:LUGENT_LIVE_UNSET}")
+    rmSync(p, { force: true })
+  })
+
+  test("saveProvider mirrors the file's models into the live entry", () => {
+    const p = `/tmp/opencode/save-live-models-${Date.now()}.json`
+    saveProvider("r", { baseUrl: "http://r/v1", models: ["a"] }, p)
+    // A models-less save keeps the previous list on disk, so the session must see it too.
+    const r = saveProvider("r", { baseUrl: "http://r/v1" }, p)
+    expect(r.live.models).toEqual(["a"])
+    rmSync(p, { force: true })
+  })
+
   test("saveProvider replaces an unparseable file and reports a failed write", () => {
     const p = `/tmp/opencode/save-corrupt-${Date.now()}.json`
     writeFileSync(p, "not json")

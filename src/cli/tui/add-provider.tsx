@@ -3,7 +3,7 @@ import { Box, Text, useInput } from "ink"
 import { discoverModels } from "../../core/provider"
 
 type Cfg = { baseUrl: string; apiKey?: string; models?: string[] }
-type Phase = "name" | "url" | "key" | "test" | "import" | "confirm"
+type Phase = "name" | "url" | "key" | "test" | "nomodels" | "import" | "confirm"
 
 const FIELDS: { phase: Phase; label: string }[] = [
   { phase: "name", label: "name" },
@@ -89,31 +89,63 @@ export function AddProvider(p: {
     loadingRef.current = true; setLoading(true); clearMsg()
     const r = await discover({ baseUrl: urlRef.current, apiKey: keyRef.current })
     loadingRef.current = false; setLoading(false)
-    if (!r.ok) { setError(r.error ?? "test failed"); return }
+    if (!r.ok) {
+      // A reachable endpoint that advertises nothing is not a typo in the key —
+      // retesting will not help. Offer the models-less save (decision 6).
+      if (r.noModels) { go("nomodels"); return }
+      setError(r.error ?? "test failed"); return
+    }
     modelsRef.current = r.models; setModels(r.models)
     go("import")
   }
 
-  function save() {
+  function save(models?: string[]) {
     const cfg: Cfg = { baseUrl: urlRef.current }
     if (keyRef.current) cfg.apiKey = keyRef.current
-    if (modelsRef.current.length) cfg.models = modelsRef.current
+    // Omitted entirely when there is no list: `models` is optional in
+    // `saveProvider`, and a provider without it still works (the picker falls
+    // back to a live `listModels()`).
+    if (models !== undefined) cfg.models = models
     p.onSaved(nameRef.current, cfg)
   }
 
   function submitImport() {
     if (p.existing.includes(nameRef.current)) { go("confirm"); return }
-    save()
+    save(modelsRef.current)
+  }
+
+  /**
+   * Recovery from a failed Test. The frame tells the user to fix the fields and
+   * retest; without this the only exit was ESC, which discards a long url and
+   * key. Values are kept, so a one-character typo costs one backspace.
+   */
+  function backToFields() {
+    clearMsg()
+    go("key")
   }
 
   useInput((input, k) => {
     if (k.escape) { p.onClose(); return }
-    // Test/import/confirm are action phases: no text editing, only enter.
+    // Action phases: enter acts; test/import always allow a way back. Backspace
+    // (or ←) from a failed test returns to the key with its value intact; from
+    // the models-less prompt it returns to the test, where a different url can
+    // be probed. Once models are listed or an overwrite is being confirmed the
+    // only exits are enter and esc — nothing there is a typo to correct.
     if (phaseRef.current !== "name" && phaseRef.current !== "url" && phaseRef.current !== "key") {
+      const back = k.backspace || k.delete || k.leftArrow
+      if (phaseRef.current === "test") {
+        if (back) { backToFields(); return }
+        if (k.return) void runTest()
+        return
+      }
+      if (phaseRef.current === "nomodels") {
+        if (back) { clearMsg(); go("test"); return }
+        if (k.return) save(undefined)
+        return
+      }
       if (!k.return) return
-      if (phaseRef.current === "test") { void runTest(); return }
       if (phaseRef.current === "import") { submitImport(); return }
-      if (phaseRef.current === "confirm") save()
+      if (phaseRef.current === "confirm") save(modelsRef.current)
       return
     }
     if (k.return) { submitField(); return }
@@ -143,7 +175,14 @@ export function AddProvider(p: {
       {phase === "test" && (
         <Box flexDirection="column" marginTop={1}>
           <Text>test: {loading ? <Text dimColor>calling {url}/models…</Text> : "enter · call /models"}</Text>
-          {error && <Text dimColor>nothing was written; fix the fields above and retest</Text>}
+          {error && <Text dimColor>nothing was written; backspace to edit, or retest</Text>}
+        </Box>
+      )}
+
+      {phase === "nomodels" && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color="yellow">the endpoint works but lists no models</Text>
+          <Text dimColor>save {name} without a model list? /model will fetch them live</Text>
         </Box>
       )}
 
@@ -161,10 +200,11 @@ export function AddProvider(p: {
       )}
 
       <Text dimColor>
-        {phase === "test" ? "enter test · esc cancel"
-          : phase === "import" ? "enter import & save · esc cancel"
-            : phase === "confirm" ? "enter overwrite · esc cancel"
-              : "tab/enter next · esc cancel"}
+        {phase === "test" ? "enter test · ⌫ edit · esc cancel"
+          : phase === "nomodels" ? "enter save without models · ⌫ back · esc cancel"
+            : phase === "import" ? "enter import & save · esc cancel"
+              : phase === "confirm" ? "enter overwrite · esc cancel"
+                : "tab/enter next · esc cancel"}
       </Text>
       {p.shadowed && phase === "import" && (
         <Text color="yellow">note: this directory's lugent.json declares providers and will shadow the new one</Text>

@@ -56,12 +56,13 @@ export async function* parseSSE(res: Response, idleMs = 120_000, totalMs = 600_0
  *
  * `ok` requires a `2xx` *and* at least one parsed model id: gateways that answer
  * `200 {"data":[]}` or an HTML page would otherwise unlock an import that
- * imports nothing.
+ * imports nothing. That case is not a dead end, though — it sets `noModels`, and
+ * the form offers to save the provider without a `models` key (decision 6).
  */
 export async function discoverModels(
   cfg: ProviderConfig,
   opts: { fetchFn?: typeof fetch; timeoutMs?: number } = {},
-): Promise<{ ok: boolean; models: string[]; error?: string }> {
+): Promise<{ ok: boolean; models: string[]; error?: string; noModels?: boolean }> {
   const base = cfg.baseUrl.replace(/\/+$/, "")
   const headers: Record<string, string> = { "content-type": "application/json" }
   if (cfg.apiKey) {
@@ -93,7 +94,7 @@ export async function discoverModels(
   const models = (Array.isArray(json?.data) ? json.data : [])
     .map((m: any) => m?.id)
     .filter((id: unknown): id is string => typeof id === "string" && id !== "")
-  if (models.length === 0) return { ok: false, models: [], error: "endpoint answered but advertised no models" }
+  if (models.length === 0) return { ok: false, models: [], noModels: true, error: "endpoint answered but advertised no models" }
   return { ok: true, models }
 }
 

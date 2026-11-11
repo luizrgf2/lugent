@@ -67,6 +67,44 @@ test("a passing test lists the models and saves on confirm", async () => {
   expect(saved[0][1].baseUrl).toBe("http://r/v1")
 })
 
+test("a failed test can be fixed in place — backspace returns to the key, value intact", async () => {
+  const seen: string[] = []
+  const { type, lastFrame } = renderTui(
+    <AddProvider {...base} discover={async (cfg: any) => { seen.push(cfg.apiKey ?? ""); return { ok: false, models: [], error: "HTTP 401" } }} />,
+  )
+  type("r\rhttp://r/v1\rsk-wrong\r")
+  await wait(30)
+  type("\r")                                  // Test → 401
+  await wait(40)
+  expect(lastFrame()).toContain("HTTP 401")
+  type("\u007f")                              // backspace: back to the key field
+  await wait(30)
+  expect(lastFrame()).toContain("❯ api key:")
+  type("x\r")                                 // correct the typo, submit, retest
+  await wait(30)
+  type("\r")
+  await wait(40)
+  // Same value plus the correction — nothing was retyped from scratch.
+  expect(seen).toEqual(["sk-wrong", "sk-wrongx"])
+})
+
+test("a 200 with no models offers a save without a model list", async () => {
+  const saved: any[] = []
+  const { type, lastFrame } = renderTui(
+    <AddProvider {...base} onSaved={(n, c) => saved.push([n, c])}
+      discover={async () => ({ ok: false, models: [], noModels: true, error: "endpoint answered but advertised no models" })} />,
+  )
+  type("r\rhttp://r/v1\rsk-1\r")
+  await wait(30)
+  type("\r")                                  // Test
+  await wait(40)
+  expect(lastFrame()).toContain("without a model")
+  type("\r")                                  // save it anyway
+  await wait(30)
+  expect(saved[0][0]).toBe("r")
+  expect(saved[0][1]).toEqual({ baseUrl: "http://r/v1", apiKey: "sk-1" })   // no `models` key
+})
+
 test("the key is never echoed, not even masked reversibly", async () => {
   const { type, lastFrame } = renderTui(<AddProvider {...base} />)
   type("r\rhttp://r/v1\rsk-supersecret-abc\r")
