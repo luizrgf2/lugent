@@ -465,6 +465,73 @@ test("duplicate ids toggle independently and are written once per checked row", 
   expect(saved[0][1].models).toEqual(["dup"])   // second row unchecked → one entry
 })
 
+test("a re-run pre-checks the models the file already holds", async () => {
+  // No fixture for this existed: the two re-run tests return entries with no `models`.
+  const { type, lastFrame } = renderTui(
+    <AddProvider {...base} existing={["r"]}
+      storedEntry={() => ({ baseUrl: "http://r/v1", apiKey: "sk-old", models: ["model-002", "model-003"] })}
+      discover={() => Promise.resolve({ ok: true, models: ["model-001", "model-002", "model-003"] })} />,
+  )
+  type("r\rhttp://r/v1\r\r")                 // blank key keeps the stored one
+  await wait(30)
+  type("\r")
+  await wait(40)
+  expect(lastFrame()).toContain("2 of 3 models selected")
+  expect(lastFrame()).toContain("[x] model-002")
+  expect(lastFrame()).toContain("[ ] model-001")
+})
+
+test("a stored model the endpoint no longer advertises is reported before the write", async () => {
+  const { type, lastFrame } = renderTui(
+    <AddProvider {...base}
+      storedEntry={() => ({ baseUrl: "http://r/v1", models: ["gone-1", "gone-2", "model-001"] })}
+      discover={() => Promise.resolve({ ok: true, models: ["model-001"] })} />,
+  )
+  type("r\rhttp://r/v1\r\r")
+  await wait(30)
+  type("\r")
+  await wait(40)
+  expect(lastFrame()).toContain("2 previously imported models are no longer advertised")
+})
+
+test("unchecking a previously imported model says it will be removed", async () => {
+  const { type, lastFrame } = renderTui(
+    <AddProvider {...base}
+      storedEntry={() => ({ baseUrl: "http://r/v1", models: ["model-001", "model-002"] })}
+      discover={() => Promise.resolve({ ok: true, models: ["model-001", "model-002"] })} />,
+  )
+  type("r\rhttp://r/v1\r\r")
+  await wait(30)
+  type("\r")
+  await wait(40)
+  expect(lastFrame()).not.toContain("removing")
+  type(" ")                                   // uncheck model-001, which the file holds
+  await wait(30)
+  expect(lastFrame()).toContain("1 previously imported model will be removed")
+})
+
+test("both notice lines at once still fit the frame budget", async () => {
+  // Task 4's step 4: the two notices are extra rows inside the import block, so
+  // the bounded-frame promise the windowing test makes has to survive them.
+  const list = many(300)
+  const { type, lastFrame } = renderTui(
+    <AddProvider {...base} existing={["r"]} onSaved={() => {}}
+      storedEntry={() => ({ baseUrl: "http://r/v1", models: ["gone-1", ...list] })}
+      discover={() => Promise.resolve({ ok: true, models: list })} />,
+    { rows: 30 },
+  )
+  type("r\rhttp://r/v1\r\r")
+  await wait(30)
+  type("\r")
+  await wait(40)
+  type(" ")                                   // uncheck model-001 → "will be removed"
+  await wait(40)
+  const frame = lastFrame()
+  expect(frame).toContain("1 previously imported model is no longer advertised")
+  expect(frame).toContain("1 previously imported model will be removed")
+  expect(frame.split("\n").length).toBeLessThanOrEqual(22)
+})
+
 test("a long model list is windowed so the header and footer stay on screen", async () => {
   // Measured before the fix: 300 models rendered a 69-row frame on a 30-row
   // terminal, pushing the form's own header and footer off the screen.

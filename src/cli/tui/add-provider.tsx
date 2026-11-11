@@ -77,6 +77,10 @@ export function AddProvider(p: {
   // same reference, and React bails out — the box would never appear.
   const setPickedBoth = (next: Set<number>) => { pickedRef.current = next; setPicked(next) }
   const chosenModels = () => models.filter((_, i) => pickedRef.current.has(i))
+  // The models the file already holds for this name — the same source the Test
+  // reads its key from. Drives both the pre-check and the removal notice.
+  const [previous, setPrevious] = useState<string[]>([])
+  const previousRef = useRef<string[]>([])
 
   const go = (next: Phase) => { phaseRef.current = next; setPhase(next) }
   const clearMsg = () => { setError(null); setWarning(null) }
@@ -130,7 +134,15 @@ export function AddProvider(p: {
       setError(r.error ?? "test failed"); return
     }
     setModels(r.models)
-    setPickedBoth(new Set())
+    const prev = p.storedEntry?.(nameRef.current)?.models ?? []
+    previousRef.current = prev; setPrevious(prev)
+    const keep = new Set<number>()
+    // First occurrence only: a duplicate id keeps one row checked, not both.
+    prev.forEach(id => {
+      const i = r.models.indexOf(id)
+      if (i >= 0) keep.add(i)
+    })
+    setPickedBoth(keep)
     setSelBoth(0)
     go("import")
   }
@@ -245,6 +257,11 @@ export function AddProvider(p: {
   const fit = models.length <= MAX_VISIBLE
   const start = sel < MAX_VISIBLE ? 0 : sel - MAX_VISIBLE + 1
   const view = models.slice(start, start + MAX_VISIBLE)
+  const goneNow = previous.filter(id => !models.includes(id))
+  const goneUnchecked = previous.filter(id => {
+    const i = models.indexOf(id)
+    return i >= 0 && !picked.has(i)
+  })
 
   return (
     <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1}>
@@ -281,6 +298,16 @@ export function AddProvider(p: {
 
       {phase === "import" && (
         <Box flexDirection="column" marginTop={1}>
+          {goneNow.length > 0 && (
+            <Text color="yellow">
+              {goneNow.length} previously imported model{goneNow.length === 1 ? " is" : "s are"} no longer advertised
+            </Text>
+          )}
+          {goneUnchecked.length > 0 && (
+            <Text color="yellow">
+              {goneUnchecked.length} previously imported model{goneUnchecked.length === 1 ? " will be" : "s will be"} removed (unchecked)
+            </Text>
+          )}
           <Text>
             {picked.size} of {models.length} model{models.length === 1 ? "" : "s"} selected
             {fit ? "" : ` — ${start + 1}-${start + view.length} of ${models.length}`}
