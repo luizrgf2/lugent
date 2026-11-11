@@ -105,3 +105,20 @@ test("long model list windows to ~8 visible rows", async () => {
   expect(f2).toContain("m19")
   expect(f2).not.toContain("m00")
 })
+
+test("zero providers: says so instead of rendering 'undefined'; enter does not load", async () => {
+  const loads: string[] = []
+  const { type, lastFrame } = renderTui(
+    <ModelPicker providers={[]} currentProvider="" currentModel=""
+      loadModels={async p => { loads.push(p); return [] }}
+      onPick={() => {}} onClose={() => {}} />
+  )
+  await new Promise(r => setTimeout(r, 30))
+  const f = lastFrame()
+  expect(f).toContain("no providers configured")
+  expect(f).not.toContain("undefined")
+  type("\r")
+  await new Promise(r => setTimeout(r, 60))
+  expect(loads).toEqual([])                       // no openModels(undefined)
+  expect(lastFrame()).not.toContain("choose model")
+})

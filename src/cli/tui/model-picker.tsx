@@ -52,7 +52,7 @@ export function ModelPicker(p: {
     if (key.upArrow) { setSelBoth(Math.max(0, selRef.current - 1)); return }
     if (key.downArrow) { setSelBoth(Math.min(list.length - 1, selRef.current + 1)); return }
     if (key.return) {
-      if (levelRef.current === "providers") { openModels(list[selRef.current]); return }
+      if (levelRef.current === "providers") { if (list.length) openModels(list[selRef.current]); return }
       if (!loadingRef.current && !errorRef.current && list.length) p.onPick(chosen, list[selRef.current])
       return
     }
@@ -71,7 +71,9 @@ export function ModelPicker(p: {
   return (
     <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1}>
       <Text dimColor>/model · {level === "providers" ? "choose provider" : `${chosen} — choose model (← back)`}</Text>
-      {level === "providers"
+      {level === "providers" && view.length === 0
+        ? <Text dimColor>no providers configured (lugent.json)</Text>
+        : level === "providers"
         ? view.map((prov, i) => {
             const idx = start + i
             return (
