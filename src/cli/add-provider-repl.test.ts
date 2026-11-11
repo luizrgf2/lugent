@@ -66,6 +66,82 @@ test("parseModelSelection: blank is empty, a typo is null, out-of-range is dropp
   expect(parseModelSelection("1,99", 3)).toEqual([0])        // the valid part survives
 })
 
+test("plain repl: only the numbered models are imported", async () => {
+  // The proving test: the old code reads "2" as "not n" and imports both.
+  const f = fixture()
+  const s = scripted(["http://new/v1", "sk-new", "2"])
+  const r = await runAddProviderForm({
+    name: "fresh", ask: s.ask, discover: foundTwo, existing: [],
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    expect(r.status).toBe("saved")
+    if (r.status !== "saved") throw new Error("unreachable")
+    expect(r.imported).toBe(1)
+    expect(f.read().providers.fresh.models).toEqual(["beta"])
+  } finally { f.cleanup() }
+})
+
+test("plain repl: a range selects a slice, `a` selects everything", async () => {
+  const f = fixture()
+  const s = scripted(["http://new/v1", "sk-new", "1"])
+  const withThree = async () => ({ ok: true, models: ["one", "two", "three"] })
+  const r = await runAddProviderForm({
+    name: "fresh", ask: s.ask, discover: withThree, existing: [],
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    expect(r.status).toBe("saved")
+    if (r.status !== "saved") throw new Error("unreachable")
+    expect(f.read().providers.fresh.models).toEqual(["one"])
+  } finally { f.cleanup() }
+})
+
+test("plain repl: a typo re-asks instead of cancelling, and the third failure is an error", async () => {
+  const f = fixture()
+  const s = scripted(["http://new/v1", "sk-new", "abc", "zzz", "99"])
+  const r = await runAddProviderForm({
+    name: "fresh", ask: s.ask, discover: foundTwo, existing: [],
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    expect(r.status).toBe("invalid")
+    if (r.status !== "invalid") throw new Error("unreachable")
+    expect(r.error).toContain("3")
+    expect(s.prompts.filter(p => /select models/.test(p)).length).toBe(3)
+    expect(f.read().providers.fresh).toBeUndefined()   // nothing written
+  } finally { f.cleanup() }
+})
+
+test("plain repl: `n` cancels, and so does blank when nothing is stored", async () => {
+  const f = fixture()
+  const s = scripted(["http://new/v1", "sk-new", "n"])
+  const r = await runAddProviderForm({
+    name: "fresh", ask: s.ask, discover: foundTwo, existing: [],
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    expect(r.status).toBe("cancelled")
+    expect(f.read().providers.fresh).toBeUndefined()
+  } finally { f.cleanup() }
+})
+
+test("plain repl: blank keeps the stored selection on a re-run, marked with *", async () => {
+  const f = fixture()                                  // SEEDED holds models: ["m-old"]
+  const s = scripted(["http://new/v1", "sk-old", "", "y"])   // blank keeps *, then overwrite
+  const r = await runAddProviderForm({
+    name: "existing", ask: s.ask,
+    discover: async () => ({ ok: true, models: ["m-old", "m-new"] }),
+    existing: ["existing"], storedEntry: n => providerEntryInFile(n, f.path),
+    save: (n, cfg) => saveProvider(n, cfg, f.path),
+  })
+  try {
+    expect(r.status).toBe("saved")
+    if (r.status !== "saved") throw new Error("unreachable")
+    expect(f.read().providers.existing.models).toEqual(["m-old"])
+  } finally { f.cleanup() }
+})
+
 test("plain repl: an existing provider is not overwritten without a [y/N] confirmation", async () => {
   // Spec §"Validation, cheaply": "Name collision with an existing provider asks
   // before overwriting." The TUI form asks; the REPL silently rewrote the entry,

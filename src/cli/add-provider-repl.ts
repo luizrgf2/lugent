@@ -174,11 +174,31 @@ export async function runAddProviderForm(opts: {
   const found = await opts.discover({ baseUrl, apiKey: testKey })
   let models: string[] | undefined
   if (found.ok) {
-    found.models.forEach((m, i) => say(`  ${i + 1}. ${m}`))
-    const yes = await askFor(() => opts.ask(`import these ${found.models.length} models? [Y/n] `))
-    if (yes === CANCELLED) return { status: "cancelled" }
-    if (yes.trim().toLowerCase() === "n") return { status: "cancelled" }
-    models = found.models
+    const stored = opts.storedEntry?.(name)?.models ?? []
+    found.models.forEach((m, i) => say(`  ${i + 1}. ${stored.includes(m) ? "* " : "  "}${m}`))
+    // A blank answer keeps `*` (the models the file already holds), which is the
+    // re-run path; with nothing stored there is no default to fall into and a
+    // blank answer re-asks. `n` is the explicit cancel.
+    const keep = stored.map(id => found.models.indexOf(id)).filter(i => i >= 0).sort((a, b) => a - b)
+    const tries = 3
+    let chosen: string[] | undefined
+    for (let attempt = 0; attempt < tries && chosen === undefined; attempt++) {
+      const answer = await askFor(() => opts.ask(
+        "select models to import (1,3-5 · a all · n cancel · blank keeps *) : ",
+      ))
+      if (answer === CANCELLED) return { status: "cancelled" }
+      const text = answer.trim().toLowerCase()
+      if (text === "n" || text === "no") return { status: "cancelled" }
+      if (text === "") {
+        if (keep.length === 0) continue
+        chosen = keep.map(i => found.models[i]); break
+      }
+      const idx = parseModelSelection(answer, found.models.length)
+      if (idx === null || idx.length === 0) continue
+      chosen = idx.map(i => found.models[i])
+    }
+    if (chosen === undefined) return { status: "invalid", error: `no valid selection after ${tries} tries` }
+    models = chosen
   } else if (found.noModels) {
     // A reachable endpoint that advertises nothing: the provider is usable, it
     // just has no cached list (`/model` falls back to a live call).
