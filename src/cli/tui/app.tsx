@@ -408,6 +408,7 @@ export function App(props: { env: TuiEnv; globalConfigPath?: string }) {
               env.store.setModel(session.id, prov, m)
               setItems(is => [...is, { kind: "system", text: `${prov} · ${m}` }])
             }}
+            onClose={closeOverlay}
           />
         : overlay === "skills"   ? <SkillList skills={env.skills} onClose={closeOverlay} />
         : overlay === "mcp"      ? <McpList

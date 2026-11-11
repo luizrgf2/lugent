@@ -1348,3 +1348,82 @@ test("ctrl+9 with at most 8 children does not open the picker", async () => {
   await new Promise(r => setTimeout(r, 80))
   expect(lastFrame()).not.toContain("choose child")
 })
+
+test("/model: esc at the provider level closes the picker, no crash", async () => {
+  const provider = {
+    chat: async () => ({ content: "", toolCalls: [] }),
+    listModels: async () => ["m1", "m2"],
+  }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 40))
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).toContain("choose provider")
+  type("\u001b")                                   // esc at the provider level
+  await new Promise(r => setTimeout(r, 80))
+  const f = lastFrame()
+  expect(f).not.toContain("choose provider")       // picker unmounted
+  expect(f).toContain(">")                         // composer is back
+})
+
+test("/model: models level, esc returns to providers, esc again closes", async () => {
+  const provider = {
+    chat: async () => ({ content: "", toolCalls: [] }),
+    listModels: async () => ["m1", "m2"],
+  }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 40))
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                       // enter on the current provider
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).toContain("m1")
+  type("\u001b")                                   // back to providers
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).toContain("choose provider")
+  type("\u001b")                                   // close
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).not.toContain("choose provider")
+})
+
+test("/model: esc while the model list is still loading still closes", async () => {
+  const provider = {
+    chat: async () => ({ content: "", toolCalls: [] }),
+    listModels: () => new Promise<string[]>(r => setTimeout(() => r(["m1"]), 150)),
+  }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 40))
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  type("\r")                                       // provider chosen; fetch pending
+  await new Promise(r => setTimeout(r, 20))
+  expect(lastFrame()).toContain("loading models")
+  type("\u001b")                                   // back mid-load
+  await new Promise(r => setTimeout(r, 20))
+  type("\u001b")                                   // close mid-load
+  await new Promise(r => setTimeout(r, 300))       // let the promise settle after unmount
+  expect(lastFrame()).not.toContain("choose provider")
+  expect(lastFrame()).not.toContain("loading models")
+})
+
+test("/model: ctrl+c closes the picker; a following esc types nothing and does not crash", async () => {
+  const provider = { chat: async () => ({ content: "", toolCalls: [] }), listModels: async () => ["m1"] }
+  const env = fakeEnv({ makeProvider: () => provider })
+  const { type, lastFrame } = renderTui(<App env={env} />)
+  await new Promise(r => setTimeout(r, 40))
+  type("/model\r")
+  await new Promise(r => setTimeout(r, 60))
+  expect(lastFrame()).toContain("choose provider")
+  type("\u0003")                                   // ctrl+c closes the overlay
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).not.toContain("choose provider")
+  type("\u001b")                                   // dead-handler hazard: must be inert
+  await new Promise(r => setTimeout(r, 60))        // separate read: ESC+x in one write
+                                                   // parses as alt+x (key.meta), not two keys
+  type("x")
+  await new Promise(r => setTimeout(r, 80))
+  expect(lastFrame()).toContain("x")               // composer alive, caret has the text
+})
